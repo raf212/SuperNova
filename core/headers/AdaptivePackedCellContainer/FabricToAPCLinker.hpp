@@ -86,17 +86,10 @@ namespace BidirectionalInMemGraph
 
     protected:
         VagueTemoraryPremativeFabric* FabricOwnerPtr_{nullptr};
-        APCDataStructure::RangeOfAPC RangeOfThisAPCInSlab_{};
-        uint32_t CapacityOfThisAPC_{UNSIGNED_ZERO};
         std::byte* RawAPCBasePtr_{nullptr};
-        
         uint32_t APCSlotIdx_{APCDataStructure::APC_INDEX_BOUND_SENTINAL};
         uint64_t* APCGenerationCellPtr_{nullptr};
         uint32_t ExpectedGeneration_{UNSIGNED_ZERO};
-
-        SchemaDefinition::RegionSchemaRecord* MatrixOfSchemaRowPtr_{nullptr};
-        std::uint16_t ActiveRegionMask_{UNSIGNED_ZERO};
-        uint32_t RegionBatchCapacity_{UNSIGNED_ZERO};
 
         struct RelationOparation 
         {

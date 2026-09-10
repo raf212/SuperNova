@@ -7,6 +7,7 @@ namespace BidirectionalInMemGraph
 
     class FabricConstructor
     {
+        friend class RegionViewConstructor;
     protected:
         uint64_t* SlabBasePtr_{nullptr};
 
@@ -103,6 +104,7 @@ namespace BidirectionalInMemGraph
     class MatrixViewConstructor : public FabricConstructor
     {
         friend class FabricToAPCLinker;
+        friend class RegionViewConstructor;
     protected:
         using SD = SchemaDefinition;
         uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
