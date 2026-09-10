@@ -837,7 +837,7 @@ namespace BidirectionalInMemGraph
             }
         }
         
-        const APCDataStructure::RangeOfAPC range = GetSegmentPoolRange(slot);
+        const ADS::RangeOfAPC range = GetSegmentPoolRange(slot);
         if (
             !range.IsValid ||
             !desired_apc.BindExternalRawFabricBacking_(
@@ -964,7 +964,7 @@ namespace BidirectionalInMemGraph
         if (
             !FabricInitialized_.load(std::memory_order_acquire) ||
             !SlabBasePtr_ || 
-            !APCDataStructure::IsCapacityOfAPCValid(PerAPCRuntimeCellCount_)
+            !ADS::IsCapacityOfAPCValid(PerAPCRuntimeCellCount_)
         )
         {
             return std::nullopt;

@@ -79,7 +79,7 @@ namespace BidirectionalInMemGraph
         uint32_t GetThisSlotIdx() noexcept
         {
             return
-                IsActiveAPC() ? APCSlotIdx_ : APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+                IsActiveAPC() ? APCSlotIdx_ : ADS::APC_INDEX_BOUND_SENTINAL;
         }
 
         bool IsActiveAPC() noexcept;
@@ -87,7 +87,7 @@ namespace BidirectionalInMemGraph
     protected:
         VagueTemoraryPremativeFabric* FabricOwnerPtr_{nullptr};
         std::byte* RawAPCBasePtr_{nullptr};
-        uint32_t APCSlotIdx_{APCDataStructure::APC_INDEX_BOUND_SENTINAL};
+        uint32_t APCSlotIdx_{ADS::APC_INDEX_BOUND_SENTINAL};
         uint64_t* APCGenerationCellPtr_{nullptr};
         uint32_t ExpectedGeneration_{UNSIGNED_ZERO};
 
@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph
         bool InitiateAPCMetaHeader() noexcept;
 
         bool ReadAPCMetaUnit(
-            APCDataStructure::HeaderIdentifierOfAPC meta_idx,
+            ADS::HeaderIdentifierOfAPC meta_idx,
             uint64_t& return_value
         ) noexcept;
 

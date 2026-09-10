@@ -18,7 +18,7 @@ namespace BidirectionalInMemGraph
             EOF_APC_HEADER                      = 7
         };
 
-        static constexpr uint8_t META_CELL_COUNT = static_cast<uint8_t>(APCDataStructure::HeaderIdentifierOfAPC::EOF_APC_HEADER) + 1u;
+        static constexpr uint8_t META_CELL_COUNT = static_cast<uint8_t>(HeaderIdentifierOfAPC::EOF_APC_HEADER) + 1u;
 
         static constexpr uint32_t BRANCH_MAGIC = 0x41504342u;//big-endian
         static constexpr uint32_t EOF_HEADER = 0x72616600;//big-endian
@@ -100,4 +100,6 @@ namespace BidirectionalInMemGraph
         }
 
     };
+
+    using ADS = APCDataStructure;
 }

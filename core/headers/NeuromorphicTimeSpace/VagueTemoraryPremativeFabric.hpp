@@ -73,7 +73,7 @@ public:
         uint32_t slot_count,
         uint32_t slot_cell_count,
         const SchemaDefinition::FabricRegionConfig& region_configuration,
-        uint8_t max_direct_parents_per_axis = APCDataStructure::DEFAULT_DIRECTED_PARENT_PER_AXIS
+        uint8_t max_direct_parents_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
     ) noexcept;
 
     void ShutDownFabricWithPtrTable() noexcept;

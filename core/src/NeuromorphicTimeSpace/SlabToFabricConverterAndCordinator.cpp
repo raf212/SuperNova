@@ -112,12 +112,12 @@ namespace BidirectionalInMemGraph
 
         InitializationInProgress_.store(true, std::memory_order_release);
 
-        if (slot_count == UNSIGNED_ZERO || !APCDataStructure::IsValid32BitAPCUnit(slot_count))
+        if (slot_count == UNSIGNED_ZERO || !ADS::IsValid32BitAPCUnit(slot_count))
         {
             return false;
         }
         
-        if (!APCDataStructure::IsCapacityOfAPCValid(slot_cell_count))
+        if (!ADS::IsCapacityOfAPCValid(slot_cell_count))
         {
             return false;
         }
@@ -127,7 +127,7 @@ namespace BidirectionalInMemGraph
 
         if (
             active_mask == UNSIGNED_ZERO ||
-            (active_mask & static_cast<uint16_t>(~APCDataStructure::ValidRegionMask())) != UNSIGNED_ZERO ||
+            (active_mask & static_cast<uint16_t>(~ADS::ValidRegionMask())) != UNSIGNED_ZERO ||
             active_count == UNSIGNED_ZERO ||
             region_conf.BatchCapacity == UNSIGNED_ZERO ||
             slot_cell_count % SD::REGION_ALIGNMENT_CELLS != UNSIGNED_ZERO

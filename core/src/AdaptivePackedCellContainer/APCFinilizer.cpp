@@ -181,7 +181,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const APCDataStructure::RangeOfAPC range = GetSegmentPoolRange(slot);
+        const ADS::RangeOfAPC range = GetSegmentPoolRange(slot);
         if (!range.IsValid)
         {
             return false;
@@ -283,7 +283,7 @@ namespace BidirectionalInMemGraph
 
         const size_t lifecycle_index =
             range.BeginIndex +
-            static_cast<size_t>(APCDataStructure::HeaderIdentifierOfAPC::APC_LIFE_CYCLE);
+            static_cast<size_t>(ADS::HeaderIdentifierOfAPC::APC_LIFE_CYCLE);
 
         for (size_t idx = range.BeginIndex; idx < range.EndIndex; ++idx)
         {
@@ -304,7 +304,7 @@ namespace BidirectionalInMemGraph
             return true;
         }
 
-        for (uint8_t i = 0; i < APCDataStructure::CountOfMacroColumn(); i++)
+        for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
         {
             const SD::RegionSchemaRecord& expected = DefaultRegionTable_[i];
 

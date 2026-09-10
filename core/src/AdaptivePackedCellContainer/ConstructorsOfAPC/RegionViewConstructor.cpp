@@ -28,7 +28,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const std::optional<uint8_t> compact_index = APCDataStructure::CompactRegionIndex(FabricOwnerPtr_->ActiveRegionMask_, column);
+        const std::optional<uint8_t> compact_index = ADS::CompactRegionIndex(FabricOwnerPtr_->ActiveRegionMask_, column);
         if (!compact_index.has_value())
         {
             return false;

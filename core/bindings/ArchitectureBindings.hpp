@@ -81,7 +81,7 @@
 //     struct APCBinding final
 //     {
 //         std::weak_ptr<FabricEpoch> Epoch{};
-//         uint32_t Slot{APCDataStructure::APC_INDEX_BOUND_SENTINAL};
+//         uint32_t Slot{ADS::APC_INDEX_BOUND_SENTINAL};
 //         BindingPhase Phase{BindingPhase::DETACHED};
 //         APCBinding* Next{nullptr};
 //     };
@@ -219,7 +219,7 @@
 //                 )
 //             )
 //             {
-//                 return APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+//                 return ADS::APC_INDEX_BOUND_SENTINAL;
 //             }
 //             return binding->Slot;
 //         }
@@ -1538,7 +1538,7 @@
 //                 py::arg("layout") = Layout{},
 //                 py::arg("dtype") = DataTypes{},
 //                 py::arg("protocol") = Protocols{},
-//                 py::arg("version") = APCDataStructure::BRANCH_VERSION,
+//                 py::arg("version") = ADS::BRANCH_VERSION,
 //                 py::arg("internal_max_tries") = DEFAULT_MAX_TRIES,
 //                 py::call_guard<py::gil_scoped_release>()
 //             )
@@ -1550,7 +1550,7 @@
 //                 py::arg("layout") = Layout{},
 //                 py::arg("dtype") = DataTypes{},
 //                 py::arg("protocol") = Protocols{},
-//                 py::arg("version") = APCDataStructure::BRANCH_VERSION,
+//                 py::arg("version") = ADS::BRANCH_VERSION,
 //                 py::arg("internal_max_tries") = DEFAULT_MAX_TRIES,
 //                 py::call_guard<py::gil_scoped_release>()
 //             );
@@ -1590,7 +1590,7 @@
 //         module.attr("RegionDataType") = module.attr("DataTypeOfMacroColumn");
 //         module.attr("DEFAULT_MAX_TRIES") = py::int_(DEFAULT_MAX_TRIES);
 //         module.attr("BRANCH_VERSION") =
-//             py::int_(APCDataStructure::BRANCH_VERSION);
+//             py::int_(ADS::BRANCH_VERSION);
 //         module.attr("MINIMUM_APC_CELL_COUNT") =
 //             py::int_(MINIMUM_APC_CELL_COUNT);
 //     }

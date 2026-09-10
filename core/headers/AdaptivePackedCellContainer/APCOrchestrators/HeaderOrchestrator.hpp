@@ -7,6 +7,7 @@ namespace BidirectionalInMemGraph
 
     struct DescriptionOfAPC 
     {
+
         
         struct SeqLockAndStateStruct
         {
@@ -20,7 +21,7 @@ namespace BidirectionalInMemGraph
         static constexpr uint64_t ComposeSeqLockAndState(SeqLockAndStateStruct& files) noexcept
         {
             if (
-                !APCDataStructure::IsValid32BitAPCUnit(files.SeqLock) ||
+                !ADS::IsValid32BitAPCUnit(files.SeqLock) ||
                 !ValidateStateAgainstSeqLock(files)
             )
             {
@@ -38,7 +39,7 @@ namespace BidirectionalInMemGraph
             values.SeqLock = TwinU32ToU64::ExtractLow32Of64(desc_id_state);
             values.StateOfTheAPC = static_cast<StateOfAPC>(TwinU32ToU64::ExtractHigh32Of64(desc_id_state));
 
-            if (!APCDataStructure::IsValidFabricUnit(values.SeqLock))
+            if (!ADS::IsValidFabricUnit(values.SeqLock))
             {
                 return false;
             }
@@ -47,14 +48,14 @@ namespace BidirectionalInMemGraph
 
         static constexpr bool ValidateStateAgainstSeqLock(SeqLockAndStateStruct& files) noexcept
         {
-            if (!APCDataStructure::IsValidFabricUnit(files.SeqLock))
+            if (!ADS::IsValidFabricUnit(files.SeqLock))
             {
                 files.IsValid = false;
                 return false;
             }
             if (
                 files.StateOfTheAPC == StateOfAPC::RESERVED &&
-                APCDataStructure::IsValidEven64(files.SeqLock)
+                ADS::IsValidEven64(files.SeqLock)
             )
             {
                 files.IsValid = false;
@@ -62,7 +63,7 @@ namespace BidirectionalInMemGraph
             }
             if (
                 files.StateOfTheAPC != StateOfAPC::RESERVED &&
-                !APCDataStructure::IsValidEven64(files.SeqLock)
+                !ADS::IsValidEven64(files.SeqLock)
             )
             {
                 files.IsValid = false;
@@ -90,29 +91,9 @@ namespace BidirectionalInMemGraph
 
     struct HeaderOrchestrator : DescriptionOfAPC
     {
-        static constexpr uint8_t LEN_OF_APC_META_BUFFER_OR_COUNT = APCDataStructure::META_CELL_COUNT;
-
-
-        using DefaultMemCopyBuffer = std::array<uint64_t, UINT8_MAX>;
+        static constexpr uint8_t LEN_OF_APC_META_BUFFER_OR_COUNT = ADS::META_CELL_COUNT;
 
         using APCMetaBuffer = std::array<uint64_t, LEN_OF_APC_META_BUFFER_OR_COUNT>;
-
-
-        static constexpr void BuildNullMemCopyBuffer(DefaultMemCopyBuffer& a_default_buffer) noexcept
-        {
-            for (size_t i = 0; i < a_default_buffer.size(); i++)
-            {
-                a_default_buffer[i] = FABRIC_CELL_SENTINAL;
-            }
-        }
-
-        static constexpr void ConstructNullHeaderBuffer(APCMetaBuffer& a_meta_buffer) noexcept
-        {
-            for (size_t i = 0; i < a_meta_buffer.size(); i++)
-            {
-                a_meta_buffer[i] = FABRIC_CELL_SENTINAL;
-            }
-        }
 
         static constexpr bool InitializeDefaultHeaderBuffer(
             APCMetaBuffer& header,
@@ -126,16 +107,16 @@ namespace BidirectionalInMemGraph
             }
             
             if (
-                !APCDataStructure::IsCapacityOfAPCValid(capacity_of_apc) ||
-                !APCDataStructure::IsValid32BitAPCUnit(apc_slot_idx)
+                !ADS::IsCapacityOfAPCValid(capacity_of_apc) ||
+                !ADS::IsValid32BitAPCUnit(apc_slot_idx)
             )
             {
                 return false;
             }
 
-            header[static_cast<std::size_t>(APCDataStructure::HeaderIdentifierOfAPC::MAGIC_ID)] = APCDataStructure::BRANCH_MAGIC;
-            header[static_cast<std::size_t>(APCDataStructure::HeaderIdentifierOfAPC::APC_SLOT_IDX)] = apc_slot_idx;
-            header[static_cast<std::size_t>(APCDataStructure::HeaderIdentifierOfAPC::EOF_APC_HEADER)] = APCDataStructure::EOF_HEADER;
+            header[static_cast<std::size_t>(ADS::HeaderIdentifierOfAPC::MAGIC_ID)] = ADS::BRANCH_MAGIC;
+            header[static_cast<std::size_t>(ADS::HeaderIdentifierOfAPC::APC_SLOT_IDX)] = apc_slot_idx;
+            header[static_cast<std::size_t>(ADS::HeaderIdentifierOfAPC::EOF_APC_HEADER)] = ADS::EOF_HEADER;
 
             return true;
         }

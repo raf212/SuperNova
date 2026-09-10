@@ -55,7 +55,7 @@ namespace BidirectionalInMemGraph
             uint32_t RequiredAPCCells = UNSIGNED_ZERO;
             uint32_t ParameterCount = UNSIGNED_ZERO;
             uint16_t ActiveRegionMask = UNSIGNED_ZERO;
-            uint8_t MaxDirectParentPerAxis = APCDataStructure::DEFAULT_DIRECTED_PARENT_PER_AXIS;
+            uint8_t MaxDirectParentPerAxis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS;
 
             SD::FabricRegionConfig FabricConfig{};
             SD::RegionSchemaTable DefaultSchemaTable{};
@@ -98,7 +98,7 @@ namespace BidirectionalInMemGraph
                  edge_table != FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V)
             )
             {
-                return APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+                return ADS::APC_INDEX_BOUND_SENTINAL;
             }
 
             const uint32_t axis_offset =
@@ -112,7 +112,7 @@ namespace BidirectionalInMemGraph
         static constexpr bool MakeDefaultGHGFStorageProfile(
             GHGFStorageProfile& profile,
             uint32_t batch_capacity = DEFAULT_BATCH_CAPACITY,
-            uint8_t max_direct_parent_per_axis = APCDataStructure::DEFAULT_DIRECTED_PARENT_PER_AXIS
+            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
         ) noexcept
         {
             profile = GHGFStorageProfile{};
@@ -121,7 +121,7 @@ namespace BidirectionalInMemGraph
             if (
                 batch_capacity == UNSIGNED_ZERO ||
                 max_direct_parent_per_axis == UNSIGNED_ZERO ||
-                max_direct_parent_per_axis > APCDataStructure::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS
+                max_direct_parent_per_axis > ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS
             )
             {
                 return false;
@@ -190,9 +190,9 @@ namespace BidirectionalInMemGraph
             const uint32_t expected_paremeter_count = FIRST_COUPLING_INDEX + (AXIS_COUNT * static_cast<uint32_t>(profile.MaxDirectParentPerAxis));
 
             const uint16_t expected_mask = static_cast<uint16_t>(
-                APCDataStructure::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
-                APCDataStructure::RegionBit(MacroColumnOfAPC::ERROR_SLOT) |
-                APCDataStructure::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT)
+                ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
+                ADS::RegionBit(MacroColumnOfAPC::ERROR_SLOT) |
+                ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT)
             );        
 
             const SD::RegionSchemaRecord& state = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::STATE_SLOT)];
@@ -203,13 +203,13 @@ namespace BidirectionalInMemGraph
                 profile.IsValid &&
                 profile.BatchCapacity != UNSIGNED_ZERO &&
                 profile.MaxDirectParentPerAxis != UNSIGNED_ZERO &&
-                profile.MaxDirectParentPerAxis <= APCDataStructure::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS &&
+                profile.MaxDirectParentPerAxis <= ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS &&
                 profile.ParameterCount == expected_paremeter_count &&
                 profile.ActiveRegionMask == expected_mask &&
                 profile.FabricConfig.ActiveRegionMask == expected_mask &&
                 profile.FabricConfig.Reserved == UNSIGNED_ZERO &&
                 profile.FabricConfig.BatchCapacity == profile.BatchCapacity &&
-                APCDataStructure::IsCapacityOfAPCValid(profile.RequiredAPCCells) &&
+                ADS::IsCapacityOfAPCValid(profile.RequiredAPCCells) &&
                 SD::GetActiveMaskOfRegionTable_(profile.DefaultSchemaTable) == expected_mask &&
                 SD::RequiredCellsForSchemaTable_(profile.DefaultSchemaTable) == profile.RequiredAPCCells &&
                 state.Region == MacroColumnOfAPC::STATE_SLOT &&
@@ -272,7 +272,7 @@ namespace BidirectionalInMemGraph
             static constexpr float MAX_PRECISION = 1.0e10f;
             static constexpr float INITIAL_SEARCH_STEP = 1.0f;
             static constexpr float MIN_SEARCH_STEP = 1.0e-3f;
-            static constexpr uint32_t INVALID_SLOT = APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+            static constexpr uint32_t INVALID_SLOT = ADS::APC_INDEX_BOUND_SENTINAL;
         };
 
     };

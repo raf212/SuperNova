@@ -14,14 +14,14 @@ namespace BidirectionalInMemGraph
         if (
             !raw_cells_ptr ||
             !fabric_owner ||
-            !APCDataStructure::IsCapacityOfAPCValid(fabric_owner->PerAPCRuntimeCellCount_) ||
-            !APCDataStructure::IsValid32BitAPCUnit(fabric_slot_idx) ||
+            !ADS::IsCapacityOfAPCValid(fabric_owner->PerAPCRuntimeCellCount_) ||
+            !ADS::IsValid32BitAPCUnit(fabric_slot_idx) ||
             IsFabricBound_()
         )
         {
             return false;
         }
-        const APCDataStructure::RangeOfAPC range_of_this_apc = fabric_owner->GetSegmentPoolRange(fabric_slot_idx);
+        const ADS::RangeOfAPC range_of_this_apc = fabric_owner->GetSegmentPoolRange(fabric_slot_idx);
         if (
             !range_of_this_apc.IsValid ||
             range_of_this_apc.EndIndex - range_of_this_apc.BeginIndex != fabric_owner->PerAPCRuntimeCellCount_
@@ -52,7 +52,7 @@ namespace BidirectionalInMemGraph
     {
         FabricOwnerPtr_ = nullptr;
         RawAPCBasePtr_ = nullptr;
-        APCSlotIdx_ = APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+        APCSlotIdx_ = ADS::APC_INDEX_BOUND_SENTINAL;
         APCGenerationCellPtr_ = nullptr;
         ExpectedGeneration_ = UNSIGNED_ZERO;
     }
@@ -86,23 +86,23 @@ namespace BidirectionalInMemGraph
 
         const uint64_t raw_new_state_seq = DSA::ComposeSeqLockAndState(current_state);
 
-        header_meta_buffer[static_cast<uint8_t>(APCDataStructure::HeaderIdentifierOfAPC::APC_LIFE_CYCLE)] = raw_new_state_seq;
+        header_meta_buffer[static_cast<uint8_t>(ADS::HeaderIdentifierOfAPC::APC_LIFE_CYCLE)] = raw_new_state_seq;
 
-        const APCDataStructure::RangeOfAPC range_of_this_apc = FabricOwnerPtr_->GetSegmentPoolRange(APCSlotIdx_);
+        const ADS::RangeOfAPC range_of_this_apc = FabricOwnerPtr_->GetSegmentPoolRange(APCSlotIdx_);
 
 
         return
             range_of_this_apc.IsValid &&
-            APCDataStructure::IsValidFabricUnit(raw_new_state_seq) &&
+            ADS::IsValidFabricUnit(raw_new_state_seq) &&
             FabricOwnerPtr_->ForceNxLenMemCopy(
                 range_of_this_apc.BeginIndex,
-                APCDataStructure::META_CELL_COUNT,
+                ADS::META_CELL_COUNT,
                 header_meta_buffer.data()
             );
     }
 
     bool FabricToAPCLinker::ReadAPCMetaUnit(
-        APCDataStructure::HeaderIdentifierOfAPC meta_idx,
+        ADS::HeaderIdentifierOfAPC meta_idx,
         uint64_t& return_value
     ) noexcept
     {
@@ -111,7 +111,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
         const uint8_t idx_u = static_cast<uint8_t>(meta_idx);
-        const APCDataStructure::RangeOfAPC range_of_this_apc = FabricOwnerPtr_->GetSegmentPoolRange(APCSlotIdx_);
+        const ADS::RangeOfAPC range_of_this_apc = FabricOwnerPtr_->GetSegmentPoolRange(APCSlotIdx_);
         const size_t slab_idx = static_cast<uint64_t>(range_of_this_apc.BeginIndex + idx_u);
         return range_of_this_apc.IsValid && FabricOwnerPtr_->AtomicallyLoadReadAUnit(slab_idx, return_value);
     }
@@ -121,7 +121,7 @@ namespace BidirectionalInMemGraph
         return FabricOwnerPtr_ != nullptr &&
             RawAPCBasePtr_ != nullptr &&
             APCGenerationCellPtr_ != nullptr &&
-            APCDataStructure::IsValid32BitAPCUnit(APCSlotIdx_) &&
+            ADS::IsValid32BitAPCUnit(APCSlotIdx_) &&
             HandleOfAPCStatic::IsGenerationValid(ExpectedGeneration_);
     }
 
@@ -142,7 +142,7 @@ namespace BidirectionalInMemGraph
         if (
             values.Closed ||
             values.Generation != ExpectedGeneration_ ||
-            values.ActiveAccess == APCDataStructure::APC_INDEX_BOUND_SENTINAL
+            values.ActiveAccess == ADS::APC_INDEX_BOUND_SENTINAL
         )
         {
             control.fetch_sub(1u, std::memory_order_release);

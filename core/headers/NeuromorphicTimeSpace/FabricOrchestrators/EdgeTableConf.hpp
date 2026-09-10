@@ -56,7 +56,7 @@ namespace BidirectionalInMemGraph
         ) noexcept
         {
             constexpr size_t cells_per_cacheline =
-                APCDataStructure::APC_CACHELINE_SIZE / sizeof(uint64_t);
+                ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
             const size_t raw = RawEdgeTableRecordWidth(max_direct_parents);
             return (raw + cells_per_cacheline - 1u) &
                 ~(cells_per_cacheline - 1u);
@@ -67,7 +67,7 @@ namespace BidirectionalInMemGraph
         ) noexcept
         {
             return value > 0u &&
-                value <= APCDataStructure::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS;
+                value <= ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS;
         }
 
         static constexpr bool IsValidRelationOrdinal(

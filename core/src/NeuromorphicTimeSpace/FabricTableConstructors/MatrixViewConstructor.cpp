@@ -63,9 +63,9 @@ namespace BidirectionalInMemGraph
         SD::RegionSchemaTable prepared{};
         uint16_t observed_mask = UNSIGNED_ZERO;
         uint8_t prepared_count = UNSIGNED_ZERO;
-        uint32_t cursor = SD::AlignRegionCells(APCDataStructure::META_CELL_COUNT);
+        uint32_t cursor = SD::AlignRegionCells(ADS::META_CELL_COUNT);
 
-        for (uint8_t i = 0; i < APCDataStructure::CountOfMacroColumn(); i++)
+        for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
         {
             const SD::RegionSchemaRecord& source = requested[i];
             const MacroColumnOfAPC expected_region = static_cast<MacroColumnOfAPC>(i);
@@ -108,7 +108,7 @@ namespace BidirectionalInMemGraph
             }
             
             cursor = record.CellOffset + record.CellCount;
-            observed_mask = static_cast<uint16_t>(observed_mask | APCDataStructure::RegionBit(expected_region));
+            observed_mask = static_cast<uint16_t>(observed_mask | ADS::RegionBit(expected_region));
             prepared[prepared_count++] = record;
         }
         

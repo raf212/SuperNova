@@ -141,7 +141,7 @@ namespace BidirectionalInMemGraph
     {
         uint64_t value{};
         if (
-            !ReadAPCMetaUnit(APCDataStructure::HeaderIdentifierOfAPC::GHGF_ROLE_CELL, value)||
+            !ReadAPCMetaUnit(ADS::HeaderIdentifierOfAPC::GHGF_ROLE_CELL, value)||
             value < static_cast<uint8_t>(GM::GHGFNodeRole::OBSERVATION) ||
             value > static_cast<uint8_t>(GM::GHGFNodeRole::VOLATILE)
         )
