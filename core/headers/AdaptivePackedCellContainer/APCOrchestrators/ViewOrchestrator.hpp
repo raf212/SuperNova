@@ -117,4 +117,116 @@ namespace BidirectionalInMemGraph
     };
 
     
+    template<class DType>
+    class RegionView
+    {
+    public:
+        using SD = SchemaDefinition;
+
+    private:
+        SD::SchemaProtocols Protocol_{SD::SchemaProtocols::PRIVATE_REGION};
+        std::span<DType> Elements_{};
+        APCUseScope Use_{};
+    
+    public:
+        constexpr RegionView() noexcept = default;
+
+        constexpr RegionView(
+            std::span<DType> elements,
+            SD::SchemaProtocols protocol,
+            APCUseScope use
+        ) noexcept:
+            Elements_(elements),
+            Protocol_(protocol),
+            Use_(std::move(use))
+        {}
+
+        constexpr bool IsValid() const noexcept
+        {
+            return static_cast<bool>(Use_) && !Elements_.empty();
+        }
+
+        constexpr size_t Size() const noexcept
+        {
+            return Use_ ?  Elements_.size() : UNSIGNED_ZERO;
+        }
+
+        constexpr SD::SchemaProtocols GetProtocol() const noexcept
+        {
+            return Protocol_;
+        }
+
+        std::optional<std::span<DType>> RawMutableSpan() noexcept
+        {
+            if (!Use_ || Protocol_ != SD::SchemaProtocols::PRIVATE_REGION)
+            {
+                return std::nullopt;
+            }
+            
+            return Elements_;
+        }
+
+        DType AtomicLoad(size_t idx, std::memory_order mem_order = std::memory_order_acquire) const noexcept
+        {
+            if (
+                !Use_ ||
+                Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
+                idx >= Elements_.size()
+            )
+            {
+                return DType{};
+            }
+
+            return std::atomic_ref<DType>(Elements_[idx]).load(mem_order);
+            
+        }
+
+
+        bool AtomicStore(
+            size_t idx,
+            DType value,
+            std::memory_order order = std::memory_order_release
+        ) noexcept
+        {
+            if (
+                !Use_ ||
+                Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
+                idx >= Elements_.size()
+            )
+            {
+                return false;
+            }
+
+            std::atomic_ref<DType>(Elements_[idx]).store(value, order);
+            return true;
+        }
+
+        bool AtomicCompareExchangeStrong(
+            size_t idx,
+            DType& expected,
+            DType desired,
+            std::memory_order success = std::memory_order_acq_rel,
+            std::memory_order failure = std::memory_order_acquire
+        ) noexcept
+        {
+            if (
+                !Use_ ||
+                Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
+                idx >= Elements_.size()
+            )
+            {
+                return false;
+            }
+
+            return std::atomic_ref<DType>(Elements_[idx]).compare_exchange_strong(
+                expected,
+                desired,
+                success,
+                failure
+            );
+        }
+
+    };
+
+    
 }
