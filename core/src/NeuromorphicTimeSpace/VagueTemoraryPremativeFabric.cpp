@@ -185,8 +185,8 @@ namespace BidirectionalInMemGraph
         APCUseScope child_use = candidate->AcquireAPCUse_();
         if (
             !child_use ||
-            candidate->FabricOwnerPtr_ != this ||
-            candidate->APCSlotIdx_ != EdgeBuilder::RelationSlot(locator)
+            candidate->Cache_.FabricOwnerPtr_ != this ||
+            candidate->Cache_.APCSlotIdx_ != EdgeBuilder::RelationSlot(locator)
         )
         {
             return SeqLockedOperation::RETRY;
@@ -251,8 +251,8 @@ namespace BidirectionalInMemGraph
             APCUseScope parent_use = parent->AcquireAPCUse_();
             if (
                 !parent_use ||
-                parent->FabricOwnerPtr_ != this ||
-                parent->ExpectedGeneration_ != EdgeBuilder::ParentGeneration(relation)
+                parent->Cache_.FabricOwnerPtr_ != this ||
+                parent->Cache_.ExpectedGeneration_ != EdgeBuilder::ParentGeneration(relation)
             )
             {
                 continue;

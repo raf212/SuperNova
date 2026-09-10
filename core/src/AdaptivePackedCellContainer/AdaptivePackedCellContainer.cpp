@@ -19,12 +19,12 @@ namespace BidirectionalInMemGraph
         return 
             child_use &&
             parent_use &&
-            FabricOwnerPtr_ == parent.FabricOwnerPtr_ &&
-            FabricOwnerPtr_->AddParentRelation_(
-                parent.APCSlotIdx_,
-                parent.ExpectedGeneration_,
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            Cache_.FabricOwnerPtr_ == parent.Cache_.FabricOwnerPtr_ &&
+            Cache_.FabricOwnerPtr_->AddParentRelation_(
+                parent.Cache_.APCSlotIdx_,
+                parent.Cache_.ExpectedGeneration_,
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             );
@@ -42,12 +42,12 @@ namespace BidirectionalInMemGraph
         return
             child_use &&
             parent_use &&
-            FabricOwnerPtr_ == parent.FabricOwnerPtr_ &&
-            FabricOwnerPtr_->RemoveParentRelation_(
-                parent.APCSlotIdx_,
-                parent.ExpectedGeneration_,
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            Cache_.FabricOwnerPtr_ == parent.Cache_.FabricOwnerPtr_ &&
+            Cache_.FabricOwnerPtr_->RemoveParentRelation_(
+                parent.Cache_.APCSlotIdx_,
+                parent.Cache_.ExpectedGeneration_,
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             );
@@ -73,15 +73,15 @@ namespace BidirectionalInMemGraph
             child_use &&
             old_parent_use &&
             new_parent_use &&
-            FabricOwnerPtr_ == old_parent.FabricOwnerPtr_ &&
-            FabricOwnerPtr_ == new_parent.FabricOwnerPtr_ &&
-            FabricOwnerPtr_->ReplaceParentRelation_(
-                old_parent.APCSlotIdx_,
-                old_parent.ExpectedGeneration_,
-                new_parent.APCSlotIdx_,
-                new_parent.ExpectedGeneration_,
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            Cache_.FabricOwnerPtr_ == old_parent.Cache_.FabricOwnerPtr_ &&
+            Cache_.FabricOwnerPtr_ == new_parent.Cache_.FabricOwnerPtr_ &&
+            Cache_.FabricOwnerPtr_->ReplaceParentRelation_(
+                old_parent.Cache_.APCSlotIdx_,
+                old_parent.Cache_.ExpectedGeneration_,
+                new_parent.Cache_.APCSlotIdx_,
+                new_parent.Cache_.ExpectedGeneration_,
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             );
@@ -115,9 +115,9 @@ namespace BidirectionalInMemGraph
     {
         APCUseScope use = AcquireAPCUse_();
         return use
-            ? FabricOwnerPtr_->FindParent_(
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            ? Cache_.FabricOwnerPtr_->FindParent_(
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 relation_ordinal,
                 max_tries
@@ -133,9 +133,9 @@ namespace BidirectionalInMemGraph
     {
         APCUseScope use = AcquireAPCUse_();
         return use
-            ? FabricOwnerPtr_->FindFirstChild_(
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            ? Cache_.FabricOwnerPtr_->FindFirstChild_(
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             )
@@ -150,9 +150,9 @@ namespace BidirectionalInMemGraph
     {
         APCUseScope use = AcquireAPCUse_();
         return use
-            ? FabricOwnerPtr_->FindLastChild_(
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            ? Cache_.FabricOwnerPtr_->FindLastChild_(
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             )
@@ -168,9 +168,9 @@ namespace BidirectionalInMemGraph
     {
         APCUseScope use = AcquireAPCUse_();
         return use
-            ? FabricOwnerPtr_->FindNextChild_(
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            ? Cache_.FabricOwnerPtr_->FindNextChild_(
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 current_relation_locator,
                 max_tries
@@ -187,9 +187,9 @@ namespace BidirectionalInMemGraph
     {
         APCUseScope use = AcquireAPCUse_();
         return use
-            ? FabricOwnerPtr_->FindPreviousChild_(
-                APCSlotIdx_,
-                ExpectedGeneration_,
+            ? Cache_.FabricOwnerPtr_->FindPreviousChild_(
+                Cache_.APCSlotIdx_,
+                Cache_.ExpectedGeneration_,
                 edge_table,
                 current_relation_locator,
                 max_tries
@@ -206,9 +206,9 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        VagueTemoraryPremativeFabric* owner = FabricOwnerPtr_;
-        const uint32_t slot = APCSlotIdx_;
-        const uint32_t generation = ExpectedGeneration_;
+        VagueTemoraryPremativeFabric* owner = Cache_.FabricOwnerPtr_;
+        const uint32_t slot = Cache_.APCSlotIdx_;
+        const uint32_t generation = Cache_.ExpectedGeneration_;
 
         if (!owner->RetireAPC_(slot, generation, max_tries))
         {

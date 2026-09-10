@@ -21,18 +21,14 @@ namespace BidirectionalInMemGraph
         uint32_t GetThisSlotIdx() noexcept
         {
             return
-                IsActiveAPC() ? APCSlotIdx_ : ADS::APC_INDEX_BOUND_SENTINAL;
+                IsActiveAPC() ? Cache_.APCSlotIdx_ : ADS::APC_INDEX_BOUND_SENTINAL;
         }
 
         bool IsActiveAPC() noexcept;
 
     protected:
-        VagueTemoraryPremativeFabric* FabricOwnerPtr_{nullptr};
-        
-        std::byte* RawAPCBasePtr_{nullptr};
-        uint32_t APCSlotIdx_{ADS::APC_INDEX_BOUND_SENTINAL};
-        uint64_t* APCGenerationCellPtr_{nullptr};
-        uint32_t ExpectedGeneration_{UNSIGNED_ZERO};
+
+        ADS::CacheOfAPC Cache_{};
 
         struct RelationOparation 
         {
