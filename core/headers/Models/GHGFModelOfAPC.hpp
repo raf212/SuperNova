@@ -38,7 +38,7 @@ namespace BidirectionalInMemGraph
     public :
 
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
-
+        
         bool ResetGHGFState() noexcept;
 
         bool CompileGHGFModel() noexcept;

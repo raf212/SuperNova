@@ -60,6 +60,11 @@ namespace BidirectionalInMemGraph
         }
     };
 
+    struct CacheOfAPC
+    {
+
+    };
+
     class FabricToAPCLinker 
     {
         friend class VagueTemoraryPremativeFabric;
