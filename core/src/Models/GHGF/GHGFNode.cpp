@@ -112,4 +112,43 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
+    void GHGFNode::ResetAPCGHGFStateRegion_() noexcept
+    {
+        std::fill_n(
+            GHGFFabric_->GHGFRegion_(APCSlotIdx_, GHGFFabric_->Cache_.StateCellOffset_),
+            static_cast<size_t>(GM::STATE_ROW_COUNT_HEIGHT) * GHGFFabric_->Profile_.BatchCapacity, GM::StorageConst::ZERO
+        );
+        std::fill_n(
+            GHGFFabric_->GHGFRegion_(APCSlotIdx_, GHGFFabric_->Cache_.ErrorCellOffset_),
+            static_cast<size_t>(GM::ERROR_ROW_COUNT_HEIGHT) * GHGFFabric_->Profile_.BatchCapacity, GM::StorageConst::ZERO
+        );
+        const float initial_mean = GHGFRole_() == GM::GHGFNodeRole::OBSERVATION ?
+            GM::StorageConst::INITIAL_BINARY_PROBABILITY : GM::StorageConst::ZERO;
+
+        for (uint32_t lane = 0; lane < GHGFFabric_->Profile_.BatchCapacity; ++lane)
+        {
+            GHGFFabric_->GHGFStateRow_(APCSlotIdx_, GM::GHGFStateRow::EXPECTED_MEAN)[lane] = initial_mean;
+            GHGFFabric_->GHGFStateRow_(APCSlotIdx_, GM::GHGFStateRow::PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
+            GHGFFabric_->GHGFStateRow_(APCSlotIdx_, GM::GHGFStateRow::EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
+            GHGFFabric_->GHGFStateRow_(APCSlotIdx_, GM::GHGFStateRow::CONDITIONAL_EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
+            GHGFFabric_->GHGFStateRow_(APCSlotIdx_, GM::GHGFStateRow::OBSERVED)[lane] = GM::StorageConst::ONE;
+            GHGFFabric_->GHGFStateRow_(APCSlotIdx_, GM::GHGFStateRow::CURRENT_VARIANCE)[lane] = GM::StorageConst::ONE;
+        }
+    }
+
+
+    std::optional<GHGFLayerModel::GHGFNodeRole> GHGFNode::GHGFRole_() noexcept
+    {
+        uint64_t value{};
+        if (
+            !ReadAPCMetaUnit(APCDataStructure::HeaderIdentifierOfAPC::GHGF_ROLE_CELL, value)||
+            value < static_cast<uint8_t>(GM::GHGFNodeRole::OBSERVATION) ||
+            value > static_cast<uint8_t>(GM::GHGFNodeRole::VOLATILE)
+        )
+        {
+            return std::nullopt;
+        }
+        return static_cast<GM::GHGFNodeRole>(value);
+    }
+
 }

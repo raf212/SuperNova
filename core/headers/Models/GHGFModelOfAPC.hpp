@@ -14,7 +14,7 @@ namespace BidirectionalInMemGraph
         using FCSpan = std::span<const float>;
         struct GHGFModelConstructionValues
         {
-            std::span<GHGFNode> APCParticipentSpan{};
+            std::span<GHGFNode> APCNodes{};
             std::span<const GM::GHGFNodeRole> RoleSpan{};
             std::span<const GM::GHGFConnection> ConnectionSpan{};            
         };
@@ -22,13 +22,8 @@ namespace BidirectionalInMemGraph
         GM::GHGFCache Cache_{};
         GM::GHGFStorageProfile Profile_{};
 
-        GM::GHGFNodeRole GHGFRole_(uint32_t slot) const noexcept;
-        bool IsExternalGHGFBuffer_(const float* data, size_t count) const noexcept;
-        bool IsLiveGHGFSlot_(uint32_t slot) noexcept;
         bool IsGHGFPlanCurrent_() noexcept;
-        bool PredictGHGFNode_(uint32_t slot, uint32_t batch) noexcept;
-        bool UpdateGHGFNode_(uint32_t slot, uint32_t batch) noexcept;
-        bool PropogateGHGFError_(uint32_t child, uint32_t batch) noexcept;
+
         bool PredictGHGFBatch(uint32_t batch) noexcept;
         bool UpdateGHGFBatch(FCSpan observation, uint32_t batch) noexcept;
         bool CopyGHGFPrediction_(FCSpan prediction, uint32_t batch) noexcept;
@@ -38,7 +33,6 @@ namespace BidirectionalInMemGraph
         float* GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept;
 
         void InvalidateGHGFModel_() noexcept;
-        void ResetAPCGHGFStateRegion_(uint32_t slot) noexcept;
 
         uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept;
     public :

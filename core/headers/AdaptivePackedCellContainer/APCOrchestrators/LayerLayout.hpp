@@ -14,9 +14,9 @@ namespace BidirectionalInMemGraph
 
         enum class GHGFNodeRole : uint8_t
         {
-            OBSERVATION = 0,
-            VALUE = 1,
-            VOLATILE = 2
+            OBSERVATION = 1,
+            VALUE = 2,
+            VOLATILE = 3
         };
 
         enum class GHGFStateRow : uint8_t

@@ -5,20 +5,6 @@
 namespace BidirectionalInMemGraph
 { 
 
-    bool GHGFModelConstructor::IsLiveGHGFSlot_(uint32_t slot) noexcept
-    {
-        if (!IsFabricActive() || slot >= CountOfAPC_)
-        {
-            return false;
-        }
-
-        const uint64_t raw = std::atomic_ref<uint64_t>(*GetAPCGenerationPtr_(slot)).load(std::memory_order_acquire);
-        const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(raw);
-        const uint64_t role = SlabBasePtr_[SlotBegin_(slot) + static_cast<uint8_t>(APCDataStructure::HeaderIdentifierOfAPC::GHGF_ROLE_CELL)];
-        return !control.Closed  && role >= 1u &&
-            role <= static_cast<uint64_t>(GM::GHGFNodeRole::VOLATILE) + 1u;
-    }
-
     bool GHGFModelConstructor::IsGHGFPlanCurrent_() noexcept
     {
         return IsFabricActive() && Cache_.ModelPrepared_ &&
@@ -104,29 +90,7 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    void GHGFModelConstructor::ResetAPCGHGFStateRegion_(uint32_t slot) noexcept
-    {
-        std::fill_n(
-            GHGFRegion_(slot, Cache_.StateCellOffset_),
-            static_cast<size_t>(GM::STATE_ROW_COUNT_HEIGHT) * Profile_.BatchCapacity, GM::StorageConst::ZERO
-        );
-        std::fill_n(
-            GHGFRegion_(slot, Cache_.ErrorCellOffset_),
-            static_cast<size_t>(GM::ERROR_ROW_COUNT_HEIGHT) * Profile_.BatchCapacity, GM::StorageConst::ZERO
-        );
-        const float initial_mean = GHGFRole_(slot) == GM::GHGFNodeRole::OBSERVATION ?
-            GM::StorageConst::INITIAL_BINARY_PROBABILITY : GM::StorageConst::ZERO;
 
-        for (uint32_t lane = 0; lane < Profile_.BatchCapacity; ++lane)
-        {
-            GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_MEAN)[lane] = initial_mean;
-            GHGFStateRow_(slot, GM::GHGFStateRow::PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
-            GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
-            GHGFStateRow_(slot, GM::GHGFStateRow::CONDITIONAL_EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
-            GHGFStateRow_(slot, GM::GHGFStateRow::OBSERVED)[lane] = GM::StorageConst::ONE;
-            GHGFStateRow_(slot, GM::GHGFStateRow::CURRENT_VARIANCE)[lane] = GM::StorageConst::ONE;
-        }
-    }
 
     bool GHGFModelConstructor::ConstructGHGFModel(
         GHGFModelConstructionValues& model_values,
@@ -136,14 +100,14 @@ namespace BidirectionalInMemGraph
         if (
             IsFabricActive() ||
             !GM::IsValidStoregeProfile(profile) ||
-            model_values.APCParticipentSpan.empty() ||
-            model_values.APCParticipentSpan.size() != model_values.RoleSpan.size() ||
-            model_values.APCParticipentSpan.size() >= GM::StorageConst::INVALID_SLOT
+            model_values.APCNodes.empty() ||
+            model_values.APCNodes.size() != model_values.RoleSpan.size() ||
+            model_values.APCNodes.size() >= GM::StorageConst::INVALID_SLOT
         )
         {
             return false;
         }
-        for (AdaptivePackedCellContainer& apc : model_values.APCParticipentSpan)
+        for (AdaptivePackedCellContainer& apc : model_values.APCNodes)
         {
             if (apc.IsActiveAPC())
             {
@@ -151,14 +115,14 @@ namespace BidirectionalInMemGraph
             }
         }
 
-        if (!InitializeGHGFFabric(static_cast<uint32_t>(model_values.APCParticipentSpan.size()), profile))
+        if (!InitializeGHGFFabric(static_cast<uint32_t>(model_values.APCNodes.size()), profile))
         {
             return false;
         }
         
         for (uint32_t i = 0; i < CountOfAPC_; i++)
         {
-            if (!CreateNodeOfGHGF(model_values.APCParticipentSpan[i], model_values.RoleSpan[i]))
+            if (!CreateNodeOfGHGF(model_values.APCNodes[i], model_values.RoleSpan[i]))
             {
                 ShutDownFabricWithPtrTable();
                 return false;
