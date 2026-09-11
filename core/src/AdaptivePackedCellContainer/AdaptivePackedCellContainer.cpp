@@ -106,95 +106,126 @@ namespace BidirectionalInMemGraph
     }
 
 
-    FabricToAPCLinker::RelationOparation
-    AdaptivePackedCellContainer::FindParent(
+    AdaptivePackedCellContainer AdaptivePackedCellContainer::FindParent(
         FabricSegments edge_table,
         uint8_t relation_ordinal,
-        uint32_t max_tries
+        RelationOparation* parent_relation,
+        uint32_t max_tries 
     ) noexcept
     {
         APCUseScope use = AcquireAPCUse_();
-        return use
-            ? Cache_.FabricOwnerPtr_->FindParent_(
+
+        if (!use)
+        {
+            return AdaptivePackedCellContainer{};
+        }
+
+        return 
+            Cache_.FabricOwnerPtr_->FindParent_(
                 Cache_.APCSlotIdx_,
                 Cache_.ExpectedGeneration_,
                 edge_table,
                 relation_ordinal,
+                parent_relation,
                 max_tries
-            )
-            : RelationOparation{};
+            );
     }
 
-    FabricToAPCLinker::RelationOparation
-    AdaptivePackedCellContainer::FindFirstChild(
+    AdaptivePackedCellContainer AdaptivePackedCellContainer::FindFirstChild(
         FabricSegments edge_table,
+        RelationOparation* child_relation,
         uint32_t max_tries
     ) noexcept
     {
         APCUseScope use = AcquireAPCUse_();
-        return use
-            ? Cache_.FabricOwnerPtr_->FindFirstChild_(
+
+        if (!use)
+        {
+            return AdaptivePackedCellContainer{};
+        }
+
+        return 
+            Cache_.FabricOwnerPtr_->FindFirstChild_(
                 Cache_.APCSlotIdx_,
                 Cache_.ExpectedGeneration_,
                 edge_table,
+                child_relation,
                 max_tries
-            )
-            : RelationOparation{};
+            );
     }
 
-    FabricToAPCLinker::RelationOparation
-    AdaptivePackedCellContainer::FindLastChild(
+    AdaptivePackedCellContainer AdaptivePackedCellContainer::FindLastChild(
         FabricSegments edge_table,
+        RelationOparation* child_relation,
         uint32_t max_tries
     ) noexcept
     {
         APCUseScope use = AcquireAPCUse_();
-        return use
-            ? Cache_.FabricOwnerPtr_->FindLastChild_(
+
+        if (!use)
+        {
+            return AdaptivePackedCellContainer{};
+        }
+
+        return 
+            Cache_.FabricOwnerPtr_->FindLastChild_(
                 Cache_.APCSlotIdx_,
                 Cache_.ExpectedGeneration_,
                 edge_table,
+                child_relation,
                 max_tries
-            )
-            : RelationOparation{};
+            );
     }
 
-    FabricToAPCLinker::RelationOparation
-    AdaptivePackedCellContainer::FindNextChild(
+    AdaptivePackedCellContainer AdaptivePackedCellContainer::FindNextChild(
         FabricSegments edge_table,
         uint32_t current_relation_locator,
+        RelationOparation* child_relation,
         uint32_t max_tries
     ) noexcept
     {
         APCUseScope use = AcquireAPCUse_();
-        return use
-            ? Cache_.FabricOwnerPtr_->FindNextChild_(
+
+        if (!use)
+        {
+            return AdaptivePackedCellContainer{};
+        }
+
+        return 
+            Cache_.FabricOwnerPtr_->FindNextChild_(
                 Cache_.APCSlotIdx_,
                 Cache_.ExpectedGeneration_,
                 edge_table,
                 current_relation_locator,
+                child_relation,
                 max_tries
-            )
-            : RelationOparation{};
+            );
     }
 
-    FabricToAPCLinker::RelationOparation
-    AdaptivePackedCellContainer::FindPreviousChild(
+
+    AdaptivePackedCellContainer AdaptivePackedCellContainer::FindPreviousChild(
         FabricSegments edge_table,
         uint32_t current_relation_locator,
+        RelationOparation* child_relation,
         uint32_t max_tries
     ) noexcept
     {
         APCUseScope use = AcquireAPCUse_();
-        return use
-            ? Cache_.FabricOwnerPtr_->FindPreviousChild_(
+
+        if (!use)
+        {
+            return AdaptivePackedCellContainer{};
+        }
+
+        return 
+            Cache_.FabricOwnerPtr_->FindPreviousChild_(
                 Cache_.APCSlotIdx_,
                 Cache_.ExpectedGeneration_,
                 edge_table,
                 current_relation_locator,
+                child_relation,
                 max_tries
-            )
-            : RelationOparation{};
+            );
     }
 
     bool AdaptivePackedCellContainer::Retire(
@@ -214,7 +245,6 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
-        owner->StoreAPCRuntimePtr(slot, nullptr);
         ReleseFabricBindingOnly_();
         return true;
     }

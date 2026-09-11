@@ -6,6 +6,85 @@
 namespace BidirectionalInMemGraph
 {
 
+    bool VagueTemoraryPremativeFabric::GetExistingAPC_(
+        uint32_t slot,
+        AdaptivePackedCellContainer& apc,
+        APCUseScope& apc_use,
+        std::optional<uint32_t> expected_generation
+    ) noexcept
+    {
+        if (
+            !IsFabricActive() ||
+            slot >= CountOfAPC_ ||
+            apc.IsFabricBound_() ||
+            apc_use ||
+            (
+                expected_generation.has_value() &&
+                !HandleOfAPCStatic::IsGenerationValid(
+                    expected_generation.value()
+                )
+            )
+        )
+        {
+            return false;
+        }
+
+        const ADS::RangeOfAPC range = GetSegmentPoolRange(slot);
+        uint64_t* generation_cell = GetAPCGenerationPtr_(slot);
+        if (!generation_cell || !range.IsValid)
+        {
+            return false;
+        }
+        const uint64_t control_raw = std::atomic_ref<const uint64_t>(*generation_cell).load(std::memory_order_acquire);
+
+        const HandleOfAPCStatic::ControlValues control_values = HandleOfAPCStatic::ReadControlCell(control_raw);
+        if (
+            control_values.Closed ||
+            !HandleOfAPCStatic::IsGenerationValid(control_values.Generation) ||
+            (
+                expected_generation.has_value() &&
+                control_values.Generation != expected_generation.value()
+            )
+        )
+        {
+            return false;
+        }
+
+        const uint32_t resolved_generation = control_values.Generation;
+
+        if (!apc.BindExternalRawFabricBacking_(
+            &SlabBasePtr_[range.BeginIndex],
+            this,
+            slot,
+            generation_cell,
+            resolved_generation
+        ))
+        {
+            return false;
+        }
+
+        APCUseScope acquired_use = apc.AcquireAPCUse_();
+
+        if (!acquired_use)
+        {
+            apc.ReleseFabricBindingOnly_();
+            return false;
+        }
+        const DescriptionOfAPC::SeqLockAndStateStruct state = ReadAPCStateAtomically_(slot);
+        if (
+            !state.IsValid ||
+            state.StateOfTheAPC != StateOfAPC::LIVE
+        )
+        {
+            acquired_use.Release();
+            apc.ReleseFabricBindingOnly_();
+            return false;
+        }
+        apc_use = std::move(acquired_use);
+        return true;
+    }
+    
+
     void VagueTemoraryPremativeFabric::ShutDownFabricWithPtrTable() noexcept
     {
         const bool was_active = FabricInitialized_.exchange(false, std::memory_order_acq_rel);
@@ -42,104 +121,16 @@ namespace BidirectionalInMemGraph
         ResetScalarsofTheFabric_();
     }
 
-
-    bool VagueTemoraryPremativeFabric::BuildAPCRuntimePtrTable_() noexcept
-    {
-        if (CountOfAPC_ == UNSIGNED_ZERO)
-        {
-            return false;
-        }
-        APCRuntimePtrTable_.reset(new (std::nothrow) std::atomic<AdaptivePackedCellContainer*>[static_cast<size_t>(CountOfAPC_)]);
-
-        if (!APCRuntimePtrTable_)
-        {
-            return false;
-        }
-
-        for (size_t i = 0; i < static_cast<size_t>(CountOfAPC_); i++)
-        {
-            APCRuntimePtrTable_[i].store(nullptr, std::memory_order_release);
-        }
-        
-        return true;
-    }
-
-    void VagueTemoraryPremativeFabric::ClearAPCRuntimePtrTable_() noexcept
-    {
-        if (!APCRuntimePtrTable_)
-        {
-            return;
-        }
-        for (size_t i = 0; i < static_cast<size_t>(CountOfAPC_); i++)
-        {   
-            AdaptivePackedCellContainer* apc = APCRuntimePtrTable_[i].exchange(nullptr, std::memory_order_acq_rel);
-            if (apc)
-            {
-                apc->ReleseFabricBindingOnly_();
-            }            
-        }
-    }
-
-    bool VagueTemoraryPremativeFabric::StoreAPCRuntimePtr(size_t apc_idx, AdaptivePackedCellContainer* apc_ptr) noexcept
-    {
-        if (!APCRuntimePtrTable_ || apc_idx >= CountOfAPC_)
-        {
-            return false;
-        }
-
-        APCRuntimePtrTable_[apc_idx].store(apc_ptr, std::memory_order_release);
-        return true;
-    }
-
-    AdaptivePackedCellContainer* VagueTemoraryPremativeFabric::GetAPCRuntimePtrBySlotIndex_(size_t apc_idx) noexcept
-    {
-        if (!APCRuntimePtrTable_ || apc_idx >= CountOfAPC_)
-        {
-            return nullptr;
-        }
-
-        return APCRuntimePtrTable_[apc_idx].load(std::memory_order_acquire);
-    }
-
-
-    bool VagueTemoraryPremativeFabric::InitializeFabricWithPtrTable(
-        uint32_t slot_count,
-        uint32_t slot_cell_count,
-        const SchemaDefinition::FabricRegionConfig& region_configuration,
-        uint8_t max_direct_parents_per_axis 
-    ) noexcept
-    {
-        ShutDownFabricWithPtrTable();
-        const bool base_ok = InitializeFabric(
-            slot_count,
-            slot_cell_count,
-            region_configuration,
-            max_direct_parents_per_axis
-        );
-
-        if (!base_ok)
-        {
-            return false;
-        }
-
-        if (!BuildAPCRuntimePtrTable_())
-        {
-            ShutDownFabricWithPtrTable();
-            return false;
-        }
-        
-        return true;
-    }
-
     VagueTemoraryPremativeFabric::SeqLockedOperation VagueTemoraryPremativeFabric::ResolveChildLocator_(
         uint32_t parent_slot,
         uint32_t parent_generation,
         FabricSegments edge_table,
         uint32_t locator,
-        AdaptivePackedCellContainer*& child
+        APCUseScope& use,
+        AdaptivePackedCellContainer& child
     ) noexcept
     {
-        child = nullptr;
+        child = AdaptivePackedCellContainer{};
         if (
             parent_slot >= CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
@@ -175,38 +166,45 @@ namespace BidirectionalInMemGraph
             return SeqLockedOperation::RETRY;
         }
 
-        AdaptivePackedCellContainer* candidate = GetAPCRuntimePtrBySlotIndex_(EdgeBuilder::RelationSlot(locator));
 
-        if (!candidate)
+        APCUseScope child_use{};
+        if (
+            !GetExistingAPC_(
+                EdgeBuilder::ParentSlot(relation),
+                child,
+                child_use,
+                EdgeBuilder::ParentGeneration(relation)
+            )
+        )
         {
-            return SeqLockedOperation::RETRY;
+            return SeqLockedOperation::NONE;
         }
         
-        APCUseScope child_use = candidate->AcquireAPCUse_();
         if (
-            !child_use ||
-            candidate->Cache_.FabricOwnerPtr_ != this ||
-            candidate->Cache_.APCSlotIdx_ != EdgeBuilder::RelationSlot(locator)
+            child.Cache_.FabricOwnerPtr_ != this ||
+            child.Cache_.APCSlotIdx_ != EdgeBuilder::RelationSlot(locator)
         )
         {
             return SeqLockedOperation::RETRY;
         }
-        
-        child = candidate;
 
+        use = std::move(child_use);
         return SeqLockedOperation::FOUND;
     }
 
 
-    FabricToAPCLinker::RelationOparation VagueTemoraryPremativeFabric::FindParent_(
+    AdaptivePackedCellContainer VagueTemoraryPremativeFabric::FindParent_(
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
         uint8_t relation_ordinal,
+        FabricToAPCLinker::RelationOparation* result_ptr,
         uint32_t max_tries 
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
+        AdaptivePackedCellContainer parent{};
+        
         if (
             child_slot >= CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(child_generation) ||
@@ -217,7 +215,7 @@ namespace BidirectionalInMemGraph
             )
         )
         {
-            return result;
+            return parent;
         }
         
         for (uint32_t i = 0; i < max_tries; i++)
@@ -238,45 +236,57 @@ namespace BidirectionalInMemGraph
 
             if (read != SeqLockedOperation::FOUND)
             {
-                return result;
+                return parent;
             }
 
-            AdaptivePackedCellContainer* parent = GetAPCRuntimePtrBySlotIndex_(EdgeBuilder::ParentSlot(relation));
-
-            if (!parent)
+            APCUseScope parent_use{};
+            if (
+                !GetExistingAPC_(
+                    EdgeBuilder::ParentSlot(relation),
+                    parent,
+                    parent_use,
+                    EdgeBuilder::ParentGeneration(relation)
+                )
+            )
             {
                 continue;
             }
             
-            APCUseScope parent_use = parent->AcquireAPCUse_();
             if (
-                !parent_use ||
-                parent->Cache_.FabricOwnerPtr_ != this ||
-                parent->Cache_.ExpectedGeneration_ != EdgeBuilder::ParentGeneration(relation)
+                parent.Cache_.FabricOwnerPtr_ != this ||
+                parent.Cache_.ExpectedGeneration_ != EdgeBuilder::ParentGeneration(relation)
             )
             {
                 continue;
             }
 
-            result.APCPtr_ = parent;
+            result.Use_ = std::move(parent_use);
             result.RelationLocator_ = EdgeBuilder::PackRelationLocator(child_slot, relation_ordinal);
-
             result.MutationOP_ = SeqLockedOperation::FOUND;
-            return result;
+
+            return parent;
         }
         result.MutationOP_ = SeqLockedOperation::RETRY;
-        return result;
+        if (result_ptr)
+        {
+            result_ptr = &result;
+        }
+        
+        return parent;
     }
 
 
-    FabricToAPCLinker::RelationOparation VagueTemoraryPremativeFabric::FindFirstChild_(
+    AdaptivePackedCellContainer VagueTemoraryPremativeFabric::FindFirstChild_(
         uint32_t parent_slot,
         uint32_t parent_generation,
         FabricSegments edge_table,
-        uint32_t max_tries 
+        FabricToAPCLinker::RelationOparation* result_ptr,
+        uint32_t max_tries
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
+        AdaptivePackedCellContainer child{};
+
 
         if (
             parent_slot >= CountOfAPC_ ||
@@ -284,15 +294,16 @@ namespace BidirectionalInMemGraph
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
         )
         {
-            return result;
+            return child;
         }
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
+            child = AdaptivePackedCellContainer{};
             EdgeBuilder::EdgeData before{};
             if (!ReadEdgeHeader_(edge_table, parent_slot, before))
             {
-                return result;
+                return child;
             }
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
@@ -300,11 +311,11 @@ namespace BidirectionalInMemGraph
             }
             if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
             {
-                return result;
+                return child;
             }
             if (before.TailLocator == EdgeBuilder::RELATION_NULL)
             {
-                return result;
+                return child;
             }
 
             EdgeBuilder::ParentRelation tail_relation{};
@@ -328,17 +339,16 @@ namespace BidirectionalInMemGraph
                 )
             )
             {
-                return result;
+                return child;
             }
 
-            const uint32_t first =
-                EdgeBuilder::NextLocator(tail_relation);
-            AdaptivePackedCellContainer* child = nullptr;
+            const uint32_t first = EdgeBuilder::NextLocator(tail_relation);
             const SeqLockedOperation resolved = ResolveChildLocator_(
                 parent_slot,
                 parent_generation,
                 edge_table,
                 first,
+                result.Use_,
                 child
             );
 
@@ -348,7 +358,8 @@ namespace BidirectionalInMemGraph
             }
             if (resolved != SeqLockedOperation::FOUND)
             {
-                return result;
+                child = AdaptivePackedCellContainer{};
+                return child;
             }
 
             EdgeBuilder::EdgeData after{};
@@ -360,41 +371,49 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            result.APCPtr_ = child;
             result.RelationLocator_ = first;
             result.MutationOP_ = SeqLockedOperation::FOUND;
-            return result;
+            if (result_ptr)
+            {
+                result_ptr = &result;
+            }
+            
+            return child;
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
-        return result;
+        child = AdaptivePackedCellContainer{};
+        return child;
     }
 
-    FabricToAPCLinker::RelationOparation VagueTemoraryPremativeFabric::FindLastChild_(
+    AdaptivePackedCellContainer VagueTemoraryPremativeFabric::FindLastChild_(
         uint32_t parent_slot,
         uint32_t parent_generation,
         FabricSegments edge_table,
+        FabricToAPCLinker::RelationOparation* result_ptr,
         uint32_t max_tries
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
+        AdaptivePackedCellContainer child{};
         if (
             parent_slot >= CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
         )
         {
-            return result;
+            return child;
         }
         
         for (uint32_t i = 0; i < max_tries; i++)
         {
+            child = AdaptivePackedCellContainer{};
             EdgeBuilder::EdgeData before{};
             if (
                 !ReadEdgeHeader_(edge_table, parent_slot, before)
             )
             {
-                return result;
+                return child;
             }
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
@@ -403,20 +422,20 @@ namespace BidirectionalInMemGraph
             
             if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
             {
-                return result;
+                return child;
             }
             
             if (before.TailLocator == EdgeBuilder::RELATION_NULL)
             {
-                return result;
+                return child;
             }
 
-            AdaptivePackedCellContainer* child = nullptr;
             const SeqLockedOperation resolved = ResolveChildLocator_(
                 parent_slot,
                 parent_generation,
                 edge_table,
                 before.TailLocator,
+                result.Use_,
                 child
             );
 
@@ -426,7 +445,7 @@ namespace BidirectionalInMemGraph
             }
             if (resolved != SeqLockedOperation::FOUND)
             {
-                return result;
+                return child;
             }
 
             EdgeBuilder::EdgeData after{};
@@ -438,26 +457,32 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            result.APCPtr_ = child;
             result.RelationLocator_ = before.TailLocator;
             result.MutationOP_ = SeqLockedOperation::FOUND;
-            return result;
+            if (result_ptr)
+            {
+                result_ptr = & result;
+            }
+            return child;
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
-        return result;
+        child = AdaptivePackedCellContainer{};
+        return child;
     }
 
 
-    FabricToAPCLinker::RelationOparation VagueTemoraryPremativeFabric::FindNextChild_(
+    AdaptivePackedCellContainer VagueTemoraryPremativeFabric::FindNextChild_(
         uint32_t parent_slot,
         uint32_t parent_generation,
         FabricSegments edge_table,
         uint32_t current_relation_locator,
+        FabricToAPCLinker::RelationOparation* result_ptr,
         uint32_t max_tries
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
+        AdaptivePackedCellContainer child{};
         if (
             parent_slot >= CountOfAPC_  ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
@@ -469,7 +494,7 @@ namespace BidirectionalInMemGraph
             )
         )
         {
-            return result;
+            return child;
         }
         
 
@@ -477,10 +502,11 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t i = 0; i < max_tries; i++)
         {
+            child = AdaptivePackedCellContainer{};
             EdgeBuilder::EdgeData before{};
             if (!ReadEdgeHeader_(edge_table, parent_slot, before))
             {
-                return result;
+                return child;
             }
             
             if (
@@ -495,7 +521,7 @@ namespace BidirectionalInMemGraph
                 before.TailLocator == EdgeBuilder::RELATION_NULL
             )
             {
-                return result;
+                return child;
             }
 
             EdgeBuilder::ParentRelation current{};
@@ -517,7 +543,7 @@ namespace BidirectionalInMemGraph
                 current.ParentHandle != parent_handle
             )
             {
-                return result;
+                return child;
             }
             
             if (current_relation_locator == before.TailLocator)
@@ -528,19 +554,19 @@ namespace BidirectionalInMemGraph
                     SameHeader_(before, after) 
                 )
                 {
-                    return result;
+                    return child;
                 }
                 continue;
             }
             
             const uint32_t next = EdgeBuilder::NextLocator(current);
-            AdaptivePackedCellContainer* child = nullptr;
 
             const SeqLockedOperation resolved = ResolveChildLocator_(
                 parent_slot,
                 parent_generation,
                 edge_table,
                 next,
+                result.Use_,
                 child
             );
 
@@ -551,7 +577,8 @@ namespace BidirectionalInMemGraph
 
             if (resolved != SeqLockedOperation::FOUND)
             {
-                return result;
+                child = AdaptivePackedCellContainer{};
+                return child;
             }
 
             EdgeBuilder::EdgeData after{};
@@ -564,25 +591,32 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            result.APCPtr_ = child;
             result.RelationLocator_ = next;
             result.MutationOP_ = SeqLockedOperation::FOUND;
-            return result;
+            if (result_ptr)
+            {
+                result_ptr = &result;
+            }
+            
+            return child;
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
-        return result;
+        child = AdaptivePackedCellContainer{};
+        return child;
     }
 
-    FabricToAPCLinker::RelationOparation VagueTemoraryPremativeFabric::FindPreviousChild_(
+    AdaptivePackedCellContainer VagueTemoraryPremativeFabric::FindPreviousChild_(
         uint32_t parent_slot,
         uint32_t parent_generation,
         FabricSegments edge_table,
         uint32_t current_relation_locator,
+        FabricToAPCLinker::RelationOparation* result_ptr,
         uint32_t max_tries
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
+        AdaptivePackedCellContainer child{};
 
         if (
             parent_slot >= CountOfAPC_ ||
@@ -595,7 +629,7 @@ namespace BidirectionalInMemGraph
             )
         )
         {
-            return result;
+            return child;
         }
 
         const uint64_t parent_handle = EdgeBuilder::MakeParentHandle(
@@ -605,10 +639,11 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
+            child = AdaptivePackedCellContainer{};
             EdgeBuilder::EdgeData before{};
             if (!ReadEdgeHeader_(edge_table, parent_slot, before))
             {
-                return result;
+                return child;
             }
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
@@ -619,7 +654,7 @@ namespace BidirectionalInMemGraph
                 before.TailLocator == EdgeBuilder::RELATION_NULL
             )
             {
-                return result;
+                return child;
             }
 
             EdgeBuilder::ParentRelation tail{};
@@ -654,7 +689,7 @@ namespace BidirectionalInMemGraph
                 current.ParentHandle != parent_handle
             )
             {
-                return result;
+                return child;
             }
 
             const uint32_t first = EdgeBuilder::NextLocator(tail);
@@ -666,18 +701,19 @@ namespace BidirectionalInMemGraph
                     ConstructDAGOnEachAxis::SameHeader_(before, after)
                 )
                 {
-                    return result;
+                    return child;
                 }
                 continue;
             }
 
             const uint32_t previous = EdgeBuilder::PreviousLocator(current);
-            AdaptivePackedCellContainer* child = nullptr;
+
             const SeqLockedOperation resolved = ResolveChildLocator_(
                 parent_slot,
                 parent_generation,
                 edge_table,
                 previous,
+                result.Use_,
                 child
             );
 
@@ -687,7 +723,8 @@ namespace BidirectionalInMemGraph
             }
             if (resolved != SeqLockedOperation::FOUND)
             {
-                return result;
+                child = AdaptivePackedCellContainer{};
+                return child;
             }
 
             EdgeBuilder::EdgeData after{};
@@ -699,14 +736,19 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            result.APCPtr_ = child;
             result.RelationLocator_ = previous;
             result.MutationOP_ = SeqLockedOperation::FOUND;
-            return result;
+            if (result_ptr)
+            {
+                result_ptr = &result;
+            }
+            
+            return child;
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
-        return result;
+        child = AdaptivePackedCellContainer{};
+        return child;
     }
 
 
@@ -737,7 +779,6 @@ namespace BidirectionalInMemGraph
 
         bool horizontal_reserved = false;
         bool vertical_reserved = false;
-        bool pointer_stored = false;
         bool descriptor_live = false;
         bool matrix_view_prepared = false;
 
@@ -751,11 +792,6 @@ namespace BidirectionalInMemGraph
                     StateOfAPC::LIVE,
                     internal_max_tries
                 );
-            }
-
-            if (pointer_stored)
-            {
-                StoreAPCRuntimePtr(slot, nullptr);
             }
             
             if (vertical_reserved)
@@ -909,15 +945,12 @@ namespace BidirectionalInMemGraph
             horizontal_before.TailLocator != EdgeBuilder::RELATION_NULL ||
             vertical_before.TailLocator != EdgeBuilder::RELATION_NULL ||
             !ReservedRowIsEmpty___(FabricSegments::VALUE_PARENT_EDGE_TABLE_H) ||
-            !ReservedRowIsEmpty___(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V) ||
-            !StoreAPCRuntimePtr(slot, &desired_apc)
+            !ReservedRowIsEmpty___(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V)
         )
         {
             AbortCreation___();
             return false;
         }
-
-        pointer_stored = true;
         
         if (!SwitchDescriptionState(
             slot,

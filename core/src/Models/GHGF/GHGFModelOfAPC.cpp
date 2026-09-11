@@ -65,7 +65,7 @@ namespace BidirectionalInMemGraph
         HasDefaultRegionTable_ = true;
 
         if (
-            !InitializeFabricWithPtrTable(
+            !InitializeFabric(
                 slot_count,
                 profile.RequiredAPCCells,
                 profile.FabricConfig,

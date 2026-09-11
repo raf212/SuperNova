@@ -42,31 +42,36 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
-        RelationOparation FindParent(
+        AdaptivePackedCellContainer FindParent(
             FabricSegments edge_table,
             uint8_t relation_ordinal,
+            RelationOparation* parent_relation = nullptr,
             uint32_t max_tries = REALTION_FIND_TRIES
         ) noexcept;
 
-        RelationOparation FindFirstChild(
+        AdaptivePackedCellContainer FindFirstChild(
             FabricSegments edge_table,
+            RelationOparation* child_relation = nullptr,
             uint32_t max_tries = REALTION_FIND_TRIES
         ) noexcept;
 
-        RelationOparation FindLastChild(
+        AdaptivePackedCellContainer FindLastChild(
             FabricSegments edge_table,
+            RelationOparation* child_relation = nullptr,
             uint32_t max_tries = REALTION_FIND_TRIES
         ) noexcept;
 
-        RelationOparation FindNextChild(
-            FabricSegments edge_table,
-            uint32_t current_relation_locator,
-            uint32_t max_tries = REALTION_FIND_TRIES
-        ) noexcept;
-
-        RelationOparation FindPreviousChild(
+        AdaptivePackedCellContainer FindNextChild(
             FabricSegments edge_table,
             uint32_t current_relation_locator,
+            RelationOparation* child_relation = nullptr,
+            uint32_t max_tries = REALTION_FIND_TRIES
+        ) noexcept;
+
+        AdaptivePackedCellContainer FindPreviousChild(
+            FabricSegments edge_table,
+            uint32_t current_relation_locator,
+            RelationOparation* child_relation = nullptr,
             uint32_t max_tries = REALTION_FIND_TRIES
         ) noexcept;
 

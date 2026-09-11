@@ -394,7 +394,7 @@
 //             ShutDownFabric();
 //         }
 
-//         bool InitializeFabricWithPtrTable(
+//         bool InitializeFabric(
 //             uint32_t slot_count,
 //             uint32_t slot_cell_count = MINIMUM_APC_CELL_COUNT
 //         )
@@ -408,7 +408,7 @@
 //             }
 
 //             auto candidate = std::make_shared<FabricEpoch>(slot_count);
-//             if (!candidate->Native.InitializeFabricWithPtrTable(
+//             if (!candidate->Native.InitializeFabric(
 //                     slot_count,
 //                     slot_cell_count
 //                 ))
@@ -770,7 +770,7 @@
 //         }
 
 //         std::shared_ptr<PythonAPC> resolved =
-//             snapshot.Epoch->Resolve(result.APCPtr_);
+//             snapshot.Epoch->Resolve(result.APC_);
 
 //         return resolved
 //             ? NavigationResult{NavigationStatus::FOUND, std::move(resolved)}
@@ -800,7 +800,7 @@
 //         }
 
 //         std::shared_ptr<PythonAPC> resolved =
-//             snapshot.Epoch->Resolve(result.APCPtr_);
+//             snapshot.Epoch->Resolve(result.APC_);
 
 //         return resolved
 //             ? NavigationResult{NavigationStatus::FOUND, std::move(resolved)}
@@ -1387,7 +1387,7 @@
 
 //         py::class_<NavigationResult>(module, "RelationOparation")
 //             .def_readonly("MutationOP_", &NavigationResult::Status)
-//             .def_readonly("APCPtr_", &NavigationResult::APC)
+//             .def_readonly("APC_", &NavigationResult::APC)
 //             .def_property_readonly("status", [](const NavigationResult& self)
 //             {
 //                 return self.Status;
@@ -1512,8 +1512,8 @@
 //         fabric_class
 //             .def(py::init<>())
 //             .def(
-//                 "InitializeFabricWithPtrTable",
-//                 &PythonFabric::InitializeFabricWithPtrTable,
+//                 "InitializeFabric",
+//                 &PythonFabric::InitializeFabric,
 //                 py::arg("slot_count"),
 //                 py::arg("slot_cell_count") = MINIMUM_APC_CELL_COUNT,
 //                 py::call_guard<py::gil_scoped_release>()
@@ -1577,7 +1577,7 @@
 //         apc_class.attr("zero_region") = apc_class.attr("ZeroARegion");
 
 //         fabric_class.attr("initialize") =
-//             fabric_class.attr("InitializeFabricWithPtrTable");
+//             fabric_class.attr("InitializeFabric");
 //         fabric_class.attr("shutdown") = fabric_class.attr("ShutDownFabric");
 //         fabric_class.attr("is_active") = fabric_class.attr("IsFabricActive");
 

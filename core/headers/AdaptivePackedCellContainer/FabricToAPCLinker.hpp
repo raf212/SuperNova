@@ -6,6 +6,7 @@
 namespace BidirectionalInMemGraph
 {
 
+    class AdaptivePackedCellContainer;
 
     class FabricToAPCLinker 
     {
@@ -32,7 +33,7 @@ namespace BidirectionalInMemGraph
 
         struct RelationOparation 
         {
-            AdaptivePackedCellContainer* APCPtr_ = nullptr;
+            APCUseScope Use_{};
             uint32_t RelationLocator_ = UINT32_MAX;
             SeqLockedOperation MutationOP_ = SeqLockedOperation::NONE;
         };

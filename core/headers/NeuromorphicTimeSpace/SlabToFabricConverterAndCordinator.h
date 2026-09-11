@@ -19,13 +19,6 @@ namespace BidirectionalInMemGraph
         SD::RegionSchemaTable DefaultRegionTable_{};
         bool HasDefaultRegionTable_{false};
 
-        bool InitializeFabric(
-            uint32_t slot_count,
-            uint32_t slot_cell_count,
-            const SchemaDefinition::FabricRegionConfig& region_conf,
-            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
-        ) noexcept;
-
         void FreeRawPackedCells_(uint64_t*packed_cell_memory_ptr, size_t packed_cell_count) noexcept;
         void ResetScalarsofTheFabric_() noexcept;
 
@@ -56,6 +49,13 @@ namespace BidirectionalInMemGraph
                 ADS::IsValid32BitAPCUnit(PerAPCRuntimeCellCount_) &&
                 ADS::IsValid32BitAPCUnit(CountOfAPC_);
         }
+
+        bool InitializeFabric(
+            uint32_t slot_count,
+            uint32_t slot_cell_count,
+            const SchemaDefinition::FabricRegionConfig& region_conf,
+            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
+        ) noexcept;
         
     };
 

@@ -512,7 +512,7 @@ public:
             matrix_width
         };
 
-        if (!Fabric_.InitializeFabricWithPtrTable(
+        if (!Fabric_.InitializeFabric(
             FABRIC_SLOT_COUNT,
             SLOT_WORDS,
             region_config,
@@ -809,10 +809,10 @@ private:
     ReadResult Convert_(const Operation& operation) const noexcept
     {
         return ReadResult{
-            IndexOf_(operation.APCPtr_),
+            IndexOf_(operation.APC_),
             operation.RelationLocator_,
             operation.MutationOP_,
-            operation.APCPtr_ != nullptr
+            operation.Use_
         };
     }
 };
@@ -2136,7 +2136,7 @@ inline bool FabricConfigurationValidation() noexcept
     ) noexcept
     {
         VagueTemoraryPremativeFabric fabric{};
-        return fabric.InitializeFabricWithPtrTable(
+        return fabric.InitializeFabric(
             slot_count,
             slot_cells,
             config,
@@ -2180,7 +2180,7 @@ inline bool FabricConfigurationValidation() noexcept
 inline bool CreationValidationAndRollback() noexcept
 {
     VagueTemoraryPremativeFabric fabric{};
-    if (!fabric.InitializeFabricWithPtrTable(
+    if (!fabric.InitializeFabric(
         1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
     ))
     {
@@ -2321,7 +2321,7 @@ bool PrivateCase() noexcept
     VagueTemoraryPremativeFabric fabric{};
     AdaptivePackedCellContainer apc{};
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
         ) ||
         !CreateTyped<T>(fabric, apc, SD::SchemaProtocols::PRIVATE_REGION)
@@ -2363,7 +2363,7 @@ bool AtomicCase() noexcept
     VagueTemoraryPremativeFabric fabric{};
     AdaptivePackedCellContainer apc{};
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
         ) ||
         !CreateTyped<T>(fabric, apc, SD::SchemaProtocols::ATOMIC_WORD_ARRAY)
@@ -2423,7 +2423,7 @@ bool ImmutableCase() noexcept
     VagueTemoraryPremativeFabric fabric{};
     AdaptivePackedCellContainer apc{};
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
         ) ||
         !CreateTyped<T>(fabric, apc, SD::SchemaProtocols::IMMUTABLE_SNAPSHOT)
@@ -2475,7 +2475,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
 
     InspectableFabric fabric{};
     const SD::FabricRegionConfig config{active_mask, 0u, batch};
-    if (!fabric.InitializeFabricWithPtrTable(
+    if (!fabric.InitializeFabric(
         slot_count, MINIMUM_APC_CELL_COUNT, config, 2u
     ))
     {
@@ -2736,7 +2736,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
 inline bool SlotReuseClearsPayloadAndSchema() noexcept
 {
     InspectableFabric fabric{};
-    if (!fabric.InitializeFabricWithPtrTable(
+    if (!fabric.InitializeFabric(
         1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
     ))
     {
@@ -3052,7 +3052,7 @@ inline bool RetirementAndABA()
     AdaptivePackedCellContainer replacement{};
 
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 2u
         ) ||
         !CreateAtomic(fabric, parent) ||
