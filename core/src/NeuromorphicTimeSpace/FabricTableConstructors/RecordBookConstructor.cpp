@@ -55,7 +55,7 @@ namespace BidirectionalInMemGraph
     {
         const size_t base_idx = GetStartingOfAnyFabricTable_(table_class);
         if (
-            !APCDataStructure::IsValidFabricUnit(base_idx) || 
+            !ADS::IsValidFabricUnit(base_idx) || 
             (base_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > SlabCellCount_) ||
             begin >= end || end > SlabCellCount_
         )
@@ -86,7 +86,7 @@ namespace BidirectionalInMemGraph
         );
         if (
             !read_ok ||
-            !APCDataStructure::IsValidFabricUnit(record_map_begin)
+            !ADS::IsValidFabricUnit(record_map_begin)
         )
         {
             return FABRIC_CELL_SENTINAL;

@@ -112,12 +112,12 @@ namespace BidirectionalInMemGraph
 
         InitializationInProgress_.store(true, std::memory_order_release);
 
-        if (slot_count == UNSIGNED_ZERO || !APCDataStructure::IsValid32BitAPCUnit(slot_count))
+        if (slot_count == UNSIGNED_ZERO || !ADS::IsValid32BitAPCUnit(slot_count))
         {
             return false;
         }
         
-        if (!APCDataStructure::IsCapacityOfAPCValid(slot_cell_count))
+        if (!ADS::IsCapacityOfAPCValid(slot_cell_count))
         {
             return false;
         }
@@ -127,7 +127,7 @@ namespace BidirectionalInMemGraph
 
         if (
             active_mask == UNSIGNED_ZERO ||
-            (active_mask & static_cast<uint16_t>(~APCDataStructure::ValidRegionMask())) != UNSIGNED_ZERO ||
+            (active_mask & static_cast<uint16_t>(~ADS::ValidRegionMask())) != UNSIGNED_ZERO ||
             active_count == UNSIGNED_ZERO ||
             region_conf.BatchCapacity == UNSIGNED_ZERO ||
             slot_cell_count % SD::REGION_ALIGNMENT_CELLS != UNSIGNED_ZERO
@@ -280,16 +280,42 @@ namespace BidirectionalInMemGraph
     
     void SlabToFabricConverterAndCordinator::ShutDownFabric() noexcept
     {
+        const bool was_active = FabricInitialized_.exchange(false, std::memory_order_acq_rel);
 
-        FabricInitialized_.store(false, std::memory_order_release);
+        if (was_active && SlabBasePtr_)
+        {
+            for (uint32_t slot = 0u; slot < CountOfAPC_; ++slot)
+            {
+                std::atomic_ref<uint64_t>(*GetAPCGenerationPtr_(slot)).fetch_or(
+                    HandleOfAPCStatic::CLOSED_MASK,
+                    std::memory_order_acq_rel
+                );
+            }
+
+            for (uint32_t slot = 0u; slot < CountOfAPC_; ++slot)
+            {
+                std::atomic_ref<uint64_t> control(*GetAPCGenerationPtr_(slot));
+                while (
+                    HandleOfAPCStatic::ReadControlCell(control.load(std::memory_order_acquire)).ActiveAccess != UNSIGNED_ZERO
+                )
+                {
+                    std::this_thread::yield();
+                }
+            }
+        }
+
         uint64_t* old_ptr = SlabBasePtr_;
         const size_t old_count = SlabCellCount_;
         SlabBasePtr_ = nullptr;
         SlabCellCount_ = UNSIGNED_ZERO;
+
         if (old_ptr)
         {
             FreeRawPackedCells_(old_ptr, old_count);
         }
+
+        CompiledDagTableBeginIdx_ = UNSIGNED_ZERO;
+        CompiledDagRevision_.fetch_add(1u, std::memory_order_release);
         ResetScalarsofTheFabric_();
     }
 

@@ -2,7 +2,7 @@
 
 namespace BidirectionalInMemGraph
 {
-    using EdgeTableRange = APCDataStructure::RangeOfAPC;
+    using EdgeTableRange = ADS::RangeOfAPC;
 
     EdgeTableConstructor::EdgeTableRange
     EdgeTableConstructor::ReadAnEdgeTableRange_(

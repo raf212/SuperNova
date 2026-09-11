@@ -7,7 +7,7 @@ namespace BidirectionalInMemGraph
     struct SchemaOrchestrator 
     {
 
-        static constexpr uint32_t REGION_ALIGNMENT_CELLS = static_cast<uint32_t>(APCDataStructure::APC_CACHELINE_SIZE / sizeof(std::uint64_t));
+        static constexpr uint32_t REGION_ALIGNMENT_CELLS = static_cast<uint32_t>(ADS::APC_CACHELINE_SIZE / sizeof(std::uint64_t));
         static constexpr uint64_t NO_POSITION = FABRIC_CELL_SENTINAL;
 
         enum class SchemaProtocols : uint8_t
@@ -49,7 +49,7 @@ namespace BidirectionalInMemGraph
 
         struct alignas(uint64_t) RegionSchemaRecord final
         {
-            uint32_t CellOffset = APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+            uint32_t CellOffset = ADS::APC_INDEX_BOUND_SENTINAL;
             uint32_t CellCount = UNSIGNED_ZERO;
             uint32_t MatrixHeight = UNSIGNED_ZERO;
             uint32_t MatrixWidth = UNSIGNED_ZERO;
@@ -76,7 +76,7 @@ namespace BidirectionalInMemGraph
             uint32_t BatchCapacity = UNSIGNED_ZERO;
         };
 
-        using RegionSchemaTable = std::array<RegionSchemaRecord, APCDataStructure::CountOfMacroColumn()>;
+        using RegionSchemaTable = std::array<RegionSchemaRecord, ADS::CountOfMacroColumn()>;
 
     };
     
@@ -285,7 +285,7 @@ namespace BidirectionalInMemGraph
             if (
                 !IsKnownSchemaFlags(schema.Flags) ||
                 HasSchemaFlag(schema.Flags, SchemaFlags::REGION_DISABLED) ||
-                schema.CellOffset < APCDataStructure::META_CELL_COUNT ||
+                schema.CellOffset < ADS::META_CELL_COUNT ||
                 schema.CellOffset % REGION_ALIGNMENT_CELLS != UNSIGNED_ZERO ||
                 schema.CellCount == UNSIGNED_ZERO ||
                 schema.CellOffset > apc_cell_count ||
@@ -383,12 +383,12 @@ namespace BidirectionalInMemGraph
         static constexpr uint16_t GetActiveMaskOfRegionTable_(const RegionSchemaTable& table) noexcept
         {
             uint16_t mask = UNSIGNED_ZERO;
-            for (uint8_t i = 0; i < APCDataStructure::CountOfMacroColumn(); i++)
+            for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
             {
                 const RegionSchemaRecord& schema = table[i];
                 if (!HasSchemaFlag(schema.Flags, SchemaFlags::REGION_DISABLED))
                 {
-                    mask = static_cast<uint16_t>(mask | APCDataStructure::RegionBit(static_cast<MacroColumnOfAPC>(i)));
+                    mask = static_cast<uint16_t>(mask | ADS::RegionBit(static_cast<MacroColumnOfAPC>(i)));
                 }
             }
             return mask;
@@ -396,8 +396,8 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint32_t RequiredCellsForSchemaTable_(const RegionSchemaTable& table) noexcept
         {
-            uint32_t cursor = AlignRegionCells(APCDataStructure::META_CELL_COUNT);
-            for (uint8_t i = 0; i < APCDataStructure::CountOfMacroColumn(); i++)
+            uint32_t cursor = AlignRegionCells(ADS::META_CELL_COUNT);
+            for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
             {
                 const RegionSchemaRecord& schema = table[i];
                 if (HasSchemaFlag(schema.Flags, SchemaFlags::REGION_DISABLED))
@@ -424,7 +424,7 @@ namespace BidirectionalInMemGraph
                 cursor = AlignRegionCells(MINIMUM_APC_CELL_COUNT);
             }
             
-            return APCDataStructure::IsCapacityOfAPCValid(cursor) ? cursor : UNSIGNED_ZERO;
+            return ADS::IsCapacityOfAPCValid(cursor) ? cursor : UNSIGNED_ZERO;
             
         }
 
@@ -520,7 +520,7 @@ namespace BidirectionalInMemGraph
         static constexpr void MakeDisabledSchemaTable(RegionSchemaTable& schema_table) noexcept
         {
             schema_table = RegionSchemaTable{};
-            for (uint8_t i = 0; i < APCDataStructure::CountOfMacroColumn(); i++)
+            for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
             {
                 RegionSchemaRecord& schema = schema_table[i];
                 schema.Region = static_cast<MacroColumnOfAPC>(i);

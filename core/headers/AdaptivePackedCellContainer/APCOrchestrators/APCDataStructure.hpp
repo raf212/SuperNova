@@ -6,6 +6,10 @@
 
 namespace BidirectionalInMemGraph
 {
+
+    class APCFinilizer;
+    class AdaptivePackedCellContainer;
+
     struct APCDataStructure 
     {
         enum class HeaderIdentifierOfAPC : uint8_t
@@ -18,7 +22,7 @@ namespace BidirectionalInMemGraph
             EOF_APC_HEADER                      = 7
         };
 
-        static constexpr uint8_t META_CELL_COUNT = static_cast<uint8_t>(APCDataStructure::HeaderIdentifierOfAPC::EOF_APC_HEADER) + 1u;
+        static constexpr uint8_t META_CELL_COUNT = static_cast<uint8_t>(HeaderIdentifierOfAPC::EOF_APC_HEADER) + 1u;
 
         static constexpr uint32_t BRANCH_MAGIC = 0x41504342u;//big-endian
         static constexpr uint32_t EOF_HEADER = 0x72616600;//big-endian
@@ -99,5 +103,68 @@ namespace BidirectionalInMemGraph
                 (value & 1u) == UNSIGNED_ZERO;
         }
 
+        struct CacheOfAPC
+        {
+            APCFinilizer* FabricOwnerPtr_{nullptr};
+            std::byte* RawAPCBasePtr_{nullptr};
+            uint32_t APCSlotIdx_{APCDataStructure::APC_INDEX_BOUND_SENTINAL};
+            uint64_t* APCGenerationCellPtr_{nullptr};
+            uint32_t ExpectedGeneration_{UNSIGNED_ZERO};
+        };
     };
+
+    using ADS = APCDataStructure;
+
+
+    class APCUseScope final
+    {
+        friend class FabricToAPCLinker;
+    private:
+        uint64_t* ControlCell_{nullptr};
+        explicit APCUseScope(uint64_t* control_cell) noexcept
+            : ControlCell_(control_cell)
+        {}
+    
+    public:
+        constexpr APCUseScope() noexcept = default;
+
+        APCUseScope(const APCUseScope&) = delete;
+        APCUseScope& operator = (const APCUseScope&) = delete;
+
+        APCUseScope(APCUseScope&& other) noexcept
+            :ControlCell_(std::exchange(other.ControlCell_, nullptr))
+        {}
+
+        APCUseScope& operator = (APCUseScope&& other) noexcept
+        {
+            if (this == &other)
+            {
+                return *this;
+            }
+            Release();
+            ControlCell_ = std::exchange(other.ControlCell_, nullptr);
+            return *this;
+        }
+
+        ~APCUseScope() noexcept
+        {
+            Release();
+        }
+
+        explicit constexpr operator bool() const noexcept
+        {
+            return ControlCell_ != nullptr;
+        }
+
+        void Release() noexcept
+        {
+            if (!ControlCell_)
+            {
+                return;
+            }
+            std::atomic_ref<uint64_t>(*ControlCell_).fetch_sub(1u, std::memory_order_release);
+            ControlCell_ = nullptr;
+        }
+    };
+    
 }

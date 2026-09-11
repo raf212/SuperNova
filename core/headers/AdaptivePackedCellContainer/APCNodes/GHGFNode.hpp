@@ -17,7 +17,7 @@ namespace BidirectionalInMemGraph
         std::optional<GM::GHGFNodeRole> IsLiveGHGFSlot_() noexcept
         {
             APCUseScope apc_use = AcquireAPCUse_();
-            return GHGFRole_();
+            return apc_use ?  GHGFRole_() : std::nullopt;
         }
 
         bool PredictGHGFNode_(uint32_t batch) noexcept;

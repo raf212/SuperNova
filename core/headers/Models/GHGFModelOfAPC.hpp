@@ -6,7 +6,7 @@
 namespace BidirectionalInMemGraph
 {
 
-    class GHGFModelConstructor : private VagueTemoraryPremativeFabric
+    class GHGFModelConstructor : private APCFinilizer
     {
         friend class GHGFNode;
     public:
@@ -38,7 +38,7 @@ namespace BidirectionalInMemGraph
     public :
 
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
-
+        
         bool ResetGHGFState() noexcept;
 
         bool CompileGHGFModel() noexcept;

@@ -8,7 +8,8 @@
 //   int main() { return APCDAGTests::RunAll(); }
 //
 // Add core/headers to the compiler include path and link the production .cpp files.
-// Tests 1-5 and 7 use only public APC/Fabric operations. Test 6 additionally uses
+// Tests 1-5 and 7 use only public APC/Fabric operations. The APC adapter resolves
+// returned nodes by slab slot identity; it never compares host-object addresses. Test 6 additionally uses
 // a read-only derived Fabric probe to verify the protected DEVICE_VIEW_TABLE ABI,
 // compact row geometry, Fabric metadata, and MPMC sequence-cell initialization.
 
@@ -42,7 +43,7 @@ using namespace BidirectionalInMemGraph;
 using Clock = std::chrono::steady_clock;
 using ReadOperation = FabricToAPCLinker::SeqLockedOperation;
 
-static_assert(APCDataStructure::META_CELL_COUNT == 8u);
+static_assert(ADS::META_CELL_COUNT == 8u);
 static_assert(sizeof(SchemaDefinition::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
 static_assert(alignof(SchemaDefinition::RegionSchemaRecord) == alignof(std::uint64_t));
 static_assert(std::is_trivially_copyable_v<SchemaDefinition::RegionSchemaRecord>);
@@ -109,12 +110,12 @@ struct ReadResult
     std::size_t Node = NO_NODE;
     std::uint32_t Locator = NO_LOCATOR;
     ReadOperation Outcome = ReadOperation::NONE;
-    bool PointerPresent = false;
+    bool NodePresent = false;
 
     bool IsFound() const noexcept
     {
         return Outcome == ReadOperation::FOUND &&
-            PointerPresent &&
+            NodePresent &&
             Node != NO_NODE &&
             Locator != NO_LOCATOR;
     }
@@ -122,7 +123,7 @@ struct ReadResult
     bool IsNone() const noexcept
     {
         return Outcome == ReadOperation::NONE &&
-            !PointerPresent &&
+            !NodePresent &&
             Node == NO_NODE &&
             Locator == NO_LOCATOR;
     }
@@ -130,7 +131,7 @@ struct ReadResult
     bool IsRetry() const noexcept
     {
         return Outcome == ReadOperation::RETRY &&
-            !PointerPresent &&
+            !NodePresent &&
             Node == NO_NODE &&
             Locator == NO_LOCATOR;
     }
@@ -484,7 +485,35 @@ private:
 
 // -----------------------------------------------------------------------------
 // Public APC/Fabric adapter for the completed DAG API.
+// No runtime pointer registry is used: read results are resolved from the
+// returned ephemeral APC facade by slab slot identity.
 // -----------------------------------------------------------------------------
+
+class TestAPC final : public AdaptivePackedCellContainer
+{
+public:
+    using RelationOperationForTest = FabricToAPCLinker::RelationOparation;
+
+    std::uint32_t GenerationForTest() noexcept
+    {
+        APCUseScope use = AcquireAPCUse_();
+        return use ? Cache_.ExpectedGeneration_ : 0u;
+    }
+};
+
+class ResolverTestFabric final : public APCFinilizer
+{
+public:
+    bool ResolveExistingForTest(
+        std::uint32_t slot,
+        AdaptivePackedCellContainer& apc,
+        APCUseScope& use,
+        std::optional<std::uint32_t> expected_generation = std::nullopt
+    ) noexcept
+    {
+        return GetExistingAPC_(slot, apc, use, expected_generation);
+    }
+};
 
 template <std::size_t NodeCount, std::size_t PayloadWords, std::uint8_t ParentCapacity>
 class APCFabricBackend
@@ -498,21 +527,21 @@ public:
 
     bool Initialize() noexcept
     {
-        Slots_.fill(APCDataStructure::APC_INDEX_BOUND_SENTINAL);
+        Slots_.fill(ADS::APC_INDEX_BOUND_SENTINAL);
 
         constexpr std::uint32_t matrix_width =
             PayloadWords == 0u ? 1u : static_cast<std::uint32_t>(PayloadWords);
 
         const SD::FabricRegionConfig region_config{
             static_cast<std::uint16_t>(
-                APCDataStructure::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
-                APCDataStructure::RegionBit(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE)
+                ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
+                ADS::RegionBit(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE)
             ),
             0u,
             matrix_width
         };
 
-        if (!Fabric_.InitializeFabricWithPtrTable(
+        if (!Fabric_.InitializeFabric(
             FABRIC_SLOT_COUNT,
             SLOT_WORDS,
             region_config,
@@ -652,11 +681,15 @@ public:
         {
             return {};
         }
-        return Convert_(Nodes_[child].FindParent(
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[child].FindParent(
             EdgeTableForAxis(axis),
             ordinal,
+            &operation,
             max_tries
-        ));
+        );
+        return Convert_(found, operation);
     }
 
     ReadResult FindFirstChild(
@@ -664,9 +697,18 @@ public:
         Axis axis,
         std::uint32_t max_tries = 1u) noexcept
     {
-        return parent < NodeCount
-            ? Convert_(Nodes_[parent].FindFirstChild(EdgeTableForAxis(axis), max_tries))
-            : ReadResult{};
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindFirstChild(
+            EdgeTableForAxis(axis),
+            &operation,
+            max_tries
+        );
+        return Convert_(found, operation);
     }
 
     ReadResult FindLastChild(
@@ -674,9 +716,18 @@ public:
         Axis axis,
         std::uint32_t max_tries = 1u) noexcept
     {
-        return parent < NodeCount
-            ? Convert_(Nodes_[parent].FindLastChild(EdgeTableForAxis(axis), max_tries))
-            : ReadResult{};
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindLastChild(
+            EdgeTableForAxis(axis),
+            &operation,
+            max_tries
+        );
+        return Convert_(found, operation);
     }
 
     ReadResult FindNextChild(
@@ -685,13 +736,19 @@ public:
         std::uint32_t locator,
         std::uint32_t max_tries = 1u) noexcept
     {
-        return parent < NodeCount
-            ? Convert_(Nodes_[parent].FindNextChild(
-                EdgeTableForAxis(axis),
-                locator,
-                max_tries
-            ))
-            : ReadResult{};
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindNextChild(
+            EdgeTableForAxis(axis),
+            locator,
+            &operation,
+            max_tries
+        );
+        return Convert_(found, operation);
     }
 
     ReadResult FindPreviousChild(
@@ -700,13 +757,19 @@ public:
         std::uint32_t locator,
         std::uint32_t max_tries = 1u) noexcept
     {
-        return parent < NodeCount
-            ? Convert_(Nodes_[parent].FindPreviousChild(
-                EdgeTableForAxis(axis),
-                locator,
-                max_tries
-            ))
-            : ReadResult{};
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindPreviousChild(
+            EdgeTableForAxis(axis),
+            locator,
+            &operation,
+            max_tries
+        );
+        return Convert_(found, operation);
     }
 
     bool StorePayload(
@@ -784,35 +847,45 @@ public:
         return Nodes_[index];
     }
 
-    VagueTemoraryPremativeFabric Fabric_{};
+    APCFinilizer Fabric_{};
 
 private:
-    std::array<AdaptivePackedCellContainer, NodeCount> Nodes_{};
+    std::array<TestAPC, NodeCount> Nodes_{};
     std::array<std::uint32_t, NodeCount> Slots_{};
     std::array<RegionView<std::uint64_t>, NodeCount> DirectViews_{};
     std::array<RegionView<std::uint64_t>, NodeCount> AtomicViews_{};
 
-    std::size_t IndexOf_(AdaptivePackedCellContainer* ptr) const noexcept
+    std::size_t IndexOfSlot_(std::uint32_t slot) const noexcept
     {
-        if (!ptr)
+        if (slot == ADS::APC_INDEX_BOUND_SENTINAL)
         {
             return ReadResult::NO_NODE;
         }
-        const AdaptivePackedCellContainer* first = Nodes_.data();
-        const AdaptivePackedCellContainer* last = first + Nodes_.size();
-        return ptr >= first && ptr < last
-            ? static_cast<std::size_t>(ptr - first)
-            : ReadResult::NO_NODE;
+
+        for (std::size_t i = 0u; i < NodeCount; ++i)
+        {
+            if (Slots_[i] == slot)
+            {
+                return i;
+            }
+        }
+        return ReadResult::NO_NODE;
     }
 
-    template <typename Operation>
-    ReadResult Convert_(const Operation& operation) const noexcept
+    ReadResult Convert_(
+        AdaptivePackedCellContainer& found,
+        const TestAPC::RelationOperationForTest& operation
+    ) const noexcept
     {
+        const std::uint32_t slot = found.GetThisSlotIdx();
+        const std::size_t node = IndexOfSlot_(slot);
+        const bool node_present = node != ReadResult::NO_NODE;
+
         return ReadResult{
-            IndexOf_(operation.APCPtr_),
+            node,
             operation.RelationLocator_,
             operation.MutationOP_,
-            operation.APCPtr_ != nullptr
+            node_present
         };
     }
 };
@@ -1893,13 +1966,13 @@ constexpr SD::FabricRegionConfig OneRegionConfig(
 ) noexcept
 {
     return SD::FabricRegionConfig{
-        APCDataStructure::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
+        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
         0u,
         batch_capacity
     };
 }
 
-class InspectableFabric final : public VagueTemoraryPremativeFabric
+class InspectableFabric final : public APCFinilizer
 {
 public:
     std::span<const SD::RegionSchemaRecord> SchemaRow(
@@ -1915,7 +1988,7 @@ public:
         std::uint32_t local_cell
     ) noexcept
     {
-        const APCDataStructure::RangeOfAPC range = GetSegmentPoolRange(slot);
+        const ADS::RangeOfAPC range = GetSegmentPoolRange(slot);
         if (
             !range.IsValid ||
             local_cell >= range.EndIndex - range.BeginIndex ||
@@ -1943,14 +2016,14 @@ public:
         ).load(std::memory_order_acquire);
     }
 
-    std::optional<APCDataStructure::RangeOfAPC> TableRange(FabricSegments table) noexcept
+    std::optional<ADS::RangeOfAPC> TableRange(FabricSegments table) noexcept
     {
         RecordBookConf::FabricSegmentBounds bounds{};
         if (!GetRecordMapCarrierRanges_(table, bounds) || !bounds.IsValid)
         {
             return std::nullopt;
         }
-        return APCDataStructure::RangeOfAPC{
+        return ADS::RangeOfAPC{
             static_cast<std::size_t>(bounds.BeginIndex),
             static_cast<std::size_t>(bounds.EndIndex),
             true
@@ -2024,7 +2097,7 @@ inline bool SchemaABIAndGeometry() noexcept
         return false;
     }
 
-    ordinary.CellOffset = APCDataStructure::META_CELL_COUNT;
+    ordinary.CellOffset = ADS::META_CELL_COUNT;
     const auto ordinary_bytes = SD::MatrixByteCount(ordinary);
     const auto ordinary_cells = SD::MatrixCellCount(ordinary);
     const auto ordinary_stride = SD::RecordStrideCells(ordinary);
@@ -2048,7 +2121,7 @@ inline bool SchemaABIAndGeometry() noexcept
         double_buffer,
         2u
     );
-    double_buffer.CellOffset = APCDataStructure::META_CELL_COUNT;
+    double_buffer.CellOffset = ADS::META_CELL_COUNT;
 
     SD::RegionSchemaRecord queue{};
     queue = ordinary;
@@ -2059,7 +2132,7 @@ inline bool SchemaABIAndGeometry() noexcept
         queue,
         4u
     );
-    queue.CellOffset = APCDataStructure::META_CELL_COUNT;
+    queue.CellOffset = ADS::META_CELL_COUNT;
 
     SD::RegionSchemaRecord invalid{};
     SD::RegionSchemaRecord invalid_1{};
@@ -2085,25 +2158,25 @@ inline bool SchemaABIAndGeometry() noexcept
         );
 
     constexpr std::uint16_t sparse_mask =
-        APCDataStructure::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
-        APCDataStructure::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
-        APCDataStructure::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT) |
-        APCDataStructure::RegionBit(MacroColumnOfAPC::HETEROGENOUS_PTR);
+        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
+        ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
+        ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT) |
+        ADS::RegionBit(MacroColumnOfAPC::HETEROGENOUS_PTR);
 
     const bool compact_ok =
-        APCDataStructure::CompactRegionIndex(
+        ADS::CompactRegionIndex(
             sparse_mask, MacroColumnOfAPC::FEEDFORWARD_MESSAGE
         ) == 0u &&
-        APCDataStructure::CompactRegionIndex(
+        ADS::CompactRegionIndex(
             sparse_mask, MacroColumnOfAPC::STATE_SLOT
         ) == 1u &&
-        APCDataStructure::CompactRegionIndex(
+        ADS::CompactRegionIndex(
             sparse_mask, MacroColumnOfAPC::WEIGHT_SLOT
         ) == 2u &&
-        APCDataStructure::CompactRegionIndex(
+        ADS::CompactRegionIndex(
             sparse_mask, MacroColumnOfAPC::HETEROGENOUS_PTR
         ) == 3u &&
-        !APCDataStructure::CompactRegionIndex(
+        !ADS::CompactRegionIndex(
             sparse_mask, MacroColumnOfAPC::ERROR_SLOT
         ).has_value();
 
@@ -2135,8 +2208,8 @@ inline bool FabricConfigurationValidation() noexcept
         std::uint8_t parents
     ) noexcept
     {
-        VagueTemoraryPremativeFabric fabric{};
-        return fabric.InitializeFabricWithPtrTable(
+        APCFinilizer fabric{};
+        return fabric.InitializeFabric(
             slot_count,
             slot_cells,
             config,
@@ -2148,13 +2221,13 @@ inline bool FabricConfigurationValidation() noexcept
     constexpr SD::FabricRegionConfig zero_mask{0u, 0u, VIEW_WIDTH};
     constexpr SD::FabricRegionConfig invalid_mask{
         static_cast<std::uint16_t>(
-            std::uint16_t{1u} << APCDataStructure::CountOfMacroColumn()
+            std::uint16_t{1u} << ADS::CountOfMacroColumn()
         ),
         0u,
         VIEW_WIDTH
     };
     constexpr SD::FabricRegionConfig zero_batch{
-        APCDataStructure::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
+        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
         0u,
         0u
     };
@@ -2172,15 +2245,15 @@ inline bool FabricConfigurationValidation() noexcept
             MINIMUM_APC_CELL_COUNT,
             valid,
             static_cast<std::uint8_t>(
-                APCDataStructure::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS + 1u
+                ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS + 1u
             )
         );
 }
 
 inline bool CreationValidationAndRollback() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
-    if (!fabric.InitializeFabricWithPtrTable(
+    APCFinilizer fabric{};
+    if (!fabric.InitializeFabric(
         1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
     ))
     {
@@ -2259,7 +2332,7 @@ inline bool CreationValidationAndRollback() noexcept
 
     const bool candidate_remained_unbound =
         !candidate.IsActiveAPC() &&
-        candidate.GetThisSlotIdx() == APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+        candidate.GetThisSlotIdx() == ADS::APC_INDEX_BOUND_SENTINAL;
 
     AdaptivePackedCellContainer valid_apc{};
     const bool slot_reusable =
@@ -2294,7 +2367,7 @@ using WrongType = std::conditional_t<std::is_same_v<T, float>, std::uint32_t, fl
 
 template <typename T>
 bool CreateTyped(
-    VagueTemoraryPremativeFabric& fabric,
+    APCFinilizer& fabric,
     AdaptivePackedCellContainer& apc,
     SD::SchemaProtocols region_protocol) noexcept
 {
@@ -2318,10 +2391,10 @@ bool CreateTyped(
 template <typename T>
 bool PrivateCase() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer apc{};
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
         ) ||
         !CreateTyped<T>(fabric, apc, SD::SchemaProtocols::PRIVATE_REGION)
@@ -2360,10 +2433,10 @@ bool PrivateCase() noexcept
 template <typename T>
 bool AtomicCase() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer apc{};
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
         ) ||
         !CreateTyped<T>(fabric, apc, SD::SchemaProtocols::ATOMIC_WORD_ARRAY)
@@ -2420,10 +2493,10 @@ bool AtomicCase() noexcept
 template <typename T>
 bool ImmutableCase() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer apc{};
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
         ) ||
         !CreateTyped<T>(fabric, apc, SD::SchemaProtocols::IMMUTABLE_SNAPSHOT)
@@ -2464,18 +2537,18 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     constexpr std::uint32_t batch = 4u;
     constexpr std::uint32_t slot_count = 3u;
     constexpr std::uint16_t active_mask =
-        APCDataStructure::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
-        APCDataStructure::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
-        APCDataStructure::RegionBit(MacroColumnOfAPC::ERROR_SLOT) |
-        APCDataStructure::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT) |
-        APCDataStructure::RegionBit(MacroColumnOfAPC::AUX_SLOT);
+        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
+        ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
+        ADS::RegionBit(MacroColumnOfAPC::ERROR_SLOT) |
+        ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT) |
+        ADS::RegionBit(MacroColumnOfAPC::AUX_SLOT);
     constexpr std::uint8_t active_count = 5u;
     constexpr std::uint16_t row_cells =
         active_count * static_cast<std::uint16_t>(SD::RegionSchemaCellCount());
 
     InspectableFabric fabric{};
     const SD::FabricRegionConfig config{active_mask, 0u, batch};
-    if (!fabric.InitializeFabricWithPtrTable(
+    if (!fabric.InitializeFabric(
         slot_count, MINIMUM_APC_CELL_COUNT, config, 2u
     ))
     {
@@ -2605,7 +2678,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     };
 
     bool row_ok = row.size() == active_count;
-    std::uint32_t expected_offset = APCDataStructure::META_CELL_COUNT;
+    std::uint32_t expected_offset = ADS::META_CELL_COUNT;
     for (std::size_t i = 0u; row_ok && i < row.size(); ++i)
     {
         expected_offset = SD::AlignRegionCells(expected_offset);
@@ -2629,19 +2702,19 @@ inline bool DeviceViewAndProtocolStorage() noexcept
             static_cast<std::uintptr_t>(row_cells) * sizeof(std::uint64_t) &&
         row[0u].MatrixHeight == 3u &&
         second_row[0u].MatrixHeight == 5u &&
-        row[0u].CellOffset == APCDataStructure::META_CELL_COUNT &&
-        second_row[0u].CellOffset == APCDataStructure::META_CELL_COUNT;
+        row[0u].CellOffset == ADS::META_CELL_COUNT &&
+        second_row[0u].CellOffset == ADS::META_CELL_COUNT;
 
     const bool header_ok =
         fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(APCDataStructure::HeaderIdentifierOfAPC::MAGIC_ID)
-        ) == APCDataStructure::BRANCH_MAGIC &&
+            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::MAGIC_ID)
+        ) == ADS::BRANCH_MAGIC &&
         fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(APCDataStructure::HeaderIdentifierOfAPC::APC_SLOT_IDX)
+            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::APC_SLOT_IDX)
         ) == slot &&
         fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(APCDataStructure::HeaderIdentifierOfAPC::EOF_APC_HEADER)
-        ) == APCDataStructure::EOF_HEADER;
+            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::EOF_APC_HEADER)
+        ) == ADS::EOF_HEADER;
 
     bool queue_storage_ok = row_ok;
     if (queue_storage_ok)
@@ -2736,7 +2809,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
 inline bool SlotReuseClearsPayloadAndSchema() noexcept
 {
     InspectableFabric fabric{};
-    if (!fabric.InitializeFabricWithPtrTable(
+    if (!fabric.InitializeFabric(
         1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
     ))
     {
@@ -3015,14 +3088,14 @@ inline bool MixedAxisStress(std::uint64_t& retries_out)
 constexpr SchemaDefinition::FabricRegionConfig AtomicRegionConfig() noexcept
 {
     return SchemaDefinition::FabricRegionConfig{
-        APCDataStructure::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
+        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
         0u,
         8u
     };
 }
 
 inline bool CreateAtomic(
-    VagueTemoraryPremativeFabric& fabric,
+    APCFinilizer& fabric,
     AdaptivePackedCellContainer& apc) noexcept
 {
     SchemaDefinition::RegionSchemaTable schemas{};
@@ -3046,13 +3119,13 @@ inline bool CreateAtomic(
 
 inline bool RetirementAndABA()
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer parent{};
     AdaptivePackedCellContainer child{};
     AdaptivePackedCellContainer replacement{};
 
     if (
-        !fabric.InitializeFabricWithPtrTable(
+        !fabric.InitializeFabric(
             2u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 2u
         ) ||
         !CreateAtomic(fabric, parent) ||
@@ -3103,6 +3176,163 @@ inline bool RetirementAndABA()
     return parent.Retire() && replacement.Retire();
 }
 
+inline bool ShutdownDrainsOutstandingView()
+{
+    ResolverTestFabric fabric{};
+    TestAPC apc{};
+
+    if (
+        !fabric.InitializeFabric(
+            1u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 2u
+        ) ||
+        !CreateAtomic(fabric, apc)
+    )
+    {
+        return false;
+    }
+
+    auto held_view = apc.BuildAViewOverRegion<std::uint64_t>(
+        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+    );
+    if (!held_view.has_value())
+    {
+        return false;
+    }
+
+    std::atomic<bool> finished{false};
+    std::thread shutdown([&]() noexcept
+    {
+        fabric.ShutDownFabric();
+        finished.store(true, std::memory_order_release);
+    });
+
+    for (std::uint32_t spins = 0u; spins < 100'000u && fabric.IsFabricActive(); ++spins)
+    {
+        PerturbSchedule(spins);
+    }
+
+    const bool entered_shutdown = !fabric.IsFabricActive();
+    const bool correctly_waiting =
+        entered_shutdown && !finished.load(std::memory_order_acquire);
+
+    held_view.reset();
+    shutdown.join();
+
+    return correctly_waiting &&
+        finished.load(std::memory_order_acquire) &&
+        !fabric.IsFabricActive();
+}
+
+inline bool DirectResolverAndABA()
+{
+    ResolverTestFabric fabric{};
+    TestAPC original{};
+    TestAPC replacement{};
+
+    if (
+        !fabric.InitializeFabric(
+            1u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 2u
+        ) ||
+        !CreateAtomic(fabric, original)
+    )
+    {
+        return false;
+    }
+
+    const std::uint32_t slot = original.GetThisSlotIdx();
+    const std::uint32_t generation_one = original.GenerationForTest();
+    if (
+        slot == ADS::APC_INDEX_BOUND_SENTINAL ||
+        !HandleOfAPCStatic::IsGenerationValid(generation_one)
+    )
+    {
+        return false;
+    }
+
+    {
+        AdaptivePackedCellContainer current{};
+        APCUseScope current_use{};
+        if (
+            !fabric.ResolveExistingForTest(slot, current, current_use) ||
+            current.GetThisSlotIdx() != slot
+        )
+        {
+            return false;
+        }
+    }
+
+    {
+        AdaptivePackedCellContainer exact{};
+        APCUseScope exact_use{};
+        if (
+            !fabric.ResolveExistingForTest(
+                slot, exact, exact_use, generation_one
+            ) ||
+            exact.GetThisSlotIdx() != slot
+        )
+        {
+            return false;
+        }
+    }
+
+    if (
+        !original.Retire() ||
+        !CreateAtomic(fabric, replacement) ||
+        replacement.GetThisSlotIdx() != slot
+    )
+    {
+        return false;
+    }
+
+    const std::uint32_t generation_two = replacement.GenerationForTest();
+    if (
+        !HandleOfAPCStatic::IsGenerationValid(generation_two) ||
+        generation_two == generation_one
+    )
+    {
+        return false;
+    }
+
+    {
+        AdaptivePackedCellContainer stale{};
+        APCUseScope stale_use{};
+        if (fabric.ResolveExistingForTest(
+            slot, stale, stale_use, generation_one
+        ))
+        {
+            return false;
+        }
+    }
+
+    {
+        AdaptivePackedCellContainer current{};
+        APCUseScope current_use{};
+        if (
+            !fabric.ResolveExistingForTest(slot, current, current_use) ||
+            current.GetThisSlotIdx() != slot
+        )
+        {
+            return false;
+        }
+    }
+
+    {
+        AdaptivePackedCellContainer exact{};
+        APCUseScope exact_use{};
+        if (
+            !fabric.ResolveExistingForTest(
+                slot, exact, exact_use, generation_two
+            ) ||
+            exact.GetThisSlotIdx() != slot
+        )
+        {
+            return false;
+        }
+    }
+
+    return replacement.Retire();
+}
+
 inline Result Run()
 {
     Banner("TEST 7 - CONCURRENT H/V DAG MUTATION + RETIREMENT / ABA");
@@ -3110,13 +3340,17 @@ inline Result Run()
     const bool race_ok = FixedOrderRace();
     const bool stress_ok = MixedAxisStress(mixed_retries);
     const bool retirement_ok = RetirementAndABA();
-    const bool ok = race_ok && stress_ok && retirement_ok;
+    const bool resolver_ok = DirectResolverAndABA();
+    const bool shutdown_ok = ShutdownDrainsOutstandingView();
+    const bool ok = race_ok && stress_ok && retirement_ok && resolver_ok && shutdown_ok;
 
     std::cout
         << "  A--H-->B raced with illegal B--V-->A : " << (race_ok ? "PASS" : "FAIL") << '\n'
         << "  shared-parent mixed H/V stress       : " << (stress_ok ? "PASS" : "FAIL") << '\n'
         << "  transaction retries observed         : " << mixed_retries << '\n'
         << "  linked/pinned retirement + ABA reuse : " << (retirement_ok ? "PASS" : "FAIL") << '\n'
+        << "  direct slot/generation resolver + ABA: " << (resolver_ok ? "PASS" : "FAIL") << '\n'
+        << "  shutdown drains outstanding RegionView: " << (shutdown_ok ? "PASS" : "FAIL") << '\n'
         << "\nTEST 7 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n';
 
     return ok ? Result::PASS : Result::FAIL;

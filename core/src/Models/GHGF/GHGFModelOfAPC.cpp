@@ -65,7 +65,7 @@ namespace BidirectionalInMemGraph
         HasDefaultRegionTable_ = true;
 
         if (
-            !InitializeFabricWithPtrTable(
+            !InitializeFabric(
                 slot_count,
                 profile.RequiredAPCCells,
                 profile.FabricConfig,
@@ -124,7 +124,7 @@ namespace BidirectionalInMemGraph
         {
             if (!CreateNodeOfGHGF(model_values.APCNodes[i], model_values.RoleSpan[i]))
             {
-                ShutDownFabricWithPtrTable();
+                ShutDownFabric();
                 return false;
             }
         }
@@ -133,14 +133,14 @@ namespace BidirectionalInMemGraph
         {
             if (!ConnectGHGFParent(connection))
             {
-                ShutDownFabricWithPtrTable();
+                ShutDownFabric();
                 return false;
             }
         }
         
         if (!CompileGHGFModel() ||!ResetGHGFState())
         {
-            ShutDownFabricWithPtrTable();
+            ShutDownFabric();
             return false;
         }
         return true;

@@ -19,13 +19,6 @@ namespace BidirectionalInMemGraph
         SD::RegionSchemaTable DefaultRegionTable_{};
         bool HasDefaultRegionTable_{false};
 
-        bool InitializeFabric(
-            uint32_t slot_count,
-            uint32_t slot_cell_count,
-            const SchemaDefinition::FabricRegionConfig& region_conf,
-            uint8_t max_direct_parent_per_axis = APCDataStructure::DEFAULT_DIRECTED_PARENT_PER_AXIS
-        ) noexcept;
-
         void FreeRawPackedCells_(uint64_t*packed_cell_memory_ptr, size_t packed_cell_count) noexcept;
         void ResetScalarsofTheFabric_() noexcept;
 
@@ -53,9 +46,16 @@ namespace BidirectionalInMemGraph
             return
                 FabricInitialized_.load(std::memory_order_acquire) &&
                 SlabBasePtr_ &&
-                APCDataStructure::IsValid32BitAPCUnit(PerAPCRuntimeCellCount_) &&
-                APCDataStructure::IsValid32BitAPCUnit(CountOfAPC_);
+                ADS::IsValid32BitAPCUnit(PerAPCRuntimeCellCount_) &&
+                ADS::IsValid32BitAPCUnit(CountOfAPC_);
         }
+
+        bool InitializeFabric(
+            uint32_t slot_count,
+            uint32_t slot_cell_count,
+            const SchemaDefinition::FabricRegionConfig& region_conf,
+            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
+        ) noexcept;
         
     };
 
@@ -69,7 +69,7 @@ namespace BidirectionalInMemGraph
 
         struct DAGRowParticipant
         {
-            uint32_t Slot = APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+            uint32_t Slot = ADS::APC_INDEX_BOUND_SENTINAL;
             EdgeBuilder::EdgeData Before{};
             uint32_t WorkTail = EdgeBuilder::RELATION_NULL;
             bool IsParentAnchor = false;
@@ -78,7 +78,7 @@ namespace BidirectionalInMemGraph
 
         struct DAGRelationDelta
         {
-            uint32_t ChildSlot = APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+            uint32_t ChildSlot = ADS::APC_INDEX_BOUND_SENTINAL;
             uint8_t Ordinal = INVALID_RELATION_ORDINAL;
             EdgeBuilder::ParentRelation Before{};
             EdgeBuilder::ParentRelation Work{};
@@ -208,22 +208,6 @@ namespace BidirectionalInMemGraph
 
     };
 
-    class APCFinilizer : public ConstructDAGOnEachAxis
-    {
-        friend class AdaptivePackedCellContainer;
-    private:
-        bool RetireAPC_(
-            uint32_t slot,
-            uint32_t generation,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
-        ) noexcept;
 
-    protected:
-
-        bool ReclaimRetiredSlotTemp_(uint32_t slot) noexcept;
-
-        constexpr bool IsNodePolicyReConfigurable_(const SD::RegionSchemaTable& table) noexcept;
-
-    };
 
 }

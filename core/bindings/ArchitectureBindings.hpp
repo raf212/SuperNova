@@ -13,7 +13,7 @@
 // #include <utility>
 // #include <vector>
 
-// #include "../headers/NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+// #include "../headers/NeuromorphicTimeSpace/APCFinilizer.hpp"
 
 // namespace py = pybind11;
 
@@ -22,7 +22,7 @@
 //     using namespace BidirectionalInMemGraph;
 
 //     using NativeAPC = AdaptivePackedCellContainer;
-//     using NativeFabric = VagueTemoraryPremativeFabric;
+//     using NativeFabric = APCFinilizer;
 //     using IAB = InstallAxisToBuffer;
 //     using Axis = IAB::BidirectionalAxis;
 //     using Inheritance = IAB::DescOfInharitance;
@@ -81,7 +81,7 @@
 //     struct APCBinding final
 //     {
 //         std::weak_ptr<FabricEpoch> Epoch{};
-//         uint32_t Slot{APCDataStructure::APC_INDEX_BOUND_SENTINAL};
+//         uint32_t Slot{ADS::APC_INDEX_BOUND_SENTINAL};
 //         BindingPhase Phase{BindingPhase::DETACHED};
 //         APCBinding* Next{nullptr};
 //     };
@@ -219,7 +219,7 @@
 //                 )
 //             )
 //             {
-//                 return APCDataStructure::APC_INDEX_BOUND_SENTINAL;
+//                 return ADS::APC_INDEX_BOUND_SENTINAL;
 //             }
 //             return binding->Slot;
 //         }
@@ -303,7 +303,7 @@
 //         // Native memory is released only after every operation/view that held
 //         // this epoch has finished. Retained handles keep their native wrappers
 //         // alive until after the raw-pointer table and slab have shut down.
-//         Native.ShutDownFabricWithPtrTable();
+//         Native.ShutDownFabric();
 
 //         for (uint32_t slot = 0u; slot < SlotCount; ++slot)
 //         {
@@ -394,7 +394,7 @@
 //             ShutDownFabric();
 //         }
 
-//         bool InitializeFabricWithPtrTable(
+//         bool InitializeFabric(
 //             uint32_t slot_count,
 //             uint32_t slot_cell_count = MINIMUM_APC_CELL_COUNT
 //         )
@@ -408,7 +408,7 @@
 //             }
 
 //             auto candidate = std::make_shared<FabricEpoch>(slot_count);
-//             if (!candidate->Native.InitializeFabricWithPtrTable(
+//             if (!candidate->Native.InitializeFabric(
 //                     slot_count,
 //                     slot_cell_count
 //                 ))
@@ -770,7 +770,7 @@
 //         }
 
 //         std::shared_ptr<PythonAPC> resolved =
-//             snapshot.Epoch->Resolve(result.APCPtr_);
+//             snapshot.Epoch->Resolve(result.APC_);
 
 //         return resolved
 //             ? NavigationResult{NavigationStatus::FOUND, std::move(resolved)}
@@ -800,7 +800,7 @@
 //         }
 
 //         std::shared_ptr<PythonAPC> resolved =
-//             snapshot.Epoch->Resolve(result.APCPtr_);
+//             snapshot.Epoch->Resolve(result.APC_);
 
 //         return resolved
 //             ? NavigationResult{NavigationStatus::FOUND, std::move(resolved)}
@@ -1387,7 +1387,7 @@
 
 //         py::class_<NavigationResult>(module, "RelationOparation")
 //             .def_readonly("MutationOP_", &NavigationResult::Status)
-//             .def_readonly("APCPtr_", &NavigationResult::APC)
+//             .def_readonly("APC_", &NavigationResult::APC)
 //             .def_property_readonly("status", [](const NavigationResult& self)
 //             {
 //                 return self.Status;
@@ -1506,14 +1506,14 @@
 
 //         py::class_<PythonFabric, std::shared_ptr<PythonFabric>> fabric_class(
 //             module,
-//             "VagueTemoraryPremativeFabric"
+//             "APCFinilizer"
 //         );
 
 //         fabric_class
 //             .def(py::init<>())
 //             .def(
-//                 "InitializeFabricWithPtrTable",
-//                 &PythonFabric::InitializeFabricWithPtrTable,
+//                 "InitializeFabric",
+//                 &PythonFabric::InitializeFabric,
 //                 py::arg("slot_count"),
 //                 py::arg("slot_cell_count") = MINIMUM_APC_CELL_COUNT,
 //                 py::call_guard<py::gil_scoped_release>()
@@ -1524,7 +1524,7 @@
 //                 py::call_guard<py::gil_scoped_release>()
 //             )
 //             .def(
-//                 "ShutDownFabricWithPtrTable",
+//                 "ShutDownFabric",
 //                 &PythonFabric::ShutDownFabric,
 //                 py::call_guard<py::gil_scoped_release>()
 //             )
@@ -1538,7 +1538,7 @@
 //                 py::arg("layout") = Layout{},
 //                 py::arg("dtype") = DataTypes{},
 //                 py::arg("protocol") = Protocols{},
-//                 py::arg("version") = APCDataStructure::BRANCH_VERSION,
+//                 py::arg("version") = ADS::BRANCH_VERSION,
 //                 py::arg("internal_max_tries") = DEFAULT_MAX_TRIES,
 //                 py::call_guard<py::gil_scoped_release>()
 //             )
@@ -1550,7 +1550,7 @@
 //                 py::arg("layout") = Layout{},
 //                 py::arg("dtype") = DataTypes{},
 //                 py::arg("protocol") = Protocols{},
-//                 py::arg("version") = APCDataStructure::BRANCH_VERSION,
+//                 py::arg("version") = ADS::BRANCH_VERSION,
 //                 py::arg("internal_max_tries") = DEFAULT_MAX_TRIES,
 //                 py::call_guard<py::gil_scoped_release>()
 //             );
@@ -1577,12 +1577,12 @@
 //         apc_class.attr("zero_region") = apc_class.attr("ZeroARegion");
 
 //         fabric_class.attr("initialize") =
-//             fabric_class.attr("InitializeFabricWithPtrTable");
+//             fabric_class.attr("InitializeFabric");
 //         fabric_class.attr("shutdown") = fabric_class.attr("ShutDownFabric");
 //         fabric_class.attr("is_active") = fabric_class.attr("IsFabricActive");
 
 //         module.attr("APC") = module.attr("AdaptivePackedCellContainer");
-//         module.attr("Fabric") = module.attr("VagueTemoraryPremativeFabric");
+//         module.attr("Fabric") = module.attr("APCFinilizer");
 //         module.attr("Axis") = module.attr("BidirectionalAxis");
 //         module.attr("Inheritance") = module.attr("DescOfInharitance");
 //         module.attr("NavigationStatus") = module.attr("SeqLockedOperation");
@@ -1590,7 +1590,7 @@
 //         module.attr("RegionDataType") = module.attr("DataTypeOfMacroColumn");
 //         module.attr("DEFAULT_MAX_TRIES") = py::int_(DEFAULT_MAX_TRIES);
 //         module.attr("BRANCH_VERSION") =
-//             py::int_(APCDataStructure::BRANCH_VERSION);
+//             py::int_(ADS::BRANCH_VERSION);
 //         module.attr("MINIMUM_APC_CELL_COUNT") =
 //             py::int_(MINIMUM_APC_CELL_COUNT);
 //     }

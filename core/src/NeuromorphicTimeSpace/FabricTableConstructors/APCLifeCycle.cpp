@@ -3,9 +3,9 @@
 namespace BidirectionalInMemGraph
 {
 
-    APCDataStructure::RangeOfAPC APCLifeCycle::GetSegmentPoolRange(uint64_t single_description_index) noexcept
+    ADS::RangeOfAPC APCLifeCycle::GetSegmentPoolRange(uint64_t single_description_index) noexcept
     {
-        APCDataStructure::RangeOfAPC desired_segment_pool_range{};
+        ADS::RangeOfAPC desired_segment_pool_range{};
 
         if (
             single_description_index >= CountOfAPC_ ||
@@ -70,8 +70,8 @@ namespace BidirectionalInMemGraph
             uint64_t updated_id_state_value = DSA::ComposeSeqLockAndState(updated_files);
 
             if (
-                !APCDataStructure::IsValidFabricUnit(current_id_state_value) ||
-                !APCDataStructure::IsValidFabricUnit(updated_id_state_value) ||
+                !ADS::IsValidFabricUnit(current_id_state_value) ||
+                !ADS::IsValidFabricUnit(updated_id_state_value) ||
                 current_id_st.StateOfTheAPC != desired_state ||
                 !DSA::IsTransitionStateLeagal(current_id_st.StateOfTheAPC, updated_state)
             )
@@ -97,14 +97,14 @@ namespace BidirectionalInMemGraph
 
     std::optional<uint64_t> APCLifeCycle::GetDescriptionLockIdxInFabric_(uint64_t description_idx) noexcept
     {
-        const APCDataStructure::RangeOfAPC range_of_segmentpool = GetSegmentPoolRange(description_idx);
+        const ADS::RangeOfAPC range_of_segmentpool = GetSegmentPoolRange(description_idx);
 
         if (!range_of_segmentpool.IsValid)
         {
             return std::nullopt;
         }
         const size_t state_cell_idx = range_of_segmentpool.BeginIndex + 
-            static_cast<uint8_t>(APCDataStructure::HeaderIdentifierOfAPC::APC_LIFE_CYCLE);
+            static_cast<uint8_t>(ADS::HeaderIdentifierOfAPC::APC_LIFE_CYCLE);
         
         return state_cell_idx;
     }
@@ -125,7 +125,7 @@ namespace BidirectionalInMemGraph
 
             const uint64_t raw_lifecycle = DSA::ComposeSeqLockAndState(values);
             
-            if (!APCDataStructure::IsValidFabricUnit(raw_lifecycle))
+            if (!ADS::IsValidFabricUnit(raw_lifecycle))
             {
                 return;
             }

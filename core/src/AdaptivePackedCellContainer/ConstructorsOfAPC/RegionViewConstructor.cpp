@@ -14,31 +14,35 @@ namespace BidirectionalInMemGraph
         using SD = SchemaDefinition;
         using ASG = APCStorageGeometry;
 
+        std::span<SchemaDefinition::RegionSchemaRecord> region_row = Cache_.FabricOwnerPtr_->MetrixViewRow_(
+            static_cast<uint32_t>(Cache_.APCSlotIdx_)
+        );
+
         out = ResolveRegionBiteView{};
         if (
             !IsActiveAPC() ||
-            !RawAPCBasePtr_  ||
-            !MatrixOfSchemaRowPtr_
+            !Cache_.RawAPCBasePtr_  ||
+            region_row.size() != Cache_.FabricOwnerPtr_->ActiveRegionCount_
         )
         {
             return false;
         }
 
-        const std::optional<uint8_t> compact_index = APCDataStructure::CompactRegionIndex(ActiveRegionMask_, column);
+        const std::optional<uint8_t> compact_index = ADS::CompactRegionIndex(Cache_.FabricOwnerPtr_->ActiveRegionMask_, column);
         if (!compact_index.has_value())
         {
             return false;
         }
         
 
-        const SD::RegionSchemaRecord& stored = MatrixOfSchemaRowPtr_[compact_index.value()];
+        const SD::RegionSchemaRecord& stored = region_row[compact_index.value()];
 
         if (
             stored.Region != column ||
             !SD::ValidateStortedRegionSchema(
                 stored,
-                CapacityOfThisAPC_,
-                RegionBatchCapacity_
+                Cache_.FabricOwnerPtr_->PerAPCRuntimeCellCount_,
+                Cache_.FabricOwnerPtr_->MatrixBatchCapacity_
             )
         )
         {
@@ -64,15 +68,15 @@ namespace BidirectionalInMemGraph
         const uint64_t local_data_cell = static_cast<uint64_t>(stored.CellOffset) + (static_cast<std::uint64_t>(record_ordinal) * stride_cells.value());
 
         if (
-            local_data_cell >= CapacityOfThisAPC_ ||
-            matrix_cells.value() > CapacityOfThisAPC_ - local_data_cell
+            local_data_cell >= Cache_.FabricOwnerPtr_->PerAPCRuntimeCellCount_ ||
+            matrix_cells.value() > Cache_.FabricOwnerPtr_->PerAPCRuntimeCellCount_ - local_data_cell
         )
         {
             return false;
         }
         
         out.Bytes = std::span<std::byte>(
-            RawAPCBasePtr_ + (static_cast<size_t>(local_data_cell) * sizeof(uint64_t)),
+            Cache_.RawAPCBasePtr_ + (static_cast<size_t>(local_data_cell) * sizeof(uint64_t)),
             static_cast<size_t>(matrix_bytes.value())
         );
         out.Schema = &stored;

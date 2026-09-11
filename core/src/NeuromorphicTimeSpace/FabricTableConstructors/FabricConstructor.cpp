@@ -277,7 +277,7 @@ namespace BidirectionalInMemGraph
         std::atomic_ref<const uint64_t> fab_u64_ref(SlabBasePtr_[first_free]);
         uint64_t first_free_apc = fab_u64_ref.load(std::memory_order_acquire);
 
-        if (!APCDataStructure::IsValid32BitAPCUnit(first_free_apc))
+        if (!ADS::IsValid32BitAPCUnit(first_free_apc))
         {
             return std::nullopt;
         }
