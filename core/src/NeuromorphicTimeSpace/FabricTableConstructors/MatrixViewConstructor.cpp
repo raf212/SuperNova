@@ -8,33 +8,33 @@ namespace BidirectionalInMemGraph
     {
         if (
             !SlabBasePtr_ ||
-            apc_slot >= CountOfAPC_ ||
-            ActiveRegionCount_ == UNSIGNED_ZERO ||
-            MatrixViewRowCellCount_ != ActiveRegionCount_ * SD::RegionSchemaCellCount()
+            apc_slot >= FVolatileCache_.CountOfAPC_ ||
+            FVolatileCache_.ActiveRegionCount_ == UNSIGNED_ZERO ||
+            FVolatileCache_.MatrixViewRowCellCount_ != FVolatileCache_.ActiveRegionCount_ * SD::RegionSchemaCellCount()
         )
         {
             return {};
         }
 
-        std::byte* table_bytes = reinterpret_cast<std::byte*>(SlabBasePtr_ + MatrixViewTableBeginIndex_);
+        std::byte* table_bytes = reinterpret_cast<std::byte*>(SlabBasePtr_ + FVolatileCache_.MatrixViewTableBeginIndex_);
 
-        const size_t row_byte_offset = static_cast<size_t>(apc_slot) * MatrixViewRowCellCount_ * sizeof(uint64_t);
+        const size_t row_byte_offset = static_cast<size_t>(apc_slot) * FVolatileCache_.MatrixViewRowCellCount_ * sizeof(uint64_t);
 
         SD::RegionSchemaRecord* row = std::launder(reinterpret_cast<SD::RegionSchemaRecord*>(table_bytes + row_byte_offset));
 
-        return std::span<SD::RegionSchemaRecord>(row, ActiveRegionCount_);
+        return std::span<SD::RegionSchemaRecord>(row, FVolatileCache_.ActiveRegionCount_);
     }
 
     bool MatrixViewConstructor::ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept
     {
-        const size_t total_records = static_cast<size_t>(CountOfAPC_) * ActiveRegionCount_;
+        const size_t total_records = static_cast<size_t>(FVolatileCache_.CountOfAPC_) * FVolatileCache_.ActiveRegionCount_;
         const size_t required_cells = total_records * SD::RegionSchemaCellCount();
 
         if (
             !SlabBasePtr_ ||
             table_begin >= table_end ||
             table_end - table_begin != required_cells ||
-            table_end > SlabCellCount_
+            table_end > FVolatileCache_.SlabCellCount_
         )
         {
             return false;
@@ -55,7 +55,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         std::span<SD::RegionSchemaRecord> destination = MetrixViewRow_(apc_slot);
-        if (destination.size() != ActiveRegionCount_)
+        if (destination.size() != FVolatileCache_.ActiveRegionCount_)
         {
             return false;
         }
@@ -87,7 +87,7 @@ namespace BidirectionalInMemGraph
 
             if (
                 SD::HasSchemaFlag(record.Flags, SD::SchemaFlags::BATCHED_LAST_DIM) &&
-                record.MatrixWidth != MatrixBatchCapacity_
+                record.MatrixWidth != FVolatileCache_.MatrixBatchCapacity_
             )
             {
                 return false;
@@ -100,8 +100,8 @@ namespace BidirectionalInMemGraph
 
             if (!SD::ValidateStortedRegionSchema(
                 record,
-                PerAPCRuntimeCellCount_,
-                MatrixBatchCapacity_
+                FVolatileCache_.PerAPCRuntimeCellCount_,
+                FVolatileCache_.MatrixBatchCapacity_
             ))
             {
                 return false;
@@ -113,8 +113,8 @@ namespace BidirectionalInMemGraph
         }
         
         if (
-            observed_mask != ActiveRegionMask_ ||
-            prepared_count != ActiveRegionCount_
+            observed_mask != FVolatileCache_.ActiveRegionMask_ ||
+            prepared_count != FVolatileCache_.ActiveRegionCount_
         )
         {
             return false;
@@ -137,14 +137,14 @@ namespace BidirectionalInMemGraph
 
     bool MatrixViewConstructor::InitializeRegionProtocolStorage_(uint32_t apc_slot) noexcept
     {
-        if (apc_slot >= CountOfAPC_)
+        if (apc_slot >= FVolatileCache_.CountOfAPC_)
         {
             return false;
         }
 
-        const size_t apc_begin = SegmentPoolBegin_ +  static_cast<size_t>(apc_slot) * PerAPCRuntimeCellCount_;
+        const size_t apc_begin = FVolatileCache_.SegmentPoolBegin_ +  static_cast<size_t>(apc_slot) * FVolatileCache_.PerAPCRuntimeCellCount_;
         std::span<SD::RegionSchemaRecord> row = MetrixViewRow_(apc_slot);
-        if (row.size() != ActiveRegionCount_)
+        if (row.size() != FVolatileCache_.ActiveRegionCount_)
         {
             return false;
         }
@@ -176,7 +176,7 @@ namespace BidirectionalInMemGraph
             {
                 const std::size_t sequense_cell = apc_begin + schema.CellOffset + 
                     (static_cast<size_t>(i) * stride_cells.value()) + matrix_cells.value();
-                if (sequense_cell >= SlabCellCount_)
+                if (sequense_cell >= FVolatileCache_.SlabCellCount_)
                 {
                     return false;
                 }

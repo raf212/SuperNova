@@ -497,7 +497,7 @@ public:
     std::uint32_t GenerationForTest() noexcept
     {
         APCUseScope use = AcquireAPCUse_();
-        return use ? Cache_.ExpectedGeneration_ : 0u;
+        return use ? APCCache_.ExpectedGeneration_ : 0u;
     }
 };
 
@@ -1992,7 +1992,7 @@ public:
         if (
             !range.IsValid ||
             local_cell >= range.EndIndex - range.BeginIndex ||
-            range.BeginIndex + local_cell >= SlabCellCount_
+            range.BeginIndex + local_cell >= FVolatileCache_.SlabCellCount_
         )
         {
             return std::nullopt;
@@ -2032,13 +2032,13 @@ public:
 
     std::size_t MatrixViewBegin() const noexcept
     {
-        return MatrixViewTableBeginIndex_;
+        return FVolatileCache_.MatrixViewTableBeginIndex_;
     }
 
-    std::uint16_t ActiveMask() const noexcept { return ActiveRegionMask_; }
-    std::uint8_t ActiveCount() const noexcept { return ActiveRegionCount_; }
-    std::uint16_t ViewRowCells() const noexcept { return MatrixViewRowCellCount_; }
-    std::uint32_t BatchCapacity() const noexcept { return MatrixBatchCapacity_; }
+    std::uint16_t ActiveMask() const noexcept { return FVolatileCache_.ActiveRegionMask_; }
+    std::uint8_t ActiveCount() const noexcept { return FVolatileCache_.ActiveRegionCount_; }
+    std::uint16_t ViewRowCells() const noexcept { return FVolatileCache_.MatrixViewRowCellCount_; }
+    std::uint32_t BatchCapacity() const noexcept { return FVolatileCache_.MatrixBatchCapacity_; }
 };
 
 inline bool MakeSchema(

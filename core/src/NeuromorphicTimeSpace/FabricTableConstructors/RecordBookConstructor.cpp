@@ -26,7 +26,7 @@ namespace BidirectionalInMemGraph
         return_bounds = {};
         const uint64_t entry_idx = GetStartingOfAnyFabricTable_(table_class);
         if (
-            entry_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > SlabCellCount_ ||
+            entry_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FVolatileCache_.SlabCellCount_ ||
             !ReadAFabricU64Directly(
                 entry_idx + static_cast<uint8_t>(CoreOfFabricCoordinator::RecordBookInternalIndexing::BEGIN64),
                 return_bounds.BeginIndex
@@ -36,7 +36,7 @@ namespace BidirectionalInMemGraph
                 return_bounds.EndIndex
             ) ||
             return_bounds.BeginIndex >= return_bounds.EndIndex ||
-            return_bounds.EndIndex > SlabCellCount_
+            return_bounds.EndIndex > FVolatileCache_.SlabCellCount_
         )
         {
             return_bounds.IsValid = false;
@@ -56,8 +56,8 @@ namespace BidirectionalInMemGraph
         const size_t base_idx = GetStartingOfAnyFabricTable_(table_class);
         if (
             !ADS::IsValidFabricUnit(base_idx) || 
-            (base_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > SlabCellCount_) ||
-            begin >= end || end > SlabCellCount_
+            (base_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FVolatileCache_.SlabCellCount_) ||
+            begin >= end || end > FVolatileCache_.SlabCellCount_
         )
         {
             return;

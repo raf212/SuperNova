@@ -8,20 +8,20 @@ namespace BidirectionalInMemGraph
         ADS::RangeOfAPC desired_segment_pool_range{};
 
         if (
-            single_description_index >= CountOfAPC_ ||
-            PerAPCRuntimeCellCount_ == UNSIGNED_ZERO
+            single_description_index >= FVolatileCache_.CountOfAPC_ ||
+            FVolatileCache_.PerAPCRuntimeCellCount_ == UNSIGNED_ZERO
         )
         {
             return desired_segment_pool_range;
         }
 
-        const uint64_t apc_count_offset = single_description_index * PerAPCRuntimeCellCount_;
-        desired_segment_pool_range.BeginIndex = SegmentPoolBegin_ + static_cast<size_t>(apc_count_offset);
-        desired_segment_pool_range.EndIndex = desired_segment_pool_range.BeginIndex + static_cast<size_t>(PerAPCRuntimeCellCount_);
+        const uint64_t apc_count_offset = single_description_index * FVolatileCache_.PerAPCRuntimeCellCount_;
+        desired_segment_pool_range.BeginIndex = FVolatileCache_.SegmentPoolBegin_ + static_cast<size_t>(apc_count_offset);
+        desired_segment_pool_range.EndIndex = desired_segment_pool_range.BeginIndex + static_cast<size_t>(FVolatileCache_.PerAPCRuntimeCellCount_);
         desired_segment_pool_range.IsValid =
-            desired_segment_pool_range.BeginIndex >= SegmentPoolBegin_ &&
+            desired_segment_pool_range.BeginIndex >= FVolatileCache_.SegmentPoolBegin_ &&
             desired_segment_pool_range.BeginIndex < desired_segment_pool_range.EndIndex &&
-            desired_segment_pool_range.EndIndex <= SlabCellCount_;
+            desired_segment_pool_range.EndIndex <= FVolatileCache_.SlabCellCount_;
 
         return desired_segment_pool_range;
         
@@ -111,7 +111,7 @@ namespace BidirectionalInMemGraph
 
     void APCLifeCycle::InitAllAPCLifeCycleState() noexcept
     {
-        for (size_t i = 0; i < CountOfAPC_; i++)
+        for (size_t i = 0; i < FVolatileCache_.CountOfAPC_; i++)
         {
             std::optional<uint64_t> maybe_id_state_idx = GetDescriptionLockIdxInFabric_(i);
             if (!maybe_id_state_idx.has_value())

@@ -19,7 +19,7 @@ namespace BidirectionalInMemGraph
             std::span<const GM::GHGFConnection> ConnectionSpan{};            
         };
     private:
-        GM::GHGFCache Cache_{};
+        GM::GHGFCache HGFCache_{};
         GM::GHGFStorageProfile Profile_{};
 
         bool IsGHGFPlanCurrent_() noexcept;

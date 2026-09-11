@@ -22,14 +22,14 @@ namespace BidirectionalInMemGraph
         uint32_t GetThisSlotIdx() noexcept
         {
             return
-                IsActiveAPC() ? Cache_.APCSlotIdx_ : ADS::APC_INDEX_BOUND_SENTINAL;
+                IsActiveAPC() ? APCCache_.APCSlotIdx_ : ADS::APC_INDEX_BOUND_SENTINAL;
         }
 
         bool IsActiveAPC() noexcept;
 
     protected:
 
-        ADS::CacheOfAPC Cache_{};
+        ADS::CacheOfAPC APCCache_{};
 
         struct RelationOparation 
         {

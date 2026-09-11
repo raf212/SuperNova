@@ -9,17 +9,17 @@ namespace BidirectionalInMemGraph
 
     CompiledDAGTableConstructor::CompiledDAGRecord* CompiledDAGTableConstructor::CompiledDAGRow_(uint32_t row_slot) noexcept
     {
-        if (!SlabBasePtr_ || row_slot >= CountOfAPC_)
+        if (!SlabBasePtr_ || row_slot >= FVolatileCache_.CountOfAPC_)
         {
             return nullptr;
         }
         
-        const size_t row_begin = static_cast<size_t>(CompiledDagTableBeginIdx_) +
+        const size_t row_begin = static_cast<size_t>(FVolatileCache_.CompiledDagTableBeginIdx_) +
             (static_cast<size_t>(row_slot) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
         
         if (
-            row_begin >= SlabCellCount_ ||
-            CoreOfFabricCoordinator::COMPILED_DAG_LEN > SlabCellCount_ - row_begin
+            row_begin >= FVolatileCache_.SlabCellCount_ ||
+            CoreOfFabricCoordinator::COMPILED_DAG_LEN > FVolatileCache_.SlabCellCount_ - row_begin
         )
         {
             return nullptr;
@@ -37,21 +37,21 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const size_t required_cells = static_cast<size_t>(CountOfAPC_) * CoreOfFabricCoordinator::COMPILED_DAG_LEN;
+        const size_t required_cells = static_cast<size_t>(FVolatileCache_.CountOfAPC_) * CoreOfFabricCoordinator::COMPILED_DAG_LEN;
 
         if (
             bounds.EndIndex - bounds.BeginIndex != required_cells ||
-            bounds.EndIndex > SlabCellCount_
+            bounds.EndIndex > FVolatileCache_.SlabCellCount_
         )
         {
             return false;
         }
 
-        CompiledDagTableBeginIdx_ = bounds.BeginIndex;
+        FVolatileCache_.CompiledDagTableBeginIdx_ = bounds.BeginIndex;
 
-        for (uint32_t i = 0; i < CountOfAPC_; i++)
+        for (uint32_t i = 0; i < FVolatileCache_.CountOfAPC_; i++)
         {
-            const size_t row_begin = static_cast<size_t>(CompiledDagTableBeginIdx_) +
+            const size_t row_begin = static_cast<size_t>(FVolatileCache_.CompiledDagTableBeginIdx_) +
                 (static_cast<size_t>(i) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
 
             std::construct_at(reinterpret_cast<CompiledDAGRecord*>(SlabBasePtr_ + row_begin), CompiledDAGRecord{});
@@ -70,8 +70,8 @@ namespace BidirectionalInMemGraph
     {
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            child_slot >= CountOfAPC_ ||
-            relation_ordinal >= MaxDirectParentsPerAxis_ ||
+            child_slot >= FVolatileCache_.CountOfAPC_ ||
+            relation_ordinal >= FVolatileCache_.MaxDirectParentsPerAxis_ ||
             EdgeBuilder::IsPartiallyEmpty(relation)
         )
         {
@@ -113,7 +113,7 @@ namespace BidirectionalInMemGraph
         return_mask = UNSIGNED_ZERO;
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            child_slot >= CountOfAPC_
+            child_slot >= FVolatileCache_.CountOfAPC_
         )
         {
             return SeqLockedOperation::NONE;
@@ -177,7 +177,7 @@ namespace BidirectionalInMemGraph
         bool is_parent_anchor
     ) noexcept
     {
-        if (slot >= CountOfAPC_)
+        if (slot >= FVolatileCache_.CountOfAPC_)
         {
             return false;
         }
@@ -272,7 +272,7 @@ namespace BidirectionalInMemGraph
             !row->Reserved ||
             !EdgeBuilder::IsValidRelationOrdinal(
                 ordinal,
-                MaxDirectParentsPerAxis_
+                FVolatileCache_.MaxDirectParentsPerAxis_
             )
         )
         {
@@ -299,7 +299,7 @@ namespace BidirectionalInMemGraph
         std::span<EdgeBuilder::ParentRelation> relations =
             ParentRelations_(transaction.EdgeTable, child_slot);
 
-        if (relations.size() != MaxDirectParentsPerAxis_)
+        if (relations.size() != FVolatileCache_.MaxDirectParentsPerAxis_)
         {
             return nullptr;
         }
@@ -414,7 +414,7 @@ namespace BidirectionalInMemGraph
 
         if (
             !range.IsValid ||
-            stored.size() != MaxDirectParentsPerAxis_
+            stored.size() != FVolatileCache_.MaxDirectParentsPerAxis_
         )
         {
             return SeqLockedOperation::NONE;
@@ -445,7 +445,7 @@ namespace BidirectionalInMemGraph
             observed.Header = before;
             bool malformed = false;
 
-            for (uint8_t ordinal = 0; ordinal < MaxDirectParentsPerAxis_; ordinal++)
+            for (uint8_t ordinal = 0; ordinal < FVolatileCache_.MaxDirectParentsPerAxis_; ordinal++)
             {
                 EdgeBuilder::ParentRelation relation{};
                 relation.ParentHandle = std::atomic_ref<uint64_t>(stored[ordinal].ParentHandle).load(std::memory_order_acquire);
@@ -525,8 +525,8 @@ namespace BidirectionalInMemGraph
         
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            parent_slot >= CountOfAPC_ ||
-            child_slot >= CountOfAPC_ ||
+            parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            child_slot >= FVolatileCache_.CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !HandleOfAPCStatic::IsGenerationValid(child_generation) ||
             !EdgeBuilder::CanInsertCombinedDAGRelation(
@@ -592,8 +592,8 @@ namespace BidirectionalInMemGraph
 
                 if (!EdgeBuilder::IsValidRelationLocator(
                     old_tail,
-                    static_cast<uint32_t>(CountOfAPC_),
-                    MaxDirectParentsPerAxis_
+                    static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                    FVolatileCache_.MaxDirectParentsPerAxis_
                 ))
                 {
                     return false;
@@ -618,8 +618,8 @@ namespace BidirectionalInMemGraph
                 first = EdgeBuilder::NextLocator(old_tail_relation);
                 if (!EdgeBuilder::IsValidRelationLocator(
                     first,
-                    static_cast<uint32_t>(CountOfAPC_),
-                    MaxDirectParentsPerAxis_
+                    static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                    FVolatileCache_.MaxDirectParentsPerAxis_
                 ))
                 {
                     return false;
@@ -779,8 +779,8 @@ namespace BidirectionalInMemGraph
     {
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            parent_slot >= CountOfAPC_ ||
-            child_slot >= CountOfAPC_ ||
+            parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            child_slot >= FVolatileCache_.CountOfAPC_ ||
             parent_slot == child_slot ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !HandleOfAPCStatic::IsGenerationValid(child_generation)
@@ -825,13 +825,13 @@ namespace BidirectionalInMemGraph
             if (
                 !EdgeBuilder::IsValidRelationLocator(
                     previous,
-                    static_cast<uint32_t>(CountOfAPC_),
-                    MaxDirectParentsPerAxis_
+                    static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                    FVolatileCache_.MaxDirectParentsPerAxis_
                 ) ||
                 !EdgeBuilder::IsValidRelationLocator(
                     next,
-                    static_cast<uint32_t>(CountOfAPC_),
-                    MaxDirectParentsPerAxis_
+                    static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                    FVolatileCache_.MaxDirectParentsPerAxis_
                 )
             )
             {
@@ -1031,9 +1031,9 @@ namespace BidirectionalInMemGraph
     {
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            old_parent_slot >= CountOfAPC_ ||
-            new_parent_slot >= CountOfAPC_ ||
-            child_slot >= CountOfAPC_ ||
+            old_parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            new_parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            child_slot >= FVolatileCache_.CountOfAPC_ ||
             old_parent_slot == new_parent_slot ||
             !HandleOfAPCStatic::IsGenerationValid(old_parent_generation) ||
             !HandleOfAPCStatic::IsGenerationValid(new_parent_generation) ||
@@ -1080,13 +1080,13 @@ namespace BidirectionalInMemGraph
             if (
                 !EdgeBuilder::IsValidRelationLocator(
                     old_previous,
-                    static_cast<uint32_t>(CountOfAPC_),
-                    MaxDirectParentsPerAxis_
+                    static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                    FVolatileCache_.MaxDirectParentsPerAxis_
                 ) ||
                 !EdgeBuilder::IsValidRelationLocator(
                     old_next,
-                    static_cast<uint32_t>(CountOfAPC_),
-                    MaxDirectParentsPerAxis_
+                    static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                    FVolatileCache_.MaxDirectParentsPerAxis_
                 )
             )
             {
@@ -1185,8 +1185,8 @@ namespace BidirectionalInMemGraph
                 new_tail = new_parent_header.TailLocator;
                 if (!EdgeBuilder::IsValidRelationLocator(
                     new_tail,
-                    static_cast<uint32_t>(CountOfAPC_),
-                    MaxDirectParentsPerAxis_
+                    static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                    FVolatileCache_.MaxDirectParentsPerAxis_
                 ))
                 {
                     return false;
@@ -1212,8 +1212,8 @@ namespace BidirectionalInMemGraph
                 if (
                     !EdgeBuilder::IsValidRelationLocator(
                         new_first,
-                        static_cast<uint32_t>(CountOfAPC_),
-                        MaxDirectParentsPerAxis_
+                        static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
+                        FVolatileCache_.MaxDirectParentsPerAxis_
                     )
                 )
                 {

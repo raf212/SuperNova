@@ -5,6 +5,29 @@
 namespace BidirectionalInMemGraph
 {
 
+    struct FabricCache 
+    {
+        ///FABRIC CONSTRUCTION
+        uint32_t PerAPCRuntimeCellCount_{UNSIGNED_ZERO};
+        uint64_t CountOfAPC_{UNSIGNED_ZERO};
+        size_t SlabCellCount_{UNSIGNED_ZERO};
+        size_t SegmentPoolBegin_{CoreOfFabricCoordinator::FABRIC_UNIT_COUNT};
+        uint8_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
+        uint16_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
+        uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
+        ///MATRIX CONSTRUCTION
+        uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
+        uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
+        uint16_t ActiveRegionMask_{UNSIGNED_ZERO};
+        uint16_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
+        uint32_t MatrixBatchCapacity_{UNSIGNED_ZERO};
+        ///EDGE CONSTRUCTION
+        uint64_t HorizontalEdgeBeginIdx_{UNSIGNED_ZERO};
+        uint64_t VerticalEdgeBeginIdx_{UNSIGNED_ZERO};
+        uint64_t CompiledDagTableBeginIdx_{UNSIGNED_ZERO};
+
+    };
+
     class FabricConstructor
     {
         friend class RegionViewConstructor;
@@ -12,18 +35,8 @@ namespace BidirectionalInMemGraph
     protected:
         uint64_t* SlabBasePtr_{nullptr};
 
-        uint32_t PerAPCRuntimeCellCount_{UNSIGNED_ZERO};
-        uint64_t CountOfAPC_{UNSIGNED_ZERO};
-
-        size_t SlabCellCount_{UNSIGNED_ZERO};
-        size_t SegmentPoolBegin_{CoreOfFabricCoordinator::FABRIC_UNIT_COUNT};
-
-        uint8_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
-        uint16_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
+        FabricCache FVolatileCache_{};
     
-        uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
-
-
         std::atomic<bool> FabricInitialized_{false};
         std::atomic<bool> InitializationInProgress_{false};
         RawPackedCellAllocator AllocatorOfFabric_{};
@@ -72,7 +85,7 @@ namespace BidirectionalInMemGraph
 
         constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
         {
-            if (SlabBasePtr_ && desired_idx < SlabCellCount_)
+            if (SlabBasePtr_ && desired_idx < FVolatileCache_.SlabCellCount_)
             {
                 return true;
             }
@@ -81,7 +94,7 @@ namespace BidirectionalInMemGraph
 
         constexpr size_t SlotBegin_(uint32_t slot) noexcept
         {
-            return SegmentPoolBegin_ + static_cast<size_t>(slot) * PerAPCRuntimeCellCount_;
+            return FVolatileCache_.SegmentPoolBegin_ + static_cast<size_t>(slot) * FVolatileCache_.PerAPCRuntimeCellCount_;
         }
 
         template<typename T>
@@ -93,7 +106,7 @@ namespace BidirectionalInMemGraph
             }
             if (
                 count > SIZE_MAX / sizeof(T) ||
-                SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
+                FVolatileCache_.SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
             )
             {
                 return true;
@@ -102,7 +115,7 @@ namespace BidirectionalInMemGraph
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
             const uintptr_t slab = reinterpret_cast<uintptr_t>(SlabBasePtr_);
             const size_t bytes = count * sizeof(T);
-            const size_t slab_bytes = SlabCellCount_ * sizeof(uint64_t);
+            const size_t slab_bytes = FVolatileCache_.SlabCellCount_ * sizeof(uint64_t);
 
             return begin >= slab
                 ? begin - slab < slab_bytes
@@ -117,11 +130,6 @@ namespace BidirectionalInMemGraph
         friend class RegionViewConstructor;
     protected:
         using SD = SchemaDefinition;
-        uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
-        uint16_t ActiveRegionMask_{UNSIGNED_ZERO};
-        uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
-        uint16_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
-        uint32_t MatrixBatchCapacity_{UNSIGNED_ZERO};
 
         std::span<SD::RegionSchemaRecord> MetrixViewRow_(uint32_t apc_slot) noexcept;
 

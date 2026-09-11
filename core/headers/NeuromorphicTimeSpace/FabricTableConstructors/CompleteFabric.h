@@ -60,8 +60,6 @@ namespace BidirectionalInMemGraph
         using EdgeTableRange = ADS::RangeOfAPC;
 
     protected:
-        uint64_t HorizontalEdgeBeginIdx_{UNSIGNED_ZERO};
-        uint64_t VerticalEdgeBeginIdx_{UNSIGNED_ZERO};
 
         EdgeTableRange ReadAnEdgeTableRange_(
             FabricSegments edge_table,
@@ -124,11 +122,10 @@ namespace BidirectionalInMemGraph
     protected:
         struct alignas(uint64_t) CompiledDAGRecord final
         {
-            uint64_t ValueParentMask = UNSIGNED_ZERO;
+            uint64_t ValueParentMask = UNSIGNED_ZERO;   
             uint64_t VolatileParentMask = UNSIGNED_ZERO;
         };
 
-        uint64_t CompiledDagTableBeginIdx_{UNSIGNED_ZERO};
         std::atomic<uint64_t> CompiledDagRevision_{UNSIGNED_ZERO};
 
         CompiledDAGRecord* CompiledDAGRow_(uint32_t row_slot) noexcept;

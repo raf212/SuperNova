@@ -115,11 +115,11 @@ namespace BidirectionalInMemGraph
     void GHGFNode::ResetAPCGHGFStateRegion_() noexcept
     {
         std::fill_n(
-            GHGFFabric_->GHGFRegion_(Cache_.APCSlotIdx_, GHGFFabric_->Cache_.StateCellOffset_),
+            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->HGFCache_.StateCellOffset_),
             static_cast<size_t>(GM::STATE_ROW_COUNT_HEIGHT) * GHGFFabric_->Profile_.BatchCapacity, GM::StorageConst::ZERO
         );
         std::fill_n(
-            GHGFFabric_->GHGFRegion_(Cache_.APCSlotIdx_, GHGFFabric_->Cache_.ErrorCellOffset_),
+            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->HGFCache_.ErrorCellOffset_),
             static_cast<size_t>(GM::ERROR_ROW_COUNT_HEIGHT) * GHGFFabric_->Profile_.BatchCapacity, GM::StorageConst::ZERO
         );
         const float initial_mean = GHGFRole_() == GM::GHGFNodeRole::OBSERVATION ?
@@ -127,12 +127,12 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t lane = 0; lane < GHGFFabric_->Profile_.BatchCapacity; ++lane)
         {
-            GHGFFabric_->GHGFStateRow_(Cache_.APCSlotIdx_, GM::GHGFStateRow::EXPECTED_MEAN)[lane] = initial_mean;
-            GHGFFabric_->GHGFStateRow_(Cache_.APCSlotIdx_, GM::GHGFStateRow::PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
-            GHGFFabric_->GHGFStateRow_(Cache_.APCSlotIdx_, GM::GHGFStateRow::EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
-            GHGFFabric_->GHGFStateRow_(Cache_.APCSlotIdx_, GM::GHGFStateRow::CONDITIONAL_EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
-            GHGFFabric_->GHGFStateRow_(Cache_.APCSlotIdx_, GM::GHGFStateRow::OBSERVED)[lane] = GM::StorageConst::ONE;
-            GHGFFabric_->GHGFStateRow_(Cache_.APCSlotIdx_, GM::GHGFStateRow::CURRENT_VARIANCE)[lane] = GM::StorageConst::ONE;
+            GHGFFabric_->GHGFStateRow_(APCCache_.APCSlotIdx_, GM::GHGFStateRow::EXPECTED_MEAN)[lane] = initial_mean;
+            GHGFFabric_->GHGFStateRow_(APCCache_.APCSlotIdx_, GM::GHGFStateRow::PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
+            GHGFFabric_->GHGFStateRow_(APCCache_.APCSlotIdx_, GM::GHGFStateRow::EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
+            GHGFFabric_->GHGFStateRow_(APCCache_.APCSlotIdx_, GM::GHGFStateRow::CONDITIONAL_EXPECTED_PRECISION)[lane] = GM::StorageConst::INITIAL_PRECISION;
+            GHGFFabric_->GHGFStateRow_(APCCache_.APCSlotIdx_, GM::GHGFStateRow::OBSERVED)[lane] = GM::StorageConst::ONE;
+            GHGFFabric_->GHGFStateRow_(APCCache_.APCSlotIdx_, GM::GHGFStateRow::CURRENT_VARIANCE)[lane] = GM::StorageConst::ONE;
         }
     }
 

@@ -7,8 +7,8 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::IsGHGFPlanCurrent_() noexcept
     {
-        return IsFabricActive() && Cache_.ModelPrepared_ &&
-            Cache_.PreparedRevision_ == CompiledDagRevision_.load(std::memory_order_acquire);
+        return IsFabricActive() && HGFCache_.ModelPrepared_ &&
+            HGFCache_.PreparedRevision_ == CompiledDagRevision_.load(std::memory_order_acquire);
     }
 
     float* GHGFModelConstructor::GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept
@@ -18,13 +18,13 @@ namespace BidirectionalInMemGraph
 
     float* GHGFModelConstructor::GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept
     {
-        return GHGFRegion_(slot, Cache_.StateCellOffset_) +
+        return GHGFRegion_(slot, HGFCache_.StateCellOffset_) +
             static_cast<size_t>(row) * Profile_.BatchCapacity;
     }
 
     float* GHGFModelConstructor::GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept
     {
-        return GHGFRegion_(slot, Cache_.ErrorCellOffset_) +
+        return GHGFRegion_(slot, HGFCache_.ErrorCellOffset_) +
             static_cast<size_t>(row) * Profile_.BatchCapacity;
     }
 
@@ -37,9 +37,9 @@ namespace BidirectionalInMemGraph
 
     void GHGFModelConstructor::InvalidateGHGFModel_() noexcept
     {
-        Cache_.ModelPrepared_ = false;
-        Cache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
-        Cache_.ActiveBatch_ = UNSIGNED_ZERO;
+        HGFCache_.ModelPrepared_ = false;
+        HGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+        HGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
     }
 
 
@@ -59,8 +59,8 @@ namespace BidirectionalInMemGraph
         }
         
         InvalidateGHGFModel_();
-        Cache_.NodeCount_ = UNSIGNED_ZERO;
-        Cache_.ObservationCount_ = UNSIGNED_ZERO;
+        HGFCache_.NodeCount_ = UNSIGNED_ZERO;
+        HGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         DefaultRegionTable_ = profile.DefaultSchemaTable;
         HasDefaultRegionTable_ = true;
 
@@ -80,9 +80,9 @@ namespace BidirectionalInMemGraph
         {
             switch (record.Region)
             {
-            case MacroColumnOfAPC::STATE_SLOT: Cache_.StateCellOffset_ = record.CellOffset; break;
-            case MacroColumnOfAPC::ERROR_SLOT: Cache_.ErrorCellOffset_ = record.CellOffset; break;
-            case MacroColumnOfAPC::WEIGHT_SLOT: Cache_.WeightCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::STATE_SLOT: HGFCache_.StateCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::ERROR_SLOT: HGFCache_.ErrorCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::WEIGHT_SLOT: HGFCache_.WeightCellOffset_ = record.CellOffset; break;
             default: 
                 break;
             }
@@ -120,7 +120,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
         
-        for (uint32_t i = 0; i < CountOfAPC_; i++)
+        for (uint32_t i = 0; i < FVolatileCache_.CountOfAPC_; i++)
         {
             if (!CreateNodeOfGHGF(model_values.APCNodes[i], model_values.RoleSpan[i]))
             {

@@ -19,12 +19,12 @@ namespace BidirectionalInMemGraph
         return 
             child_use &&
             parent_use &&
-            Cache_.FabricOwnerPtr_ == parent.Cache_.FabricOwnerPtr_ &&
-            Cache_.FabricOwnerPtr_->AddParentRelation_(
-                parent.Cache_.APCSlotIdx_,
-                parent.Cache_.ExpectedGeneration_,
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
+            APCCache_.FabricOwnerPtr_->AddParentRelation_(
+                parent.APCCache_.APCSlotIdx_,
+                parent.APCCache_.ExpectedGeneration_,
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             );
@@ -42,12 +42,12 @@ namespace BidirectionalInMemGraph
         return
             child_use &&
             parent_use &&
-            Cache_.FabricOwnerPtr_ == parent.Cache_.FabricOwnerPtr_ &&
-            Cache_.FabricOwnerPtr_->RemoveParentRelation_(
-                parent.Cache_.APCSlotIdx_,
-                parent.Cache_.ExpectedGeneration_,
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
+            APCCache_.FabricOwnerPtr_->RemoveParentRelation_(
+                parent.APCCache_.APCSlotIdx_,
+                parent.APCCache_.ExpectedGeneration_,
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             );
@@ -73,15 +73,15 @@ namespace BidirectionalInMemGraph
             child_use &&
             old_parent_use &&
             new_parent_use &&
-            Cache_.FabricOwnerPtr_ == old_parent.Cache_.FabricOwnerPtr_ &&
-            Cache_.FabricOwnerPtr_ == new_parent.Cache_.FabricOwnerPtr_ &&
-            Cache_.FabricOwnerPtr_->ReplaceParentRelation_(
-                old_parent.Cache_.APCSlotIdx_,
-                old_parent.Cache_.ExpectedGeneration_,
-                new_parent.Cache_.APCSlotIdx_,
-                new_parent.Cache_.ExpectedGeneration_,
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_ == old_parent.APCCache_.FabricOwnerPtr_ &&
+            APCCache_.FabricOwnerPtr_ == new_parent.APCCache_.FabricOwnerPtr_ &&
+            APCCache_.FabricOwnerPtr_->ReplaceParentRelation_(
+                old_parent.APCCache_.APCSlotIdx_,
+                old_parent.APCCache_.ExpectedGeneration_,
+                new_parent.APCCache_.APCSlotIdx_,
+                new_parent.APCCache_.ExpectedGeneration_,
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 max_tries
             );
@@ -121,9 +121,9 @@ namespace BidirectionalInMemGraph
         }
 
         return 
-            Cache_.FabricOwnerPtr_->FindParent_(
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_->FindParent_(
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 relation_ordinal,
                 parent_relation,
@@ -145,9 +145,9 @@ namespace BidirectionalInMemGraph
         }
 
         return 
-            Cache_.FabricOwnerPtr_->FindFirstChild_(
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_->FindFirstChild_(
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 child_relation,
                 max_tries
@@ -168,9 +168,9 @@ namespace BidirectionalInMemGraph
         }
 
         return 
-            Cache_.FabricOwnerPtr_->FindLastChild_(
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_->FindLastChild_(
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 child_relation,
                 max_tries
@@ -192,9 +192,9 @@ namespace BidirectionalInMemGraph
         }
 
         return 
-            Cache_.FabricOwnerPtr_->FindNextChild_(
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_->FindNextChild_(
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 current_relation_locator,
                 child_relation,
@@ -218,9 +218,9 @@ namespace BidirectionalInMemGraph
         }
 
         return 
-            Cache_.FabricOwnerPtr_->FindPreviousChild_(
-                Cache_.APCSlotIdx_,
-                Cache_.ExpectedGeneration_,
+            APCCache_.FabricOwnerPtr_->FindPreviousChild_(
+                APCCache_.APCSlotIdx_,
+                APCCache_.ExpectedGeneration_,
                 edge_table,
                 current_relation_locator,
                 child_relation,
@@ -237,9 +237,9 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        APCFinilizer* owner = Cache_.FabricOwnerPtr_;
-        const uint32_t slot = Cache_.APCSlotIdx_;
-        const uint32_t generation = Cache_.ExpectedGeneration_;
+        APCFinilizer* owner = APCCache_.FabricOwnerPtr_;
+        const uint32_t slot = APCCache_.APCSlotIdx_;
+        const uint32_t generation = APCCache_.ExpectedGeneration_;
 
         if (!owner->RetireAPC_(slot, generation, max_tries))
         {
