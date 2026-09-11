@@ -90,15 +90,24 @@ namespace BidirectionalInMemGraph
             {
                 return false;
             }
+            if (
+                count > SIZE_MAX / sizeof(T) ||
+                SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
+            )
+            {
+                return true;
+            }
 
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
             const uintptr_t slab = reinterpret_cast<uintptr_t>(SlabBasePtr_);
-
             const size_t bytes = count * sizeof(T);
-            const size_t slab_bytes = SlabBasePtr_ * sizeof(uint64_t);
+            const size_t slab_bytes = SlabCellCount_ * sizeof(uint64_t);
 
-            return begin > slab && begin + bytes <= slab_bytes;
+            return begin >= slab
+                ? begin - slab < slab_bytes
+                : slab - begin < bytes;
         }
+        
     };
 
     class MatrixViewConstructor : public FabricConstructor

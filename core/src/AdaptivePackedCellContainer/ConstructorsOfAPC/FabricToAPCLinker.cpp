@@ -130,22 +130,37 @@ namespace BidirectionalInMemGraph
         }
 
         std::atomic_ref<uint64_t> control(*Cache_.APCGenerationCellPtr_);
+        uint64_t observed = control.load(std::memory_order_acquire);
 
-        const uint64_t before = control.fetch_add(1u, std::memory_order_acquire);
-
-        const HandleOfAPCStatic::ControlValues values = HandleOfAPCStatic::ReadControlCell(before);
-
-        if (
-            values.Closed ||
-            values.Generation != Cache_.ExpectedGeneration_ ||
-            values.ActiveAccess == ADS::APC_INDEX_BOUND_SENTINAL
-        )
+        for (;;)
         {
-            control.fetch_sub(1u, std::memory_order_release);
-            return APCUseScope{};
+            const HandleOfAPCStatic::ControlValues current =
+                HandleOfAPCStatic::ReadControlCell(observed);
+
+            if (
+                current.Closed ||
+                current.Generation != Cache_.ExpectedGeneration_ ||
+                !HandleOfAPCStatic::IsGenerationValid(current.Generation) ||
+                current.ActiveAccess == UINT32_MAX
+            )
+            {
+                return APCUseScope{};
+            }
+
+            HandleOfAPCStatic::ControlValues desired = current;
+            ++desired.ActiveAccess;
+            const uint64_t desired_raw = HandleOfAPCStatic::MakeControlCell(desired);
+
+            if (control.compare_exchange_weak(
+                observed,
+                desired_raw,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire
+            ))
+            {
+                return APCUseScope(Cache_.APCGenerationCellPtr_);
+            }
         }
-        
-        return APCUseScope(Cache_.APCGenerationCellPtr_);
     }
 
     bool FabricToAPCLinker::IsActiveAPC() noexcept

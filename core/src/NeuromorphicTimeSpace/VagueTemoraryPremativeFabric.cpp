@@ -85,42 +85,6 @@ namespace BidirectionalInMemGraph
     }
     
 
-    void VagueTemoraryPremativeFabric::ShutDownFabricWithPtrTable() noexcept
-    {
-        const bool was_active = FabricInitialized_.exchange(false, std::memory_order_acq_rel);
-        if (was_active && SlabBasePtr_)
-        {
-            for (uint32_t i = 0; i < CountOfAPC_; i++)
-            {
-                std::atomic_ref<uint64_t>(*GetAPCGenerationPtr_(i)).fetch_or(
-                    HandleOfAPCStatic::CLOSED_MASK,
-                    std::memory_order_acq_rel
-                );
-            }
-
-            for (uint32_t i = 0; i < CountOfAPC_; i++)
-            {
-                std::atomic_ref<uint64_t> control(*GetAPCGenerationPtr_(i));
-                while (HandleOfAPCStatic::ReadControlCell(control.load(std::memory_order_acquire)).ActiveAccess != UNSIGNED_ZERO)
-                {
-                    std::this_thread::yield();
-                }
-            }
-        }
-
-        uint64_t* old_ptr = SlabBasePtr_;
-        const size_t old_count = SlabCellCount_;
-        SlabBasePtr_ = nullptr;
-        SlabCellCount_ = UNSIGNED_ZERO;
-        if (old_ptr)
-        {
-            FreeRawPackedCells_(old_ptr,old_count);
-        }
-        CompiledDagTableBeginIdx_ = UNSIGNED_ZERO;
-        CompiledDagRevision_.fetch_add(1, std::memory_order_release);
-        ResetScalarsofTheFabric_();
-    }
-
     VagueTemoraryPremativeFabric::SeqLockedOperation VagueTemoraryPremativeFabric::ResolveChildLocator_(
         uint32_t parent_slot,
         uint32_t parent_generation,
@@ -170,10 +134,9 @@ namespace BidirectionalInMemGraph
         APCUseScope child_use{};
         if (
             !GetExistingAPC_(
-                EdgeBuilder::ParentSlot(relation),
+                EdgeBuilder::RelationSlot(locator),
                 child,
-                child_use,
-                EdgeBuilder::ParentGeneration(relation)
+                child_use
             )
         )
         {
@@ -183,6 +146,26 @@ namespace BidirectionalInMemGraph
         if (
             child.Cache_.FabricOwnerPtr_ != this ||
             child.Cache_.APCSlotIdx_ != EdgeBuilder::RelationSlot(locator)
+        )
+        {
+            return SeqLockedOperation::RETRY;
+        }
+
+        EdgeBuilder::ParentRelation confirmed{};
+        const SeqLockedOperation confirm_read = ReadParentRelation_(
+            edge_table,
+            EdgeBuilder::RelationSlot(locator),
+            EdgeBuilder::RelationOrdinal(locator),
+            confirmed,
+            DEFAULT_INTERNAL_TRIES__
+        );
+        if (confirm_read != SeqLockedOperation::FOUND)
+        {
+            return confirm_read;
+        }
+        if (
+            confirmed.ParentHandle !=
+            EdgeBuilder::MakeParentHandle(parent_slot, parent_generation)
         )
         {
             return SeqLockedOperation::RETRY;
@@ -269,7 +252,7 @@ namespace BidirectionalInMemGraph
         result.MutationOP_ = SeqLockedOperation::RETRY;
         if (result_ptr)
         {
-            result_ptr = &result;
+            *result_ptr = std::move(result);
         }
         
         return parent;
@@ -375,7 +358,7 @@ namespace BidirectionalInMemGraph
             result.MutationOP_ = SeqLockedOperation::FOUND;
             if (result_ptr)
             {
-                result_ptr = &result;
+                *result_ptr = std::move(result);
             }
             
             return child;
@@ -461,7 +444,7 @@ namespace BidirectionalInMemGraph
             result.MutationOP_ = SeqLockedOperation::FOUND;
             if (result_ptr)
             {
-                result_ptr = & result;
+                *result_ptr = std::move(result);
             }
             return child;
         }
@@ -595,7 +578,7 @@ namespace BidirectionalInMemGraph
             result.MutationOP_ = SeqLockedOperation::FOUND;
             if (result_ptr)
             {
-                result_ptr = &result;
+                *result_ptr = std::move(result);
             }
             
             return child;
@@ -740,7 +723,7 @@ namespace BidirectionalInMemGraph
             result.MutationOP_ = SeqLockedOperation::FOUND;
             if (result_ptr)
             {
-                result_ptr = &result;
+                *result_ptr = std::move(result);
             }
             
             return child;

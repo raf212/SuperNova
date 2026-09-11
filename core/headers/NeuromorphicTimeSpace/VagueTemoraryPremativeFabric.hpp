@@ -72,9 +72,6 @@ protected:
 
 public:
 
-
-    void ShutDownFabricWithPtrTable() noexcept;
-
     bool CreateAPC(
         AdaptivePackedCellContainer& desired_apc,
         const SD::RegionSchemaTable& region_schemas,

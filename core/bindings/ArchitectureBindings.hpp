@@ -303,7 +303,7 @@
 //         // Native memory is released only after every operation/view that held
 //         // this epoch has finished. Retained handles keep their native wrappers
 //         // alive until after the raw-pointer table and slab have shut down.
-//         Native.ShutDownFabricWithPtrTable();
+//         Native.ShutDownFabric();
 
 //         for (uint32_t slot = 0u; slot < SlotCount; ++slot)
 //         {
@@ -1524,7 +1524,7 @@
 //                 py::call_guard<py::gil_scoped_release>()
 //             )
 //             .def(
-//                 "ShutDownFabricWithPtrTable",
+//                 "ShutDownFabric",
 //                 &PythonFabric::ShutDownFabric,
 //                 py::call_guard<py::gil_scoped_release>()
 //             )
