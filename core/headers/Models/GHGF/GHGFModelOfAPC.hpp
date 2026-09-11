@@ -1,6 +1,6 @@
 #pragma once 
-#include "../NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
-#include "../AdaptivePackedCellContainer/APCNodes/GHGFNode.hpp"
+#include "../../NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include "GHGFNode.hpp"
 
 
 namespace BidirectionalInMemGraph

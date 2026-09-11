@@ -1,5 +1,5 @@
 #pragma once
-#include "Models/GHGFModelOfAPC.hpp"
+#include "Models/GHGF/GHGFModelOfAPC.hpp"
 #include <span>
 
 namespace BidirectionalInMemGraph
@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph
             GHGFFabric_->SlotBegin_(APCCache_.APCSlotIdx_) + static_cast<size_t>(ADS::HeaderIdentifierOfAPC::GHGF_ROLE_CELL),
             static_cast<uint64_t>(role)
         );
-        
+
         GHGFFabric_->InvalidateGHGFModel_();
         return true;
     }

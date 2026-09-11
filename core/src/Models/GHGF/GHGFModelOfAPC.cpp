@@ -1,5 +1,5 @@
 #pragma once
-#include "Models/GHGFModelOfAPC.hpp"
+#include "Models/GHGF/GHGFModelOfAPC.hpp"
 #include <span>
 
 namespace BidirectionalInMemGraph
@@ -205,5 +205,21 @@ namespace BidirectionalInMemGraph
         
         return true;
     }
+
+    // bool GHGFModelConstructor::ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept
+    // {
+    //     GHGFNode parent, child;
+    //     APCUseScope parent_use, child_use;
+
+    //     if (
+    //         !GetGHGFNode_(connection.parent, parent, parent_use) ||
+    //         !GetGHGFNode_(connection.Child, parent, parent_use) ||
+    //     )
+    //     {
+    //         /* code */
+    //     }
+        
+    // }
+
 
 }

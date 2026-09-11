@@ -1,5 +1,6 @@
 #pragma once 
-#include "../AdaptivePackedCellContainer.hpp"
+#include "GHGFLayer.hpp"
+#include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
 
 namespace BidirectionalInMemGraph
 {

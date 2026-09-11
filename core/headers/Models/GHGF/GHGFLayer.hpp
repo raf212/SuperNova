@@ -1,6 +1,6 @@
 #pragma once
 #include <functional>
-#include "SchemaOrchestratorForRegion.hpp"
+#include "../../AdaptivePackedCellContainer/APCOrchestrators/SchemaOrchestratorForRegion.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -64,7 +64,7 @@ namespace BidirectionalInMemGraph
 
         struct GHGFConnection
         {
-            uint32_t parent;
+            uint32_t Parent;
             uint32_t Child;
             FabricSegments Axis;
             float Coupling = 1.0f;

@@ -1,5 +1,5 @@
 #pragma once
-#include "../../SharedComponents/BitPackers/ConAndCaDependentPacker.hpp"
+#include "ConAndCaDependentPacker.hpp"
 
 namespace BidirectionalInMemGraph
 {

@@ -1,5 +1,5 @@
 #pragma once 
-#include "../../AdaptivePackedCellContainer/APCOrchestrators/APCDataStructure.hpp"
+#include "APCDataStructure.hpp"
 
 namespace BidirectionalInMemGraph 
 {

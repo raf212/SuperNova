@@ -2,7 +2,7 @@
 #pragma once 
 #include <array>
 #include <utility>
-#include "../../SharedComponents/SharedConf.hpp"
+#include "SharedConf.hpp"
 
 namespace BidirectionalInMemGraph
 {
