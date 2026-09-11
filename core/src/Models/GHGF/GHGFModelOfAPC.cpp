@@ -179,7 +179,7 @@ namespace BidirectionalInMemGraph
             }
         }
         
-        if (!CompileGHGFModel() ||!ResetGHGFState())
+        if (!SealGHGFModel_() ||!ResetGHGFState())
         {
             AbortConstruction___();
             return false;
@@ -249,6 +249,27 @@ namespace BidirectionalInMemGraph
         }
         child.RemoveParent(parent, connection.Edge);
         return false;
+    }
+
+    bool GHGFModelConstructor::RemoveParent(const GM::GHGFConnection& connection) noexcept
+    {
+        GHGFNode parent, child;
+        APCUseScope parent_use, child_use;
+        if (
+            !GetGHGFNode_(connection.Parent, parent, parent_use) ||
+            !GetGHGFNode_(connection.Child, parent, parent_use) ||
+            !CoreOfFabricCoordinator::IsValidEdgeTable(connection.Edge)
+        )
+        {
+            return false;
+        }
+
+        if (!child.RemoveParent(parent, connection.Edge))
+        {
+            return false;
+        }
+        InvalidateGHGFModel_();
+        return true;
     }
 
 

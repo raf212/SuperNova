@@ -34,17 +34,17 @@ namespace BidirectionalInMemGraph
         void InvalidateGHGFModel_() noexcept;
         uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept;
         bool GetGHGFNode_(uint32_t slot, GHGFNode& node, APCUseScope& use) noexcept;
+
+        bool SealGHGFModel_() noexcept;
     public :
         using APCFinilizer::ShutDownFabric;
         using APCFinilizer::IsFabricActive;
 
         bool RemoveParent(const GM::GHGFConnection& connection) noexcept;
-        
+
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
         
         bool ResetGHGFState() noexcept;
-
-        bool CompileGHGFModel() noexcept;
 
         bool InitializeGHGFFabric(
             uint32_t slot_count,
