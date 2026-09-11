@@ -22,13 +22,13 @@ namespace BidirectionalInMemGraph
         if (
             !IsActiveAPC() ||
             !APCCache_.RawAPCBasePtr_  ||
-            region_row.size() != APCCache_.FabricOwnerPtr_->FVolatileCache_.ActiveRegionCount_
+            region_row.size() != APCCache_.FabricOwnerPtr_->FabCache_.ActiveRegionCount_
         )
         {
             return false;
         }
 
-        const std::optional<uint8_t> compact_index = ADS::CompactRegionIndex(APCCache_.FabricOwnerPtr_->FVolatileCache_.ActiveRegionMask_, column);
+        const std::optional<uint8_t> compact_index = ADS::CompactRegionIndex(APCCache_.FabricOwnerPtr_->FabCache_.ActiveRegionMask_, column);
         if (!compact_index.has_value())
         {
             return false;
@@ -41,8 +41,8 @@ namespace BidirectionalInMemGraph
             stored.Region != column ||
             !SD::ValidateStortedRegionSchema(
                 stored,
-                APCCache_.FabricOwnerPtr_->FVolatileCache_.PerAPCRuntimeCellCount_,
-                APCCache_.FabricOwnerPtr_->FVolatileCache_.MatrixBatchCapacity_
+                APCCache_.FabricOwnerPtr_->FabCache_.PerAPCRuntimeCellCount_,
+                APCCache_.FabricOwnerPtr_->FabCache_.MatrixBatchCapacity_
             )
         )
         {
@@ -68,8 +68,8 @@ namespace BidirectionalInMemGraph
         const uint64_t local_data_cell = static_cast<uint64_t>(stored.CellOffset) + (static_cast<std::uint64_t>(record_ordinal) * stride_cells.value());
 
         if (
-            local_data_cell >= APCCache_.FabricOwnerPtr_->FVolatileCache_.PerAPCRuntimeCellCount_ ||
-            matrix_cells.value() > APCCache_.FabricOwnerPtr_->FVolatileCache_.PerAPCRuntimeCellCount_ - local_data_cell
+            local_data_cell >= APCCache_.FabricOwnerPtr_->FabCache_.PerAPCRuntimeCellCount_ ||
+            matrix_cells.value() > APCCache_.FabricOwnerPtr_->FabCache_.PerAPCRuntimeCellCount_ - local_data_cell
         )
         {
             return false;

@@ -99,7 +99,7 @@ namespace BidirectionalInMemGraph
             !IsDesiredIndexValidInSLab(slab_starting_idx + number_of_cells - 1) ||
             !desired_units ||
             number_of_cells == UNSIGNED_ZERO ||
-            number_of_cells > FVolatileCache_.SlabCellCount_ - slab_starting_idx
+            number_of_cells > FabCache_.SlabCellCount_ - slab_starting_idx
         )
         {
             return false;
@@ -127,21 +127,21 @@ namespace BidirectionalInMemGraph
     {
         if (
             !SlabBasePtr_ ||
-            slot >= FVolatileCache_.CountOfAPC_ ||
-            FVolatileCache_.HandleTableBeginIndex_ >= FVolatileCache_.SlabCellCount_
+            slot >= FabCache_.CountOfAPC_ ||
+            FabCache_.HandleTableBeginIndex_ >= FabCache_.SlabCellCount_
         )
         {
             return nullptr;
         }
         
-        const size_t idx = FVolatileCache_.HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
+        const size_t idx = FabCache_.HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
 
-        return idx < FVolatileCache_.SlabCellCount_ ? &SlabBasePtr_[idx] : nullptr;
+        return idx < FabCache_.SlabCellCount_ ? &SlabBasePtr_[idx] : nullptr;
     }
 
     bool APCHandleAndRetirement::InitializeAPCGenerationTable_() noexcept
     {
-        for (uint32_t slot = 0; slot < FVolatileCache_.CountOfAPC_; slot++)
+        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; slot++)
         {
             uint64_t* cell = GetAPCGenerationPtr_(slot);
             if (!cell)

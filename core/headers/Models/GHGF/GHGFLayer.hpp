@@ -66,7 +66,7 @@ namespace BidirectionalInMemGraph
         {
             uint32_t Parent;
             uint32_t Child;
-            FabricSegments Axis;
+            FabricSegments Edge;
             float Coupling = 1.0f;
         };
 

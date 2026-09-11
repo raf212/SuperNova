@@ -35,8 +35,8 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::IsGHGFPlanCurrent_() noexcept
     {
-        return IsFabricActive() && HGFCache_.ModelPrepared_ &&
-            HGFCache_.PreparedRevision_ == CompiledDagRevision_.load(std::memory_order_acquire);
+        return IsFabricActive() && GHGFCache_.ModelPrepared_ &&
+            GHGFCache_.PreparedRevision_ == CompiledDagRevision_.load(std::memory_order_acquire);
     }
 
     float* GHGFModelConstructor::GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept
@@ -46,13 +46,13 @@ namespace BidirectionalInMemGraph
 
     float* GHGFModelConstructor::GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept
     {
-        return GHGFRegion_(slot, HGFCache_.StateCellOffset_) +
+        return GHGFRegion_(slot, GHGFCache_.StateCellOffset_) +
             static_cast<size_t>(row) * Profile_.BatchCapacity;
     }
 
     float* GHGFModelConstructor::GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept
     {
-        return GHGFRegion_(slot, HGFCache_.ErrorCellOffset_) +
+        return GHGFRegion_(slot, GHGFCache_.ErrorCellOffset_) +
             static_cast<size_t>(row) * Profile_.BatchCapacity;
     }
 
@@ -65,9 +65,9 @@ namespace BidirectionalInMemGraph
 
     void GHGFModelConstructor::InvalidateGHGFModel_() noexcept
     {
-        HGFCache_.ModelPrepared_ = false;
-        HGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
-        HGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
+        GHGFCache_.ModelPrepared_ = false;
+        GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+        GHGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
     }
 
 
@@ -87,8 +87,8 @@ namespace BidirectionalInMemGraph
         }
         
         InvalidateGHGFModel_();
-        HGFCache_.NodeCount_ = UNSIGNED_ZERO;
-        HGFCache_.ObservationCount_ = UNSIGNED_ZERO;
+        GHGFCache_.NodeCount_ = UNSIGNED_ZERO;
+        GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         DefaultRegionTable_ = profile.DefaultSchemaTable;
         HasDefaultRegionTable_ = true;
 
@@ -110,9 +110,9 @@ namespace BidirectionalInMemGraph
         {
             switch (record.Region)
             {
-            case MacroColumnOfAPC::STATE_SLOT: HGFCache_.StateCellOffset_ = record.CellOffset; break;
-            case MacroColumnOfAPC::ERROR_SLOT: HGFCache_.ErrorCellOffset_ = record.CellOffset; break;
-            case MacroColumnOfAPC::WEIGHT_SLOT: HGFCache_.WeightCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::STATE_SLOT: GHGFCache_.StateCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::ERROR_SLOT: GHGFCache_.ErrorCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::WEIGHT_SLOT: GHGFCache_.WeightCellOffset_ = record.CellOffset; break;
             default: 
                 break;
             }
@@ -161,7 +161,7 @@ namespace BidirectionalInMemGraph
             InvalidateGHGFModel_();
         };
         
-        for (uint32_t i = 0; i < FVolatileCache_.CountOfAPC_; i++)
+        for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
         {
             if (!CreateNodeOfGHGF(model_values.APCNodes[i], model_values.RoleSpan[i]))
             {
@@ -206,20 +206,50 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    // bool GHGFModelConstructor::ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept
-    // {
-    //     GHGFNode parent, child;
-    //     APCUseScope parent_use, child_use;
+    bool GHGFModelConstructor::ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept
+    {
+        GHGFNode parent, child;
+        APCUseScope parent_use, child_use;
 
-    //     if (
-    //         !GetGHGFNode_(connection.parent, parent, parent_use) ||
-    //         !GetGHGFNode_(connection.Child, parent, parent_use) ||
-    //     )
-    //     {
-    //         /* code */
-    //     }
+        if (
+            !GetGHGFNode_(connection.Parent, parent, parent_use) ||
+            !GetGHGFNode_(connection.Child, parent, parent_use) ||
+            !CoreOfFabricCoordinator::IsValidEdgeTable(connection.Edge) ||
+            !std::isfinite(connection.Coupling) ||
+            parent.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION
+        )
+        {
+            return false;
+        }
         
-    // }
+        if (
+            child.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION &&
+            (
+                connection.Edge != FabricSegments::VALUE_PARENT_EDGE_TABLE_H ||
+                connection.Coupling != GM::StorageConst::ONE
+            )
+        )
+        {
+            return false;
+        }
+
+        InvalidateGHGFModel_();
+
+        const std::span<EdgeBuilder::ParentRelation> retations = ParentRelations_(connection.Edge, connection.Child);
+        for (uint8_t i = 0; i < FabCache_.MaxDirectParentsPerAxis_; i++)
+        {
+            if (
+                !EdgeBuilder::IsEmpty(retations[i]) &&
+                EdgeBuilder::ParentSlot(retations[i]) == connection.Parent
+            )
+            {
+                GHGFRegion_(connection.Child, GHGFCache_.WeightCellOffset_)[GM::CouplingIndex(connection.Edge, i, FabCache_.MaxDirectParentsPerAxis_)] = connection.Coupling;
+                return true;
+            }
+        }
+        child.RemoveParent(parent, connection.Edge);
+        return false;
+    }
 
 
 }

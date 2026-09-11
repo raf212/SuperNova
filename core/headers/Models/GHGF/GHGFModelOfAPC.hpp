@@ -19,7 +19,7 @@ namespace BidirectionalInMemGraph
             std::span<const GM::GHGFConnection> ConnectionSpan{};            
         };
     private:
-        GM::GHGFCache HGFCache_{};
+        GM::GHGFCache GHGFCache_{};
         GM::GHGFStorageProfile Profile_{};
         bool IsGHGFPlanCurrent_() noexcept;
 
@@ -38,7 +38,8 @@ namespace BidirectionalInMemGraph
         using APCFinilizer::ShutDownFabric;
         using APCFinilizer::IsFabricActive;
 
-
+        bool RemoveParent(const GM::GHGFConnection& connection) noexcept;
+        
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
         
         bool ResetGHGFState() noexcept;

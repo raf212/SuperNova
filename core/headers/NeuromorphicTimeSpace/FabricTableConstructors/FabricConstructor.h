@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph
     protected:
         uint64_t* SlabBasePtr_{nullptr};
 
-        FabricCache FVolatileCache_{};
+        FabricCache FabCache_{};
     
         std::atomic<bool> FabricInitialized_{false};
         std::atomic<bool> InitializationInProgress_{false};
@@ -85,7 +85,7 @@ namespace BidirectionalInMemGraph
 
         constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
         {
-            if (SlabBasePtr_ && desired_idx < FVolatileCache_.SlabCellCount_)
+            if (SlabBasePtr_ && desired_idx < FabCache_.SlabCellCount_)
             {
                 return true;
             }
@@ -94,7 +94,7 @@ namespace BidirectionalInMemGraph
 
         constexpr size_t SlotBegin_(uint32_t slot) noexcept
         {
-            return FVolatileCache_.SegmentPoolBegin_ + static_cast<size_t>(slot) * FVolatileCache_.PerAPCRuntimeCellCount_;
+            return FabCache_.SegmentPoolBegin_ + static_cast<size_t>(slot) * FabCache_.PerAPCRuntimeCellCount_;
         }
 
         template<typename T>
@@ -106,7 +106,7 @@ namespace BidirectionalInMemGraph
             }
             if (
                 count > SIZE_MAX / sizeof(T) ||
-                FVolatileCache_.SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
+                FabCache_.SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
             )
             {
                 return true;
@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
             const uintptr_t slab = reinterpret_cast<uintptr_t>(SlabBasePtr_);
             const size_t bytes = count * sizeof(T);
-            const size_t slab_bytes = FVolatileCache_.SlabCellCount_ * sizeof(uint64_t);
+            const size_t slab_bytes = FabCache_.SlabCellCount_ * sizeof(uint64_t);
 
             return begin >= slab
                 ? begin - slab < slab_bytes

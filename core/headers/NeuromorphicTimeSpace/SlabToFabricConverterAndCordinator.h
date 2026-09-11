@@ -46,8 +46,8 @@ namespace BidirectionalInMemGraph
             return
                 FabricInitialized_.load(std::memory_order_acquire) &&
                 SlabBasePtr_ &&
-                ADS::IsValid32BitAPCUnit(FVolatileCache_.PerAPCRuntimeCellCount_) &&
-                ADS::IsValid32BitAPCUnit(FVolatileCache_.CountOfAPC_);
+                ADS::IsValid32BitAPCUnit(FabCache_.PerAPCRuntimeCellCount_) &&
+                ADS::IsValid32BitAPCUnit(FabCache_.CountOfAPC_);
         }
 
         bool InitializeFabric(

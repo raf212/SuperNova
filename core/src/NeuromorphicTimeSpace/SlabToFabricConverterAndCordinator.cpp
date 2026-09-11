@@ -35,12 +35,12 @@ namespace BidirectionalInMemGraph
     void SlabToFabricConverterAndCordinator::ResetScalarsofTheFabric_() noexcept
     {
         SlabBasePtr_ = nullptr;
-        FVolatileCache_.SlabCellCount_ = UNSIGNED_ZERO;
-        FVolatileCache_.PerAPCRuntimeCellCount_ = UNSIGNED_ZERO;
-        FVolatileCache_.CountOfAPC_ = UNSIGNED_ZERO;
-        FVolatileCache_.MaxDirectParentsPerAxis_ = UNSIGNED_ZERO;
-        FVolatileCache_.EdgeTableRecordWidth_ = UNSIGNED_ZERO;
-        FVolatileCache_.SegmentPoolBegin_ = CoreOfFabricCoordinator::FABRIC_UNIT_COUNT;
+        FabCache_.SlabCellCount_ = UNSIGNED_ZERO;
+        FabCache_.PerAPCRuntimeCellCount_ = UNSIGNED_ZERO;
+        FabCache_.CountOfAPC_ = UNSIGNED_ZERO;
+        FabCache_.MaxDirectParentsPerAxis_ = UNSIGNED_ZERO;
+        FabCache_.EdgeTableRecordWidth_ = UNSIGNED_ZERO;
+        FabCache_.SegmentPoolBegin_ = CoreOfFabricCoordinator::FABRIC_UNIT_COUNT;
         FabricInitialized_.store(false, std::memory_order_release);
         InitializationInProgress_.store(false, std::memory_order_release);
     }
@@ -57,19 +57,19 @@ namespace BidirectionalInMemGraph
         }
 
         SlabBasePtr_[static_cast<size_t>(FMI::MAGIC)] = CoreOfFabricCoordinator::FABRIC_MAGIC;
-        SlabBasePtr_[static_cast<size_t>(FMI::TOTAL_CELLS)] = FVolatileCache_.SlabCellCount_;
-        SlabBasePtr_[static_cast<size_t>(FMI::SEGMENT_POOL_BEGIN_IDX)] = FVolatileCache_.SegmentPoolBegin_;
-        SlabBasePtr_[static_cast<size_t>(FMI::PER_APC_RUNTIME_CELL_COUNT)] = FVolatileCache_.PerAPCRuntimeCellCount_;
+        SlabBasePtr_[static_cast<size_t>(FMI::TOTAL_CELLS)] = FabCache_.SlabCellCount_;
+        SlabBasePtr_[static_cast<size_t>(FMI::SEGMENT_POOL_BEGIN_IDX)] = FabCache_.SegmentPoolBegin_;
+        SlabBasePtr_[static_cast<size_t>(FMI::PER_APC_RUNTIME_CELL_COUNT)] = FabCache_.PerAPCRuntimeCellCount_;
         SlabBasePtr_[static_cast<size_t>(FMI::RECORD_BOOK_OF_TSC_BEGIN)] = record_book_begin;
         SlabBasePtr_[static_cast<size_t>(FMI::RECORD_BOOK_OF_TSC_END)] = record_book_end;
         SlabBasePtr_[static_cast<size_t>(FMI::FIRST_FREE_IDX)] = UNSIGNED_ZERO;
-        SlabBasePtr_[static_cast<size_t>(FMI::EDGE_TABLE_RECORD_WIDTH)] = FVolatileCache_.EdgeTableRecordWidth_;
-        SlabBasePtr_[static_cast<size_t>(FMI::MAX_DIRECT_PARENTS_PER_AXIS)] = FVolatileCache_.MaxDirectParentsPerAxis_;
-        SlabBasePtr_[static_cast<size_t>(FMI::ACTIVE_REGION_MASK)] = FVolatileCache_.ActiveRegionMask_;
-        SlabBasePtr_[static_cast<size_t>(FMI::ACTIVE_REGION_COUNT)] = FVolatileCache_.ActiveRegionCount_;
+        SlabBasePtr_[static_cast<size_t>(FMI::EDGE_TABLE_RECORD_WIDTH)] = FabCache_.EdgeTableRecordWidth_;
+        SlabBasePtr_[static_cast<size_t>(FMI::MAX_DIRECT_PARENTS_PER_AXIS)] = FabCache_.MaxDirectParentsPerAxis_;
+        SlabBasePtr_[static_cast<size_t>(FMI::ACTIVE_REGION_MASK)] = FabCache_.ActiveRegionMask_;
+        SlabBasePtr_[static_cast<size_t>(FMI::ACTIVE_REGION_COUNT)] = FabCache_.ActiveRegionCount_;
         SlabBasePtr_[static_cast<size_t>(FMI::REGION_SCHEMA_RECORD_CELL_COUNT)] = SD::RegionSchemaCellCount();
-        SlabBasePtr_[static_cast<size_t>(FMI::DEVICE_VIEW_ROW_CELL_COUNT)] = FVolatileCache_.MatrixViewRowCellCount_;
-        SlabBasePtr_[static_cast<size_t>(FMI::MATRIC_BATCH_CAPACITY)] = FVolatileCache_.MatrixBatchCapacity_;
+        SlabBasePtr_[static_cast<size_t>(FMI::DEVICE_VIEW_ROW_CELL_COUNT)] = FabCache_.MatrixViewRowCellCount_;
+        SlabBasePtr_[static_cast<size_t>(FMI::MATRIC_BATCH_CAPACITY)] = FabCache_.MatrixBatchCapacity_;
         SlabBasePtr_[static_cast<size_t>(FMI::REGION_ALLIGNMENT_CELL_COUNT)] = SD::REGION_ALIGNMENT_CELLS;
         SlabBasePtr_[static_cast<size_t>(FMI::EOF_FABRIC_HEADER)] = CoreOfFabricCoordinator::FABRIC_META_EOF;
     }
@@ -144,16 +144,16 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        FVolatileCache_.MaxDirectParentsPerAxis_ = max_direct_parent_per_axis;
-        FVolatileCache_.EdgeTableRecordWidth_ = static_cast<uint16_t>(EdgeBuilder::EdgeTableRecordWidth(FVolatileCache_.MaxDirectParentsPerAxis_));
-        FVolatileCache_.CountOfAPC_ = static_cast<uint64_t>(slot_count);
-        FVolatileCache_.PerAPCRuntimeCellCount_ = static_cast<uint32_t>(slot_cell_count);
+        FabCache_.MaxDirectParentsPerAxis_ = max_direct_parent_per_axis;
+        FabCache_.EdgeTableRecordWidth_ = static_cast<uint16_t>(EdgeBuilder::EdgeTableRecordWidth(FabCache_.MaxDirectParentsPerAxis_));
+        FabCache_.CountOfAPC_ = static_cast<uint64_t>(slot_count);
+        FabCache_.PerAPCRuntimeCellCount_ = static_cast<uint32_t>(slot_cell_count);
 
-        FVolatileCache_.ActiveRegionMask_ = active_mask;
-        FVolatileCache_.ActiveRegionCount_ = active_count;
-        FVolatileCache_.MatrixBatchCapacity_ = region_conf.BatchCapacity;
-        FVolatileCache_.MatrixViewRowCellCount_ = static_cast<uint16_t>(
-            static_cast<uint16_t>(FVolatileCache_.ActiveRegionCount_) *
+        FabCache_.ActiveRegionMask_ = active_mask;
+        FabCache_.ActiveRegionCount_ = active_count;
+        FabCache_.MatrixBatchCapacity_ = region_conf.BatchCapacity;
+        FabCache_.MatrixViewRowCellCount_ = static_cast<uint16_t>(
+            static_cast<uint16_t>(FabCache_.ActiveRegionCount_) *
             SD::RegionSchemaCellCount()
         );
 
@@ -163,48 +163,48 @@ namespace BidirectionalInMemGraph
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(record_book_end);
         const size_t horizontal_edge_begin = cursor;
-        const size_t horizontal_edge_end = horizontal_edge_begin + static_cast<size_t>(FVolatileCache_.CountOfAPC_) * FVolatileCache_.EdgeTableRecordWidth_;
+        const size_t horizontal_edge_end = horizontal_edge_begin + static_cast<size_t>(FabCache_.CountOfAPC_) * FabCache_.EdgeTableRecordWidth_;
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(horizontal_edge_end);
         const size_t matrix_view_table_begin = cursor;
-        const size_t matrix_view_table_end = matrix_view_table_begin + static_cast<size_t>(FVolatileCache_.CountOfAPC_ * FVolatileCache_.MatrixViewRowCellCount_);
+        const size_t matrix_view_table_end = matrix_view_table_begin + static_cast<size_t>(FabCache_.CountOfAPC_ * FabCache_.MatrixViewRowCellCount_);
         
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(matrix_view_table_end);
         const size_t vertical_edge_begin = cursor;
         const size_t vertical_edge_end = vertical_edge_begin + 
-                static_cast<size_t>(FVolatileCache_.CountOfAPC_) * FVolatileCache_.EdgeTableRecordWidth_;
+                static_cast<size_t>(FabCache_.CountOfAPC_) * FabCache_.EdgeTableRecordWidth_;
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(vertical_edge_end);
         const size_t apc_handle_table_begin = cursor;
-        const size_t apc_handle_table_end = apc_handle_table_begin + static_cast<size_t>(FVolatileCache_.CountOfAPC_ * HandleOfAPCStatic::HANDLE_TABLE_WIDTH);
+        const size_t apc_handle_table_end = apc_handle_table_begin + static_cast<size_t>(FabCache_.CountOfAPC_ * HandleOfAPCStatic::HANDLE_TABLE_WIDTH);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(apc_handle_table_end);
         const size_t compiled_dag_begin = cursor;
-        const size_t compiled_dag_end = compiled_dag_begin + static_cast<size_t>(FVolatileCache_.CountOfAPC_ * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
+        const size_t compiled_dag_end = compiled_dag_begin + static_cast<size_t>(FabCache_.CountOfAPC_ * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(compiled_dag_end);
         const size_t device_planner_begain = cursor;
-        const size_t device_planner_end = device_planner_begain + static_cast<size_t>(FVolatileCache_.CountOfAPC_ * CoreOfFabricCoordinator::DEVICE_PLANNER_RECORD_LEN);
+        const size_t device_planner_end = device_planner_begain + static_cast<size_t>(FabCache_.CountOfAPC_ * CoreOfFabricCoordinator::DEVICE_PLANNER_RECORD_LEN);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(device_planner_end);
         const size_t work_queue_begin = cursor;
-        const size_t work_queue_end = work_queue_begin + static_cast<size_t>(FVolatileCache_.CountOfAPC_ * CoreOfFabricCoordinator::WORK_RECORD_WIDTH_OF_FABRIC);
+        const size_t work_queue_end = work_queue_begin + static_cast<size_t>(FabCache_.CountOfAPC_ * CoreOfFabricCoordinator::WORK_RECORD_WIDTH_OF_FABRIC);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(work_queue_end);
-        FVolatileCache_.SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
-        FVolatileCache_.SlabCellCount_ = FVolatileCache_.SegmentPoolBegin_ + static_cast<size_t>(FVolatileCache_.CountOfAPC_ * FVolatileCache_.PerAPCRuntimeCellCount_);
+        FabCache_.SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
+        FabCache_.SlabCellCount_ = FabCache_.SegmentPoolBegin_ + static_cast<size_t>(FabCache_.CountOfAPC_ * FabCache_.PerAPCRuntimeCellCount_);
 
-        if (FVolatileCache_.SlabCellCount_ == UNSIGNED_ZERO || FVolatileCache_.SlabCellCount_ >= FABRIC_CELL_SENTINAL)
+        if (FabCache_.SlabCellCount_ == UNSIGNED_ZERO || FabCache_.SlabCellCount_ >= FABRIC_CELL_SENTINAL)
         {
             return false;
         }
-        SlabBasePtr_ = AllocatePackedCellRaw_(FVolatileCache_.SlabCellCount_);
+        SlabBasePtr_ = AllocatePackedCellRaw_(FabCache_.SlabCellCount_);
         if (!SlabBasePtr_)
         {
             return false;
         }
 
-        for (size_t idx = 0; idx < FVolatileCache_.SlabCellCount_; idx++)
+        for (size_t idx = 0; idx < FabCache_.SlabCellCount_; idx++)
         {
             DirectlyStoreFabricUnit64(idx, UNSIGNED_ZERO);
         }
@@ -220,12 +220,12 @@ namespace BidirectionalInMemGraph
         WriteARecordBookOfTSCEntry_(FabricSegments::DEVICE_PLANNER_TABLE, device_planner_begain, device_planner_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::WORK_QUEUE, work_queue_begin, work_queue_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::MATRIX_VIEW_TABLE, matrix_view_table_begin, matrix_view_table_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::SEGMENT_POOL, FVolatileCache_.SegmentPoolBegin_, FVolatileCache_.SlabCellCount_);
+        WriteARecordBookOfTSCEntry_(FabricSegments::SEGMENT_POOL, FabCache_.SegmentPoolBegin_, FabCache_.SlabCellCount_);
 
-        FVolatileCache_.HorizontalEdgeBeginIdx_ = horizontal_edge_begin;
-        FVolatileCache_.VerticalEdgeBeginIdx_ = vertical_edge_begin;
-        FVolatileCache_.HandleTableBeginIndex_ = apc_handle_table_begin;
-        FVolatileCache_.MatrixViewTableBeginIndex_ = matrix_view_table_begin;
+        FabCache_.HorizontalEdgeBeginIdx_ = horizontal_edge_begin;
+        FabCache_.VerticalEdgeBeginIdx_ = vertical_edge_begin;
+        FabCache_.HandleTableBeginIndex_ = apc_handle_table_begin;
+        FabCache_.MatrixViewTableBeginIndex_ = matrix_view_table_begin;
 
         if (!ConstructMatrixViewRecords_(matrix_view_table_begin, matrix_view_table_end))
         {
@@ -234,7 +234,7 @@ namespace BidirectionalInMemGraph
 
         if (HasDefaultRegionTable_)
         {
-            for (uint32_t i = 0; i < FVolatileCache_.CountOfAPC_; i++)
+            for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
             {
                 if (
                     !PrepareMatrixViewRow_(i, DefaultRegionTable_) ||
@@ -284,7 +284,7 @@ namespace BidirectionalInMemGraph
 
         if (was_active && SlabBasePtr_)
         {
-            for (uint32_t slot = 0u; slot < FVolatileCache_.CountOfAPC_; ++slot)
+            for (uint32_t slot = 0u; slot < FabCache_.CountOfAPC_; ++slot)
             {
                 std::atomic_ref<uint64_t>(*GetAPCGenerationPtr_(slot)).fetch_or(
                     HandleOfAPCStatic::CLOSED_MASK,
@@ -292,7 +292,7 @@ namespace BidirectionalInMemGraph
                 );
             }
 
-            for (uint32_t slot = 0u; slot < FVolatileCache_.CountOfAPC_; ++slot)
+            for (uint32_t slot = 0u; slot < FabCache_.CountOfAPC_; ++slot)
             {
                 std::atomic_ref<uint64_t> control(*GetAPCGenerationPtr_(slot));
                 while (
@@ -305,16 +305,16 @@ namespace BidirectionalInMemGraph
         }
 
         uint64_t* old_ptr = SlabBasePtr_;
-        const size_t old_count = FVolatileCache_.SlabCellCount_;
+        const size_t old_count = FabCache_.SlabCellCount_;
         SlabBasePtr_ = nullptr;
-        FVolatileCache_.SlabCellCount_ = UNSIGNED_ZERO;
+        FabCache_.SlabCellCount_ = UNSIGNED_ZERO;
 
         if (old_ptr)
         {
             FreeRawPackedCells_(old_ptr, old_count);
         }
 
-        FVolatileCache_.CompiledDagTableBeginIdx_ = UNSIGNED_ZERO;
+        FabCache_.CompiledDagTableBeginIdx_ = UNSIGNED_ZERO;
         CompiledDagRevision_.fetch_add(1u, std::memory_order_release);
         ResetScalarsofTheFabric_();
     }

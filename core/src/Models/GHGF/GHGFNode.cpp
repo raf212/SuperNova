@@ -124,11 +124,11 @@ namespace BidirectionalInMemGraph
     void GHGFNode::ResetAPCGHGFStateRegion_() noexcept
     {
         std::fill_n(
-            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->HGFCache_.StateCellOffset_),
+            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->GHGFCache_.StateCellOffset_),
             static_cast<size_t>(GM::STATE_ROW_COUNT_HEIGHT) * GHGFFabric_->Profile_.BatchCapacity, GM::StorageConst::ZERO
         );
         std::fill_n(
-            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->HGFCache_.ErrorCellOffset_),
+            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->GHGFCache_.ErrorCellOffset_),
             static_cast<size_t>(GM::ERROR_ROW_COUNT_HEIGHT) * GHGFFabric_->Profile_.BatchCapacity, GM::StorageConst::ZERO
         );
         const float initial_mean = GHGFRole_() == GM::GHGFNodeRole::OBSERVATION ?

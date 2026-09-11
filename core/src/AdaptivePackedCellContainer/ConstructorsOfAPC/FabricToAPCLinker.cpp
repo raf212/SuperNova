@@ -14,7 +14,7 @@ namespace BidirectionalInMemGraph
         if (
             !raw_cells_ptr ||
             !fabric_owner ||
-            !ADS::IsCapacityOfAPCValid(fabric_owner->FVolatileCache_.PerAPCRuntimeCellCount_) ||
+            !ADS::IsCapacityOfAPCValid(fabric_owner->FabCache_.PerAPCRuntimeCellCount_) ||
             !ADS::IsValid32BitAPCUnit(fabric_slot_idx) ||
             IsFabricBound_()
         )
@@ -24,7 +24,7 @@ namespace BidirectionalInMemGraph
         const ADS::RangeOfAPC range_of_this_apc = fabric_owner->GetSegmentPoolRange(fabric_slot_idx);
         if (
             !range_of_this_apc.IsValid ||
-            range_of_this_apc.EndIndex - range_of_this_apc.BeginIndex != fabric_owner->FVolatileCache_.PerAPCRuntimeCellCount_
+            range_of_this_apc.EndIndex - range_of_this_apc.BeginIndex != fabric_owner->FabCache_.PerAPCRuntimeCellCount_
         )
         {
             return false;
@@ -34,7 +34,7 @@ namespace BidirectionalInMemGraph
             static_cast<uint32_t>(fabric_slot_idx)
         );
 
-        if (region_row.size() != fabric_owner->FVolatileCache_.ActiveRegionCount_)
+        if (region_row.size() != fabric_owner->FabCache_.ActiveRegionCount_)
         {
             return false;
         }
@@ -73,7 +73,7 @@ namespace BidirectionalInMemGraph
             !HeaderOrchestrator::InitializeDefaultHeaderBuffer(
                 header_meta_buffer,
                 APCCache_.APCSlotIdx_,
-                APCCache_.FabricOwnerPtr_->FVolatileCache_.PerAPCRuntimeCellCount_
+                APCCache_.FabricOwnerPtr_->FabCache_.PerAPCRuntimeCellCount_
             )
         )
         {

@@ -14,13 +14,13 @@ namespace BidirectionalInMemGraph
 
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            row_slot >= FVolatileCache_.CountOfAPC_ ||
+            row_slot >= FabCache_.CountOfAPC_ ||
             !EdgeBuilder::IsValidConfigurableParentCapacity(
-                FVolatileCache_.MaxDirectParentsPerAxis_
+                FabCache_.MaxDirectParentsPerAxis_
             ) ||
-            FVolatileCache_.EdgeTableRecordWidth_ !=
+            FabCache_.EdgeTableRecordWidth_ !=
                 EdgeBuilder::EdgeTableRecordWidth(
-                    FVolatileCache_.MaxDirectParentsPerAxis_
+                    FabCache_.MaxDirectParentsPerAxis_
                 )
         )
         {
@@ -29,16 +29,16 @@ namespace BidirectionalInMemGraph
 
         const uint64_t table_begin =
             edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H
-                ? FVolatileCache_.HorizontalEdgeBeginIdx_
-                : FVolatileCache_.VerticalEdgeBeginIdx_;
+                ? FabCache_.HorizontalEdgeBeginIdx_
+                : FabCache_.VerticalEdgeBeginIdx_;
 
         range.BeginIndex = table_begin +
-            static_cast<uint64_t>(row_slot) * FVolatileCache_.EdgeTableRecordWidth_;
-        range.EndIndex = range.BeginIndex + FVolatileCache_.EdgeTableRecordWidth_;
+            static_cast<uint64_t>(row_slot) * FabCache_.EdgeTableRecordWidth_;
+        range.EndIndex = range.BeginIndex + FabCache_.EdgeTableRecordWidth_;
         range.IsValid =
             range.BeginIndex >= table_begin &&
             range.BeginIndex < range.EndIndex &&
-            range.EndIndex <= FVolatileCache_.SlabCellCount_;
+            range.EndIndex <= FabCache_.SlabCellCount_;
         return range;
     }
 
@@ -64,7 +64,7 @@ namespace BidirectionalInMemGraph
 
         return {
             first,
-            static_cast<size_t>(FVolatileCache_.MaxDirectParentsPerAxis_)
+            static_cast<size_t>(FabCache_.MaxDirectParentsPerAxis_)
         };
     }
 
@@ -86,7 +86,7 @@ namespace BidirectionalInMemGraph
         );
 
         for (uint8_t ordinal = 0u;
-            ordinal < FVolatileCache_.MaxDirectParentsPerAxis_;
+            ordinal < FabCache_.MaxDirectParentsPerAxis_;
             ++ordinal)
         {
             std::construct_at(first + ordinal);
@@ -105,7 +105,7 @@ namespace BidirectionalInMemGraph
         }
 
         for (uint32_t row_slot = 0u;
-            row_slot < FVolatileCache_.CountOfAPC_;
+            row_slot < FabCache_.CountOfAPC_;
             ++row_slot)
         {
             const EdgeTableRange range =
@@ -171,10 +171,10 @@ namespace BidirectionalInMemGraph
 
         if (
             !range.IsValid ||
-            stored.size() != FVolatileCache_.MaxDirectParentsPerAxis_ ||
+            stored.size() != FabCache_.MaxDirectParentsPerAxis_ ||
             !EdgeBuilder::IsValidRelationOrdinal(
                 relation_ordinal,
-                FVolatileCache_.MaxDirectParentsPerAxis_
+                FabCache_.MaxDirectParentsPerAxis_
             )
         )
         {

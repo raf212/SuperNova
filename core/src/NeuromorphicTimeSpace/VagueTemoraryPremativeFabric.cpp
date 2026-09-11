@@ -15,7 +15,7 @@ namespace BidirectionalInMemGraph
     {
         if (
             !IsFabricActive() ||
-            slot >= FVolatileCache_.CountOfAPC_ ||
+            slot >= FabCache_.CountOfAPC_ ||
             apc.IsFabricBound_() ||
             apc_use ||
             (
@@ -96,13 +96,13 @@ namespace BidirectionalInMemGraph
     {
         child = AdaptivePackedCellContainer{};
         if (
-            parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            parent_slot >= FabCache_.CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             !EdgeBuilder::IsValidRelationLocator(
                 locator,
-                static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
-                FVolatileCache_.MaxDirectParentsPerAxis_
+                static_cast<uint32_t>(FabCache_.CountOfAPC_),
+                FabCache_.MaxDirectParentsPerAxis_
             )
         )
         {
@@ -189,12 +189,12 @@ namespace BidirectionalInMemGraph
         AdaptivePackedCellContainer parent{};
         
         if (
-            child_slot >= FVolatileCache_.CountOfAPC_ ||
+            child_slot >= FabCache_.CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(child_generation) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             !EdgeBuilder::IsValidRelationOrdinal(
                 relation_ordinal,
-                FVolatileCache_.MaxDirectParentsPerAxis_
+                FabCache_.MaxDirectParentsPerAxis_
             )
         )
         {
@@ -281,7 +281,7 @@ namespace BidirectionalInMemGraph
 
 
         if (
-            parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            parent_slot >= FabCache_.CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
         )
@@ -394,7 +394,7 @@ namespace BidirectionalInMemGraph
         FabricToAPCLinker::RelationOparation result{};
         AdaptivePackedCellContainer child{};
         if (
-            parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            parent_slot >= FabCache_.CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
         )
@@ -487,13 +487,13 @@ namespace BidirectionalInMemGraph
         FabricToAPCLinker::RelationOparation result{};
         AdaptivePackedCellContainer child{};
         if (
-            parent_slot >= FVolatileCache_.CountOfAPC_  ||
+            parent_slot >= FabCache_.CountOfAPC_  ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             !EdgeBuilder::IsValidRelationLocator(
                 current_relation_locator,
-                static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
-                FVolatileCache_.MaxDirectParentsPerAxis_
+                static_cast<uint32_t>(FabCache_.CountOfAPC_),
+                FabCache_.MaxDirectParentsPerAxis_
             )
         )
         {
@@ -628,13 +628,13 @@ namespace BidirectionalInMemGraph
         AdaptivePackedCellContainer child{};
 
         if (
-            parent_slot >= FVolatileCache_.CountOfAPC_ ||
+            parent_slot >= FabCache_.CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             !EdgeBuilder::IsValidRelationLocator(
                 current_relation_locator,
-                static_cast<uint32_t>(FVolatileCache_.CountOfAPC_),
-                FVolatileCache_.MaxDirectParentsPerAxis_
+                static_cast<uint32_t>(FabCache_.CountOfAPC_),
+                FabCache_.MaxDirectParentsPerAxis_
             )
         )
         {
@@ -938,12 +938,12 @@ namespace BidirectionalInMemGraph
         auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept -> bool
         {
             std::span<EdgeBuilder::ParentRelation> relations = ParentRelations_(table, slot);
-            if (relations.size() != FVolatileCache_.MaxDirectParentsPerAxis_)
+            if (relations.size() != FabCache_.MaxDirectParentsPerAxis_)
             {
                 return false;
             }
 
-            for (uint8_t ordinal = 0; ordinal < FVolatileCache_.MaxDirectParentsPerAxis_; ordinal++)
+            for (uint8_t ordinal = 0; ordinal < FabCache_.MaxDirectParentsPerAxis_; ordinal++)
             {
                 EdgeBuilder::ParentRelation relation{};
                 relation.ParentHandle = std::atomic_ref<uint64_t>(relations[ordinal].ParentHandle).load(std::memory_order_relaxed);
@@ -1012,7 +1012,7 @@ namespace BidirectionalInMemGraph
         if (
             !FabricInitialized_.load(std::memory_order_acquire) ||
             !SlabBasePtr_ || 
-            !ADS::IsCapacityOfAPCValid(FVolatileCache_.PerAPCRuntimeCellCount_)
+            !ADS::IsCapacityOfAPCValid(FabCache_.PerAPCRuntimeCellCount_)
         )
         {
             return std::nullopt;
@@ -1022,7 +1022,7 @@ namespace BidirectionalInMemGraph
 
         if (maybe_First_free.has_value())
         {
-            for (uint32_t description_idx = maybe_First_free.value(); description_idx < FVolatileCache_.CountOfAPC_; description_idx++)
+            for (uint32_t description_idx = maybe_First_free.value(); description_idx < FabCache_.CountOfAPC_; description_idx++)
             {
                 const DSA::SeqLockAndStateStruct current = ReadAPCStateAtomically_(description_idx);
                 if (
@@ -1052,7 +1052,7 @@ namespace BidirectionalInMemGraph
             UpdateFirstFreeIdx_(expected, FABRIC_CELL_SENTINAL);
         }
         
-        for (uint32_t slot = 0; slot < FVolatileCache_.CountOfAPC_; slot++)
+        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; slot++)
         {
             const DSA::SeqLockAndStateStruct current = ReadAPCStateAtomically_(slot);
 
@@ -1075,7 +1075,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         if (
-            slot >= FVolatileCache_.CountOfAPC_ ||
+            slot >= FabCache_.CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(generation)
         )
         {
@@ -1141,13 +1141,13 @@ namespace BidirectionalInMemGraph
             std::span<EdgeBuilder::ParentRelation> relations =
                 ParentRelations_(table, slot);
 
-            if (relations.size() != FVolatileCache_.MaxDirectParentsPerAxis_)
+            if (relations.size() != FabCache_.MaxDirectParentsPerAxis_)
             {
                 return false;
             }
 
             for (uint8_t ordinal = 0u;
-                ordinal < FVolatileCache_.MaxDirectParentsPerAxis_;
+                ordinal < FabCache_.MaxDirectParentsPerAxis_;
                 ++ordinal)
             {
                 EdgeBuilder::ParentRelation relation{};
@@ -1239,7 +1239,7 @@ namespace BidirectionalInMemGraph
 
     bool APCFinilizer::ReclaimRetiredSlotTemp_(uint32_t slot) noexcept
     {
-        if (slot >= FVolatileCache_.CountOfAPC_)
+        if (slot >= FabCache_.CountOfAPC_)
         {
             return false;
         }
@@ -1299,13 +1299,13 @@ namespace BidirectionalInMemGraph
             std::span<EdgeBuilder::ParentRelation> relations =
                 ParentRelations_(table, slot);
 
-            if (relations.size() != FVolatileCache_.MaxDirectParentsPerAxis_)
+            if (relations.size() != FabCache_.MaxDirectParentsPerAxis_)
             {
                 return false;
             }
 
             for (uint8_t ordinal = 0u;
-                ordinal < FVolatileCache_.MaxDirectParentsPerAxis_;
+                ordinal < FabCache_.MaxDirectParentsPerAxis_;
                 ++ordinal)
             {
                 EdgeBuilder::ParentRelation relation{};
