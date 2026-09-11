@@ -244,11 +244,20 @@ namespace BidirectionalInMemGraph
             }
 
             result.Use_ = std::move(parent_use);
-            result.RelationLocator_ = EdgeBuilder::PackRelationLocator(child_slot, relation_ordinal);
+            result.RelationLocator_ = EdgeBuilder::PackRelationLocator(
+                child_slot,
+                relation_ordinal
+            );
             result.MutationOP_ = SeqLockedOperation::FOUND;
+
+            if (result_ptr)
+            {
+                *result_ptr = std::move(result);
+            }
 
             return parent;
         }
+        
         result.MutationOP_ = SeqLockedOperation::RETRY;
         if (result_ptr)
         {
@@ -363,8 +372,13 @@ namespace BidirectionalInMemGraph
             
             return child;
         }
-
         result.MutationOP_ = SeqLockedOperation::RETRY;
+
+        if (result_ptr)
+        {
+            *result_ptr = std::move(result);
+        }
+
         child = AdaptivePackedCellContainer{};
         return child;
     }
@@ -450,6 +464,12 @@ namespace BidirectionalInMemGraph
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
+
+        if (result_ptr)
+        {
+            *result_ptr = std::move(result);
+        }
+
         child = AdaptivePackedCellContainer{};
         return child;
     }
@@ -585,6 +605,12 @@ namespace BidirectionalInMemGraph
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
+
+        if (result_ptr)
+        {
+            *result_ptr = std::move(result);
+        }
+
         child = AdaptivePackedCellContainer{};
         return child;
     }
@@ -730,6 +756,12 @@ namespace BidirectionalInMemGraph
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
+
+        if (result_ptr)
+        {
+            *result_ptr = std::move(result);
+        }
+
         child = AdaptivePackedCellContainer{};
         return child;
     }
