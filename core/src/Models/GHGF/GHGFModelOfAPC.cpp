@@ -5,6 +5,34 @@
 namespace BidirectionalInMemGraph
 { 
 
+    bool GHGFModelConstructor::CreateNodeOfGHGF(
+        GHGFNode& desired_apc,
+        GM::GHGFNodeRole role
+    ) noexcept
+    {
+        if (
+            !IsFabricActive() ||
+            !HasDefaultRegionTable_ ||
+            !CreateAPC(desired_apc, DefaultRegionTable_)
+        )
+        {
+            return false;
+        }
+
+        desired_apc.GHGFFabric_ = this;
+        if (desired_apc.InitializeGHGFNode(role))
+        {
+            return true;
+        }
+        
+        InvalidateGHGFModel_();
+        if (desired_apc.Retire())
+        {
+            desired_apc.GHGFFabric_ = nullptr;
+        }
+        return false;
+    }
+
     bool GHGFModelConstructor::IsGHGFPlanCurrent_() noexcept
     {
         return IsFabricActive() && HGFCache_.ModelPrepared_ &&
@@ -76,6 +104,8 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
+        Profile_ = profile;
+
         for (const SD::RegionSchemaRecord& record : MetrixViewRow_(0u))
         {
             switch (record.Region)
@@ -119,12 +149,23 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
+
+        const auto AbortConstruction___ = [&]() noexcept -> void
+        {
+            ShutDownFabric();
+            for (GHGFNode& node : model_values.APCNodes)
+            {
+                node.ReleseFabricBindingOnly_();
+                node.GHGFFabric_ = nullptr;
+            }
+            InvalidateGHGFModel_();
+        };
         
         for (uint32_t i = 0; i < FVolatileCache_.CountOfAPC_; i++)
         {
             if (!CreateNodeOfGHGF(model_values.APCNodes[i], model_values.RoleSpan[i]))
             {
-                ShutDownFabric();
+                AbortConstruction___();
                 return false;
             }
         }
@@ -133,17 +174,36 @@ namespace BidirectionalInMemGraph
         {
             if (!ConnectGHGFParent(connection))
             {
-                ShutDownFabric();
+                AbortConstruction___();
                 return false;
             }
         }
         
         if (!CompileGHGFModel() ||!ResetGHGFState())
         {
-            ShutDownFabric();
+            AbortConstruction___();
             return false;
         }
         return true;
     }
-            
+
+    bool GHGFModelConstructor::GetGHGFNode_(uint32_t slot, GHGFNode& node, APCUseScope& use) noexcept
+    {
+        if (!GetExistingAPC_(slot, node, use))
+        {
+            return false;
+        }
+
+        node.GHGFFabric_ = this;
+        if (!node.GHGFRole_().has_value())
+        {
+            use.Release();
+            node.ReleseFabricBindingOnly_();
+            node.GHGFFabric_ = nullptr;
+            return false;
+        }
+        
+        return true;
+    }
+
 }

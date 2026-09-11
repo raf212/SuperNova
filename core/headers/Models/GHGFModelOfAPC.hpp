@@ -21,21 +21,23 @@ namespace BidirectionalInMemGraph
     private:
         GM::GHGFCache HGFCache_{};
         GM::GHGFStorageProfile Profile_{};
-
         bool IsGHGFPlanCurrent_() noexcept;
 
         bool PredictGHGFBatch(uint32_t batch) noexcept;
         bool UpdateGHGFBatch(FCSpan observation, uint32_t batch) noexcept;
-        bool CopyGHGFPrediction_(FCSpan prediction, uint32_t batch) noexcept;
+        bool CopyGHGFPrediction_(std::span<float> prediction, uint32_t batch) noexcept;
 
         float* GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept;
         float* GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept;
         float* GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept;
 
         void InvalidateGHGFModel_() noexcept;
-
         uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept;
+        bool GetGHGFNode_(uint32_t slot, GHGFNode& node, APCUseScope& use) noexcept;
     public :
+        using APCFinilizer::ShutDownFabric;
+        using APCFinilizer::IsFabricActive;
+
 
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
         
@@ -51,13 +53,7 @@ namespace BidirectionalInMemGraph
         bool CreateNodeOfGHGF(
             GHGFNode& desired_apc,
             GM::GHGFNodeRole role
-        ) noexcept
-        {
-            return 
-                HasDefaultRegionTable_ && 
-                CreateAPC(desired_apc, DefaultRegionTable_) &&
-                desired_apc.InitializeGHGFNode(role);
-        }
+        ) noexcept;
         
         bool ConstructGHGFModel(
             GHGFModelConstructionValues& model_values,

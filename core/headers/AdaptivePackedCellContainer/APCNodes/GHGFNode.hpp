@@ -3,6 +3,8 @@
 
 namespace BidirectionalInMemGraph
 {
+    class GHGFModelConstructor;
+
     class GHGFNode : protected AdaptivePackedCellContainer
     {
         friend class GHGFModelConstructor;

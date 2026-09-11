@@ -12,6 +12,8 @@ namespace BidirectionalInMemGraph
 
         if (
             !GHGFFabric_ ||
+            !GHGFFabric_->IsFabricActive() ||
+            APCCache_.FabricOwnerPtr_ != static_cast<APCFinilizer*>(GHGFFabric_) ||
             !GM::IsValidStoregeProfile(GHGFFabric_->Profile_) || !IsActiveAPC()
         )
         {
@@ -32,8 +34,8 @@ namespace BidirectionalInMemGraph
         }
         
         std::optional<std::span<float>> state = state_view.value().RawMutableSpan();
-        std::optional<std::span<float>> error = state_view.value().RawMutableSpan();
-        std::optional<std::span<float>> weight = state_view.value().RawMutableSpan();
+        std::optional<std::span<float>> error = error_view.value().RawMutableSpan();
+        std::optional<std::span<float>> weight = weight_view.value().RawMutableSpan();
         
 
         if (
@@ -70,7 +72,7 @@ namespace BidirectionalInMemGraph
             }
 
             (state.value())[StateIndex___(GM::GHGFStateRow::PRECISION, batch)] = GMC::INITIAL_PRECISION;
-            (state.value())[StateIndex___(GM::GHGFStateRow::EFFECTIVE_PRECISION, batch)] = GMC::INITIAL_PRECISION;
+            (state.value())[StateIndex___(GM::GHGFStateRow::EXPECTED_PRECISION, batch)] = GMC::INITIAL_PRECISION;
             (state.value())[StateIndex___(GM::GHGFStateRow::CONDITIONAL_EXPECTED_PRECISION, batch)] = GMC::INITIAL_PRECISION;
             (state.value())[StateIndex___(GM::GHGFStateRow::OBSERVED, batch)] = GMC::INITIAL_PRECISION;
             (state.value())[StateIndex___(GM::GHGFStateRow::CURRENT_VARIANCE, batch)] = GMC::INITIAL_PRECISION;
@@ -98,7 +100,7 @@ namespace BidirectionalInMemGraph
             );
 
             if (
-                value_index > weight.value().size() ||
+                value_index >= weight.value().size() ||
                 volatile_index >= weight.value().size()
             )
             {
@@ -109,8 +111,15 @@ namespace BidirectionalInMemGraph
             (weight.value())[volatile_index] = GMC::INITIAL_VOLATILITY_COUPLING;
         }
         
+        GHGFFabric_->AtomicallyStoreU64Fab(
+            GHGFFabric_->SlotBegin_(APCCache_.APCSlotIdx_) + static_cast<size_t>(ADS::HeaderIdentifierOfAPC::GHGF_ROLE_CELL),
+            static_cast<uint64_t>(role)
+        );
+        
+        GHGFFabric_->InvalidateGHGFModel_();
         return true;
     }
+
 
     void GHGFNode::ResetAPCGHGFStateRegion_() noexcept
     {
