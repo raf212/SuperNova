@@ -13,7 +13,7 @@
 // #include <utility>
 // #include <vector>
 
-// #include "../headers/NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+// #include "../headers/NeuromorphicTimeSpace/APCFinilizer.hpp"
 
 // namespace py = pybind11;
 
@@ -22,7 +22,7 @@
 //     using namespace BidirectionalInMemGraph;
 
 //     using NativeAPC = AdaptivePackedCellContainer;
-//     using NativeFabric = VagueTemoraryPremativeFabric;
+//     using NativeFabric = APCFinilizer;
 //     using IAB = InstallAxisToBuffer;
 //     using Axis = IAB::BidirectionalAxis;
 //     using Inheritance = IAB::DescOfInharitance;
@@ -1506,7 +1506,7 @@
 
 //         py::class_<PythonFabric, std::shared_ptr<PythonFabric>> fabric_class(
 //             module,
-//             "VagueTemoraryPremativeFabric"
+//             "APCFinilizer"
 //         );
 
 //         fabric_class
@@ -1582,7 +1582,7 @@
 //         fabric_class.attr("is_active") = fabric_class.attr("IsFabricActive");
 
 //         module.attr("APC") = module.attr("AdaptivePackedCellContainer");
-//         module.attr("Fabric") = module.attr("VagueTemoraryPremativeFabric");
+//         module.attr("Fabric") = module.attr("APCFinilizer");
 //         module.attr("Axis") = module.attr("BidirectionalAxis");
 //         module.attr("Inheritance") = module.attr("DescOfInharitance");
 //         module.attr("NavigationStatus") = module.attr("SeqLockedOperation");

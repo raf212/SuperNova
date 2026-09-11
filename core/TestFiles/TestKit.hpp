@@ -501,7 +501,7 @@ public:
     }
 };
 
-class ResolverTestFabric final : public VagueTemoraryPremativeFabric
+class ResolverTestFabric final : public APCFinilizer
 {
 public:
     bool ResolveExistingForTest(
@@ -847,7 +847,7 @@ public:
         return Nodes_[index];
     }
 
-    VagueTemoraryPremativeFabric Fabric_{};
+    APCFinilizer Fabric_{};
 
 private:
     std::array<TestAPC, NodeCount> Nodes_{};
@@ -1972,7 +1972,7 @@ constexpr SD::FabricRegionConfig OneRegionConfig(
     };
 }
 
-class InspectableFabric final : public VagueTemoraryPremativeFabric
+class InspectableFabric final : public APCFinilizer
 {
 public:
     std::span<const SD::RegionSchemaRecord> SchemaRow(
@@ -2208,7 +2208,7 @@ inline bool FabricConfigurationValidation() noexcept
         std::uint8_t parents
     ) noexcept
     {
-        VagueTemoraryPremativeFabric fabric{};
+        APCFinilizer fabric{};
         return fabric.InitializeFabric(
             slot_count,
             slot_cells,
@@ -2252,7 +2252,7 @@ inline bool FabricConfigurationValidation() noexcept
 
 inline bool CreationValidationAndRollback() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     if (!fabric.InitializeFabric(
         1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
     ))
@@ -2367,7 +2367,7 @@ using WrongType = std::conditional_t<std::is_same_v<T, float>, std::uint32_t, fl
 
 template <typename T>
 bool CreateTyped(
-    VagueTemoraryPremativeFabric& fabric,
+    APCFinilizer& fabric,
     AdaptivePackedCellContainer& apc,
     SD::SchemaProtocols region_protocol) noexcept
 {
@@ -2391,7 +2391,7 @@ bool CreateTyped(
 template <typename T>
 bool PrivateCase() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer apc{};
     if (
         !fabric.InitializeFabric(
@@ -2433,7 +2433,7 @@ bool PrivateCase() noexcept
 template <typename T>
 bool AtomicCase() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer apc{};
     if (
         !fabric.InitializeFabric(
@@ -2493,7 +2493,7 @@ bool AtomicCase() noexcept
 template <typename T>
 bool ImmutableCase() noexcept
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer apc{};
     if (
         !fabric.InitializeFabric(
@@ -3095,7 +3095,7 @@ constexpr SchemaDefinition::FabricRegionConfig AtomicRegionConfig() noexcept
 }
 
 inline bool CreateAtomic(
-    VagueTemoraryPremativeFabric& fabric,
+    APCFinilizer& fabric,
     AdaptivePackedCellContainer& apc) noexcept
 {
     SchemaDefinition::RegionSchemaTable schemas{};
@@ -3119,7 +3119,7 @@ inline bool CreateAtomic(
 
 inline bool RetirementAndABA()
 {
-    VagueTemoraryPremativeFabric fabric{};
+    APCFinilizer fabric{};
     AdaptivePackedCellContainer parent{};
     AdaptivePackedCellContainer child{};
     AdaptivePackedCellContainer replacement{};

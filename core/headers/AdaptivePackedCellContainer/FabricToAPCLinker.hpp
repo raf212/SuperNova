@@ -10,7 +10,7 @@ namespace BidirectionalInMemGraph
 
     class FabricToAPCLinker 
     {
-        friend class VagueTemoraryPremativeFabric;
+        friend class APCFinilizer;
     public:
         enum class SeqLockedOperation : uint8_t
         {
@@ -46,7 +46,7 @@ namespace BidirectionalInMemGraph
 
         bool BindExternalRawFabricBacking_(
             uint64_t* raw_cells_ptr,
-            VagueTemoraryPremativeFabric* fabric_owner,
+            APCFinilizer* fabric_owner,
             uint64_t fabric_slot_idx,
             uint64_t* generation_cell,
             uint32_t expected_generation

@@ -8,6 +8,7 @@ namespace BidirectionalInMemGraph
     class FabricConstructor
     {
         friend class RegionViewConstructor;
+        
     protected:
         uint64_t* SlabBasePtr_{nullptr};
 

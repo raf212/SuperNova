@@ -7,7 +7,7 @@
 namespace BidirectionalInMemGraph
 {
 
-    class VagueTemoraryPremativeFabric;
+    class APCFinilizer;
     class AdaptivePackedCellContainer;
 
     struct APCDataStructure 
@@ -105,7 +105,7 @@ namespace BidirectionalInMemGraph
 
         struct CacheOfAPC
         {
-            VagueTemoraryPremativeFabric* FabricOwnerPtr_{nullptr};
+            APCFinilizer* FabricOwnerPtr_{nullptr};
             std::byte* RawAPCBasePtr_{nullptr};
             uint32_t APCSlotIdx_{APCDataStructure::APC_INDEX_BOUND_SENTINAL};
             uint64_t* APCGenerationCellPtr_{nullptr};

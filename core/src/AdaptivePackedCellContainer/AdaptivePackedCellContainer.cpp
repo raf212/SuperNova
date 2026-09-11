@@ -237,7 +237,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        VagueTemoraryPremativeFabric* owner = Cache_.FabricOwnerPtr_;
+        APCFinilizer* owner = Cache_.FabricOwnerPtr_;
         const uint32_t slot = Cache_.APCSlotIdx_;
         const uint32_t generation = Cache_.ExpectedGeneration_;
 

@@ -6,7 +6,7 @@
 namespace BidirectionalInMemGraph
 {
 
-    class GHGFModelConstructor : private VagueTemoraryPremativeFabric
+    class GHGFModelConstructor : private APCFinilizer
     {
         friend class GHGFNode;
     public:
