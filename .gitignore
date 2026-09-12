@@ -17,4 +17,5 @@ Dump
 *.pdb
 *.ilk
 *.so
+*.pyd
 Documentation.md

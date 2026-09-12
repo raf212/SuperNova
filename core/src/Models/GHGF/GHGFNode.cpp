@@ -147,7 +147,16 @@ namespace BidirectionalInMemGraph
 
     std::optional<GHGFLayerModel::GHGFNodeRole> GHGFNode::GHGFRole_() noexcept
     {
-        return GHGFFabric_ ? GHGFFabric_->GHGFRole__(APCCache_.APCSlotIdx_) : std::nullopt;
+        uint64_t value{};
+        if (
+            !ReadAPCMetaUnit(ADS::HeaderIdentifierOfAPC::GHGF_ROLE_CELL, value)||
+            value < static_cast<uint8_t>(GM::GHGFNodeRole::OBSERVATION) ||
+            value > static_cast<uint8_t>(GM::GHGFNodeRole::VOLATILE)
+        )
+        {
+            return std::nullopt;
+        }
+        return static_cast<GM::GHGFNodeRole>(value);
     }
 
 }

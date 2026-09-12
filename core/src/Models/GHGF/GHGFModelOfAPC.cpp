@@ -187,13 +187,13 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    bool GHGFModelConstructor::GetGHGFNode_(uint32_t slot, GHGFNode& node, APCUseScope& use) noexcept
+    bool GHGFModelConstructor::GetGHGFNode_(
+        uint32_t slot, GHGFNode& node, APCUseScope& use) noexcept
     {
         if (!GetExistingAPC_(slot, node, use))
         {
             return false;
         }
-
         node.GHGFFabric_ = this;
         if (!node.GHGFRole_().has_value())
         {
@@ -202,7 +202,6 @@ namespace BidirectionalInMemGraph
             node.GHGFFabric_ = nullptr;
             return false;
         }
-        
         return true;
     }
 
@@ -272,21 +271,6 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    std::optional<GHGFLayerModel::GHGFNodeRole> GHGFModelConstructor::GHGFRole__(uint32_t slot) noexcept
-    {
-        uint64_t value{};
-        const ADS::RangeOfAPC range_of_this_apc = GetSegmentPoolRange(slot);
-        const size_t slab_idx = static_cast<uint64_t>(range_of_this_apc.BeginIndex + static_cast<uint8_t>(ADS::HeaderIdentifierOfAPC::GHGF_ROLE_CELL));
-        if (
-            !AtomicallyLoadReadAUnit(slab_idx, value)||
-            value < static_cast<uint8_t>(GM::GHGFNodeRole::OBSERVATION) ||
-            value > static_cast<uint8_t>(GM::GHGFNodeRole::VOLATILE)
-        )
-        {
-            return std::nullopt;
-        }
-        return static_cast<GM::GHGFNodeRole>(value);
-    }
 
     bool GHGFModelConstructor::SealGHGFModel_() noexcept
     {
@@ -306,8 +290,17 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
         {
+
+            GHGFNode node;
+            APCUseScope use;
+
+            if (!GetGHGFNode_(i, node, use))
+            {
+                return false;
+            }
+            
             const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(
-                std::atomic_ref<uint64_t>(*GetAPCGenerationPtr_(i)).load(std::memory_order_acquire)
+                std::atomic_ref<uint64_t>(*node.APCCache_.GenerationCellPtr_).load(std::memory_order_acquire)
             );
             if (control.ActiveAccess != UNSIGNED_ZERO)
             {
@@ -319,14 +312,7 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            GHGFNode node;
-            APCUseScope use;
 
-            if (!GetGHGFNode_(i, node, use))
-            {
-                return false;
-            }
-            
             const std::span<SD::RegionSchemaRecord> schemas = MetrixViewRow_(i);
             if (schemas.size() != std::popcount(Profile_.ActiveRegionMask))
             {
@@ -412,19 +398,19 @@ namespace BidirectionalInMemGraph
                     }
                     
                     const uint32_t parent = EdgeBuilder::ParentSlot(relation);
-                    std::optional<GM::GHGFNodeRole> parent_role = GHGFRole__(i);
+                    GHGFNode parent_node;
+                    APCUseScope parent_use;
                     auto ValidParent___ = [&]() noexcept -> bool {return parent <= i;};
                     if (
                         !ValidParent___() ||
-                        !parent_role.has_value()||
-                        parent_role == GM::GHGFNodeRole::OBSERVATION
+                        !GetGHGFNode_(parent, parent_node, parent_use) ||
+                        parent_node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION
                     )
                     {
                         return false;
                     }
 
-                    const uint64_t parent_control = std::atomic_ref<uint64_t>(*GetAPCGenerationPtr_(parent)).load(std::memory_order_acquire);
-                    if (!HandleOfAPCStatic::IsOpenGeneration(parent_control, EdgeBuilder::ParentGeneration(relation)))
+                    if (!parent_node.IsOpenGeneration_())
                     {
                         return false;
                     }                    
@@ -472,6 +458,31 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
+    bool GHGFModelConstructor::ResetGHGFState() noexcept
+    {
+        if (!IsGHGFPlanCurrent_())
+        {
+            return false;
+        }
+        
+        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        {
+            GHGFNode node;
+            APCUseScope use;
+            if (GetGHGFNode_(slot, node, use))
+            {
+                node.ResetAPCGHGFStateRegion_();
+            }
+        }
+        GHGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
+        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
+        return true;
+    }
+
+    float GHGFModelConstructor::GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept
+    {
+        return GHGFRegion_(slot, GHGFCache_.WeightCellOffset_)[index];
+    }
 
 
 }

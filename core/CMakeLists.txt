@@ -414,25 +414,25 @@ if(BINDING_SRCS)
     endif()
 
     pybind11_add_module(
-        atomiccim_bind
+        SuperNovaBind
         ${MODULE_SRC}
     )
 
     target_link_libraries(
-        atomiccim_bind
+        SuperNovaBind
         PRIVATE
         atomiccim_core
     )
 
     target_include_directories(
-        atomiccim_bind
+        SuperNovaBind
         PRIVATE
         ${HEADERS_DIR}
         ${BINDINGS_DIR}
     )
 
-    atomiccim_optimize_compile(atomiccim_bind)
-    atomiccim_optimize_link(atomiccim_bind)
+    atomiccim_optimize_compile(SuperNovaBind)
+    atomiccim_optimize_link(SuperNovaBind)
 
     source_group(
         TREE "${BINDINGS_DIR}"
@@ -442,7 +442,7 @@ if(BINDING_SRCS)
 
     # Put the Python extension beside apc.py.
     set_target_properties(
-        atomiccim_bind
+        SuperNovaBind
         PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY
                 "${SUPERNOVA_REPOSITORY_DIR}"
@@ -455,7 +455,7 @@ if(BINDING_SRCS)
     foreach(CONFIG_TYPE DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
 
         set_target_properties(
-            atomiccim_bind
+            SuperNovaBind
             PROPERTIES
                 "LIBRARY_OUTPUT_DIRECTORY_${CONFIG_TYPE}"
                     "${SUPERNOVA_REPOSITORY_DIR}"
@@ -479,7 +479,7 @@ endif()
 # Convenience targets
 # ============================================================
 
-if(TARGET atomiccim_bind)
+if(TARGET SuperNovaBind)
 
     add_custom_target(
         build_python_module
@@ -487,11 +487,11 @@ if(TARGET atomiccim_bind)
         COMMAND
             ${CMAKE_COMMAND}
             --build ${CMAKE_BINARY_DIR}
-            --target atomiccim_bind
+            --target SuperNovaBind
             --config $<CONFIG>
 
         COMMENT
-            "Build Python extension module (atomiccim_bind)"
+            "Build Python extension module (SuperNovaBind)"
     )
 
 endif()

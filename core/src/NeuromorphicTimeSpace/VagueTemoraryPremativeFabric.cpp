@@ -237,7 +237,7 @@ namespace BidirectionalInMemGraph
             
             if (
                 parent.APCCache_.FabricOwnerPtr_ != this ||
-                parent.APCCache_.ExpectedGeneration_ != EdgeBuilder::ParentGeneration(relation)
+                parent.APCCache_.CurrentGeneration_ != EdgeBuilder::ParentGeneration(relation)
             )
             {
                 continue;

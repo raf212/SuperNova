@@ -22,7 +22,6 @@ namespace BidirectionalInMemGraph
         GM::GHGFCache GHGFCache_{};
         GM::GHGFStorageProfile Profile_{};
         bool IsGHGFPlanCurrent_() noexcept;
-
         bool PredictGHGFBatch(uint32_t batch) noexcept;
         bool UpdateGHGFBatch(FCSpan observation, uint32_t batch) noexcept;
         bool CopyGHGFPrediction_(std::span<float> prediction, uint32_t batch) noexcept;
@@ -37,7 +36,9 @@ namespace BidirectionalInMemGraph
 
         bool SealGHGFModel_() noexcept;
 
-        std::optional<GHGFLayerModel::GHGFNodeRole> GHGFRole__(uint32_t slot) noexcept;
+        float GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
+        bool SetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
+
 
     public :
         using APCFinilizer::ShutDownFabric;

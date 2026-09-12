@@ -14,7 +14,7 @@ cmake -S .\core -B .\build-release `
     -DSUPERNOVA_FAST_FP=OFF 
     
 cmake --build .\build-release `
-    --target SuperNova atomiccim_bind `
+    --target SuperNova SuperNovaBind `
     --parallel `
     --verbose
     
@@ -35,7 +35,7 @@ cmake -S ./core -B ./build-release \
     -DSUPERNOVA_FAST_FP=OFF
 
 cmake --build ./build-release \
-    --target SuperNova atomiccim_bind \
+    --target SuperNova SuperNovaBind \
     --parallel \
     --verbose
 

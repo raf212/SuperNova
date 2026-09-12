@@ -497,7 +497,7 @@ public:
     std::uint32_t GenerationForTest() noexcept
     {
         APCUseScope use = AcquireAPCUse_();
-        return use ? APCCache_.ExpectedGeneration_ : 0u;
+        return use ? APCCache_.CurrentGeneration_ : 0u;
     }
 };
 

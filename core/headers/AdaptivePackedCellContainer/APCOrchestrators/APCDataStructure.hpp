@@ -108,8 +108,8 @@ namespace BidirectionalInMemGraph
             APCFinilizer* FabricOwnerPtr_{nullptr};
             std::byte* RawAPCBasePtr_{nullptr};
             uint32_t APCSlotIdx_{APCDataStructure::APC_INDEX_BOUND_SENTINAL};
-            uint64_t* APCGenerationCellPtr_{nullptr};
-            uint32_t ExpectedGeneration_{UNSIGNED_ZERO};
+            uint64_t* GenerationCellPtr_{nullptr};
+            uint32_t CurrentGeneration_{UNSIGNED_ZERO};
         };
     };
 

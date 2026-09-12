@@ -42,8 +42,8 @@ namespace BidirectionalInMemGraph
         APCCache_.APCSlotIdx_ = static_cast<uint32_t>(fabric_slot_idx);
         APCCache_.RawAPCBasePtr_ = reinterpret_cast<std::byte*>(raw_cells_ptr);
         APCCache_.FabricOwnerPtr_ = fabric_owner;
-        APCCache_.APCGenerationCellPtr_ = generation_cell;
-        APCCache_.ExpectedGeneration_ = expected_generation;
+        APCCache_.GenerationCellPtr_ = generation_cell;
+        APCCache_.CurrentGeneration_ = expected_generation;
         return true;
     }
 
@@ -116,9 +116,9 @@ namespace BidirectionalInMemGraph
     {
         return APCCache_.FabricOwnerPtr_ != nullptr &&
             APCCache_.RawAPCBasePtr_ != nullptr &&
-            APCCache_.APCGenerationCellPtr_ != nullptr &&
+            APCCache_.GenerationCellPtr_ != nullptr &&
             ADS::IsValid32BitAPCUnit(APCCache_.APCSlotIdx_) &&
-            HandleOfAPCStatic::IsGenerationValid(APCCache_.ExpectedGeneration_);
+            HandleOfAPCStatic::IsGenerationValid(APCCache_.CurrentGeneration_);
     }
 
 
@@ -129,7 +129,7 @@ namespace BidirectionalInMemGraph
             return APCUseScope{};
         }
 
-        std::atomic_ref<uint64_t> control(*APCCache_.APCGenerationCellPtr_);
+        std::atomic_ref<uint64_t> control(*APCCache_.GenerationCellPtr_);
         uint64_t observed = control.load(std::memory_order_acquire);
 
         for (;;)
@@ -139,7 +139,7 @@ namespace BidirectionalInMemGraph
 
             if (
                 current.Closed ||
-                current.Generation != APCCache_.ExpectedGeneration_ ||
+                current.Generation != APCCache_.CurrentGeneration_ ||
                 !HandleOfAPCStatic::IsGenerationValid(current.Generation) ||
                 current.ActiveAccess == UINT32_MAX
             )
@@ -158,7 +158,7 @@ namespace BidirectionalInMemGraph
                 std::memory_order_acquire
             ))
             {
-                return APCUseScope(APCCache_.APCGenerationCellPtr_);
+                return APCUseScope(APCCache_.GenerationCellPtr_);
             }
         }
     }
@@ -170,9 +170,9 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const uint64_t raw = std::atomic_ref<const uint64_t>(*APCCache_.APCGenerationCellPtr_).load(std::memory_order_acquire);
+        const uint64_t raw = std::atomic_ref<const uint64_t>(*APCCache_.GenerationCellPtr_).load(std::memory_order_acquire);
 
-        return HandleOfAPCStatic::IsOpenGeneration(raw, APCCache_.ExpectedGeneration_);
+        return HandleOfAPCStatic::IsOpenGeneration(raw, APCCache_.CurrentGeneration_);
     }
 
 

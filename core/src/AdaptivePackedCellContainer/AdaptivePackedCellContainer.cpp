@@ -6,6 +6,14 @@
 namespace BidirectionalInMemGraph
 {
 
+    bool AdaptivePackedCellContainer::IsOpenGeneration_() noexcept
+    {
+        return HandleOfAPCStatic::IsOpenGeneration(
+            std::atomic_ref<uint64_t>(*APCCache_.GenerationCellPtr_).load(std::memory_order_acquire),
+            APCCache_.CurrentGeneration_
+        );
+    }
+
 
     bool AdaptivePackedCellContainer::AddParent(
         AdaptivePackedCellContainer& parent,
@@ -22,9 +30,9 @@ namespace BidirectionalInMemGraph
             APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
             APCCache_.FabricOwnerPtr_->AddParentRelation_(
                 parent.APCCache_.APCSlotIdx_,
-                parent.APCCache_.ExpectedGeneration_,
+                parent.APCCache_.CurrentGeneration_,
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 max_tries
             );
@@ -45,9 +53,9 @@ namespace BidirectionalInMemGraph
             APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
             APCCache_.FabricOwnerPtr_->RemoveParentRelation_(
                 parent.APCCache_.APCSlotIdx_,
-                parent.APCCache_.ExpectedGeneration_,
+                parent.APCCache_.CurrentGeneration_,
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 max_tries
             );
@@ -77,11 +85,11 @@ namespace BidirectionalInMemGraph
             APCCache_.FabricOwnerPtr_ == new_parent.APCCache_.FabricOwnerPtr_ &&
             APCCache_.FabricOwnerPtr_->ReplaceParentRelation_(
                 old_parent.APCCache_.APCSlotIdx_,
-                old_parent.APCCache_.ExpectedGeneration_,
+                old_parent.APCCache_.CurrentGeneration_,
                 new_parent.APCCache_.APCSlotIdx_,
-                new_parent.APCCache_.ExpectedGeneration_,
+                new_parent.APCCache_.CurrentGeneration_,
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 max_tries
             );
@@ -123,7 +131,7 @@ namespace BidirectionalInMemGraph
         return 
             APCCache_.FabricOwnerPtr_->FindParent_(
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 relation_ordinal,
                 parent_relation,
@@ -147,7 +155,7 @@ namespace BidirectionalInMemGraph
         return 
             APCCache_.FabricOwnerPtr_->FindFirstChild_(
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 child_relation,
                 max_tries
@@ -170,7 +178,7 @@ namespace BidirectionalInMemGraph
         return 
             APCCache_.FabricOwnerPtr_->FindLastChild_(
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 child_relation,
                 max_tries
@@ -194,7 +202,7 @@ namespace BidirectionalInMemGraph
         return 
             APCCache_.FabricOwnerPtr_->FindNextChild_(
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 current_relation_locator,
                 child_relation,
@@ -220,7 +228,7 @@ namespace BidirectionalInMemGraph
         return 
             APCCache_.FabricOwnerPtr_->FindPreviousChild_(
                 APCCache_.APCSlotIdx_,
-                APCCache_.ExpectedGeneration_,
+                APCCache_.CurrentGeneration_,
                 edge_table,
                 current_relation_locator,
                 child_relation,
@@ -239,7 +247,7 @@ namespace BidirectionalInMemGraph
 
         APCFinilizer* owner = APCCache_.FabricOwnerPtr_;
         const uint32_t slot = APCCache_.APCSlotIdx_;
-        const uint32_t generation = APCCache_.ExpectedGeneration_;
+        const uint32_t generation = APCCache_.CurrentGeneration_;
 
         if (!owner->RetireAPC_(slot, generation, max_tries))
         {
