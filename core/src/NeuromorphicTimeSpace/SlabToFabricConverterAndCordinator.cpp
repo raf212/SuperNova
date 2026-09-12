@@ -314,8 +314,8 @@ namespace BidirectionalInMemGraph
             FreeRawPackedCells_(old_ptr, old_count);
         }
 
-        FabCache_.CompiledDagTableBeginIdx_ = UNSIGNED_ZERO;
-        CompiledDagRevision_.fetch_add(1u, std::memory_order_release);
+        FabCache_.CompiledDAGTableBeginIdx_ = UNSIGNED_ZERO;
+        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         ResetScalarsofTheFabric_();
     }
 

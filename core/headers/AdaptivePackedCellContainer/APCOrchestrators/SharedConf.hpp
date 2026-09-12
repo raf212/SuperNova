@@ -32,7 +32,7 @@ namespace BidirectionalInMemGraph
     static constexpr uint16_t MINIMUM_APC_CELL_COUNT = 128u;
     static constexpr uint64_t FABRIC_CELL_SENTINAL = UINT64_MAX;
 
-    static constexpr uint8_t AXIS_COUNT = 2u;
+    static constexpr uint8_t EDGE_COUNT = 2u;
 
 
 

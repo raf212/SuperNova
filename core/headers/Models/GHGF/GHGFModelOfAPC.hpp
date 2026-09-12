@@ -36,6 +36,9 @@ namespace BidirectionalInMemGraph
         bool GetGHGFNode_(uint32_t slot, GHGFNode& node, APCUseScope& use) noexcept;
 
         bool SealGHGFModel_() noexcept;
+
+        std::optional<GHGFLayerModel::GHGFNodeRole> GHGFRole__(uint32_t slot) noexcept;
+
     public :
         using APCFinilizer::ShutDownFabric;
         using APCFinilizer::IsFabricActive;

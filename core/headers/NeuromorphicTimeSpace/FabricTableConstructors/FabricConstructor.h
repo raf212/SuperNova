@@ -24,7 +24,7 @@ namespace BidirectionalInMemGraph
         ///EDGE CONSTRUCTION
         uint64_t HorizontalEdgeBeginIdx_{UNSIGNED_ZERO};
         uint64_t VerticalEdgeBeginIdx_{UNSIGNED_ZERO};
-        uint64_t CompiledDagTableBeginIdx_{UNSIGNED_ZERO};
+        uint64_t CompiledDAGTableBeginIdx_{UNSIGNED_ZERO};
 
     };
 

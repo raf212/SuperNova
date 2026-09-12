@@ -126,7 +126,7 @@ namespace BidirectionalInMemGraph
             uint64_t VolatileParentMask = UNSIGNED_ZERO;
         };
 
-        std::atomic<uint64_t> CompiledDagRevision_{UNSIGNED_ZERO};
+        std::atomic<uint64_t> SealedDAGRevision_{UNSIGNED_ZERO};
 
         CompiledDAGRecord* CompiledDAGRow_(uint32_t row_slot) noexcept;
 

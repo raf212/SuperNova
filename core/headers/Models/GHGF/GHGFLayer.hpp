@@ -127,7 +127,7 @@ namespace BidirectionalInMemGraph
                 return false;
             }
 
-            const uint32_t parameter_count = FIRST_COUPLING_INDEX + (AXIS_COUNT * static_cast<uint32_t>(max_direct_parent_per_axis));
+            const uint32_t parameter_count = FIRST_COUPLING_INDEX + (EDGE_COUNT * static_cast<uint32_t>(max_direct_parent_per_axis));
 
             if (!SD::AttachPrivateFloat32ToTable_(
                 profile.DefaultSchemaTable,
@@ -187,7 +187,7 @@ namespace BidirectionalInMemGraph
 
         static constexpr bool IsValidStoregeProfile(const GHGFStorageProfile& profile) noexcept
         {
-            const uint32_t expected_paremeter_count = FIRST_COUPLING_INDEX + (AXIS_COUNT * static_cast<uint32_t>(profile.MaxDirectParentPerAxis));
+            const uint32_t expected_paremeter_count = FIRST_COUPLING_INDEX + (EDGE_COUNT * static_cast<uint32_t>(profile.MaxDirectParentPerAxis));
 
             const uint16_t expected_mask = static_cast<uint16_t>(
                 ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |

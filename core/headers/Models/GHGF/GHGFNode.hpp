@@ -16,7 +16,7 @@ namespace BidirectionalInMemGraph
         GHGFModelConstructor* GHGFFabric_{nullptr};
 
         std::optional<GM::GHGFNodeRole> GHGFRole_() noexcept;
-
+        
         std::optional<GM::GHGFNodeRole> IsLiveGHGFSlot_() noexcept
         {
             APCUseScope apc_use = AcquireAPCUse_();

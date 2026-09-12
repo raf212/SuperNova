@@ -14,7 +14,7 @@ namespace BidirectionalInMemGraph
             return nullptr;
         }
         
-        const size_t row_begin = static_cast<size_t>(FabCache_.CompiledDagTableBeginIdx_) +
+        const size_t row_begin = static_cast<size_t>(FabCache_.CompiledDAGTableBeginIdx_) +
             (static_cast<size_t>(row_slot) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
         
         if (
@@ -47,11 +47,11 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        FabCache_.CompiledDagTableBeginIdx_ = bounds.BeginIndex;
+        FabCache_.CompiledDAGTableBeginIdx_ = bounds.BeginIndex;
 
         for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
         {
-            const size_t row_begin = static_cast<size_t>(FabCache_.CompiledDagTableBeginIdx_) +
+            const size_t row_begin = static_cast<size_t>(FabCache_.CompiledDAGTableBeginIdx_) +
                 (static_cast<size_t>(i) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
 
             std::construct_at(reinterpret_cast<CompiledDAGRecord*>(SlabBasePtr_ + row_begin), CompiledDAGRecord{});
@@ -347,7 +347,7 @@ namespace BidirectionalInMemGraph
             );
         }
         
-        CompiledDagRevision_.fetch_add(1u, std::memory_order_release);
+        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
     
         auto Publish___ = [&](bool publish_anchor) noexcept -> void
         {
