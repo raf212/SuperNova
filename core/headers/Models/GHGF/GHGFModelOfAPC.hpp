@@ -50,6 +50,8 @@ namespace BidirectionalInMemGraph
         
         bool ResetGHGFState() noexcept;
 
+        bool PredectBatchSequentialTrial(uint32_t batch) noexcept;
+
         bool InitializeGHGFFabric(
             uint32_t slot_count,
             const GHGFLayerModel::GHGFStorageProfile& profile
