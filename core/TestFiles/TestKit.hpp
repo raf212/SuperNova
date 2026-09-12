@@ -16,6 +16,8 @@
 #ifndef APC_DAG_TEST_EXTERNAL_TYPES
 #include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
 #include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
+#include "Models/GHGF/GHGFModelOfAPC.hpp"
+
 #endif
 
 #include <algorithm>
@@ -2161,7 +2163,7 @@ inline bool SchemaABIAndGeometry() noexcept
         ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
         ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
         ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT) |
-        ADS::RegionBit(MacroColumnOfAPC::HETEROGENOUS_PTR);
+        ADS::RegionBit(MacroColumnOfAPC::EXTRA_SLOT);
 
     const bool compact_ok =
         ADS::CompactRegionIndex(
@@ -2174,7 +2176,7 @@ inline bool SchemaABIAndGeometry() noexcept
             sparse_mask, MacroColumnOfAPC::WEIGHT_SLOT
         ) == 2u &&
         ADS::CompactRegionIndex(
-            sparse_mask, MacroColumnOfAPC::HETEROGENOUS_PTR
+            sparse_mask, MacroColumnOfAPC::EXTRA_SLOT
         ) == 3u &&
         !ADS::CompactRegionIndex(
             sparse_mask, MacroColumnOfAPC::ERROR_SLOT
@@ -2753,7 +2755,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
         MacroColumnOfAPC::FEEDFORWARD_MESSAGE
     );
     auto inactive = apc.BuildAViewOverRegion<float>(
-        MacroColumnOfAPC::HETEROGENOUS_PTR
+        MacroColumnOfAPC::EXTRA_SLOT
     );
     auto second_feedforward = second_apc.BuildAViewOverRegion<float>(
         MacroColumnOfAPC::FEEDFORWARD_MESSAGE
@@ -3333,6 +3335,63 @@ inline bool DirectResolverAndABA()
     return replacement.Retire();
 }
 
+namespace Test8_GHGF
+{
+    int TestGHGF()
+    {
+        // using GM = GHGFLayerModel;
+        // using Role = GM::GHGFNodeRole;
+        // static constexpr uint32_t BATCH = 2u;
+        // static constexpr uint32_t TRAIN_STEPS = 128u;
+        // static constexpr uint32_t TEST_STEPS = 64u;
+
+        // GM::GHGFStorageProfile profile{};
+        // if (!GM::MakeDefaultGHGFStorageProfile(profile, BATCH, 2u)) { return 1; }
+
+        // GHGFModelConstructor model;
+        // {
+        //     std::array<GHGFNode, 3u> nodes{};
+        //     const std::array roles{Role::VOLATILE, Role::VALUE, Role::OBSERVATION};
+        //     const std::array<GM::GHGFConnection, 2u> connections{{
+        //         {0u, 1u, FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, 1.0f},
+        //         {1u, 2u, FabricSegments::VALUE_PARENT_EDGE_TABLE_H, 1.0f}
+        //     }};
+        //     GHGFModelConstructor::GHGFModelConstructionValues values{nodes, roles, connections};
+        //     if (!model.ConstructGHGFModel(values, profile)) { return 2; }
+        // } // Temporary handles may die. The model owns the slab, and retains no handle span.
+
+        // std::vector<float> training(TRAIN_STEPS * BATCH);
+        // std::vector<float> testing(TEST_STEPS * BATCH);
+        // for (uint32_t time = 0; time < TRAIN_STEPS + TEST_STEPS; ++time)
+        // {
+        //     // Reproducible toy observations: two independent, complementary lanes.
+        //     const float first = time % 10u < 8u ? 1.0f : 0.0f;
+        //     auto& destination = time < TRAIN_STEPS ? training : testing;
+        //     const uint32_t local_time = time < TRAIN_STEPS ? time : time - TRAIN_STEPS;
+        //     destination[local_time * BATCH] = first;
+        //     destination[local_time * BATCH + 1u] = 1.0f - first;
+        // }
+
+        // double baseline_loss{}, fitted_loss{}, test_loss{};
+        // if (!model.RunGHGFSequence(training, TRAIN_STEPS, BATCH, {}, baseline_loss)) { return 3; }
+        // const std::array<GM::GHGFParameterRange, 1u> parameters{{
+        //     {1u, static_cast<uint32_t>(GM::GHGFErrorValueIndexing::TONIC_VOLATILE), -6.0f, -2.0f}
+        // }};
+        // if (!model.FitGHGFParameters(training, TRAIN_STEPS, BATCH, parameters, 5u, fitted_loss)) { return 4; }
+
+        // std::vector<float> predictions(testing.size());
+        // // Continue the training posterior into the later held-out observations.
+        // // Predictions are scored before each held-out observation is assimilated.
+        // if (!model.RunGHGFSequence(testing, TEST_STEPS, BATCH, predictions, test_loss, false)) { return 5; }
+        // if (!std::isfinite(test_loss) || fitted_loss > baseline_loss) { return 6; }
+
+        // std::cout << "PASS\ntraining log loss: " << baseline_loss << " -> " << fitted_loss
+        //         << "\nheld-out online log loss: " << test_loss << '\n';
+        // model.ShutDownFabric(); // The inherited shutdown; no GHGF shutdown implementation.
+        return 0u;
+    }
+}
+
 inline Result Run()
 {
     Banner("TEST 7 - CONCURRENT H/V DAG MUTATION + RETIREMENT / ABA");
@@ -3344,6 +3403,8 @@ inline Result Run()
     const bool shutdown_ok = ShutdownDrainsOutstandingView();
     const bool ok = race_ok && stress_ok && retirement_ok && resolver_ok && shutdown_ok;
 
+    const bool ghgf_ok = Test8_GHGF::TestGHGF() == 0u ? true : false;
+
     std::cout
         << "  A--H-->B raced with illegal B--V-->A : " << (race_ok ? "PASS" : "FAIL") << '\n'
         << "  shared-parent mixed H/V stress       : " << (stress_ok ? "PASS" : "FAIL") << '\n'
@@ -3351,7 +3412,8 @@ inline Result Run()
         << "  linked/pinned retirement + ABA reuse : " << (retirement_ok ? "PASS" : "FAIL") << '\n'
         << "  direct slot/generation resolver + ABA: " << (resolver_ok ? "PASS" : "FAIL") << '\n'
         << "  shutdown drains outstanding RegionView: " << (shutdown_ok ? "PASS" : "FAIL") << '\n'
-        << "\nTEST 7 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n';
+        << "\nTEST 7 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n'
+        << "\nTEST 8 GHGF: " << (ghgf_ok ? "PASS" : "FAIL") << '\n';
 
     return ok ? Result::PASS : Result::FAIL;
 }

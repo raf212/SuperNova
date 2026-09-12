@@ -479,11 +479,30 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    float GHGFModelConstructor::GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept
+    std::optional<float> GHGFModelConstructor::GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept
     {
+        GHGFNode node;
+        APCUseScope use;
+        if (!GetGHGFNode_(slot, node, use) || index >= Profile_.ParameterCount)
+        {
+            return std::nullopt;
+        }
         return GHGFRegion_(slot, GHGFCache_.WeightCellOffset_)[index];
     }
 
+    bool GHGFModelConstructor::SetGHGFParameter_(uint32_t slot, uint32_t index, float value) noexcept
+    {
+        GHGFNode node;
+        APCUseScope use;
+        if (!GetGHGFNode_(slot, node, use) || index >= Profile_.ParameterCount ||
+            !std::isfinite(value) || node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
+        {
+            return false;
+        }
+        GHGFRegion_(slot, GHGFCache_.WeightCellOffset_)[index] = value;
+        GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+        return true;
+    }
 
     bool GHGFModelConstructor::PredictBatchNONVectorized_(uint32_t batch) noexcept
     {
@@ -568,7 +587,7 @@ namespace BidirectionalInMemGraph
         return observation == GHGFCache_.ObservationCount_;
     }
 
-    bool GHGFModelConstructor::PredictGHGFNONVectorized(uint32_t batch, std::span<float> predictions) noexcept
+    bool GHGFModelConstructor::PredictModelNONVectorized(uint32_t batch, std::span<float> predictions) noexcept
     {
         if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::READY ||
             batch == UNSIGNED_ZERO || batch > Profile_.BatchCapacity ||
@@ -593,7 +612,7 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    bool GHGFModelConstructor::UpdateGHGFNONVectorized(uint32_t batch, FCSpan observations) noexcept
+    bool GHGFModelConstructor::UpdateModelNONVectorized(uint32_t batch, FCSpan observations) noexcept
     {
         if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::PREDICTED ||
             batch != GHGFCache_.ActiveBatch_ || observations.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
@@ -631,4 +650,182 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
+
+    std::optional<double> GHGFModelConstructor::RunGHGFSequence(
+        FCSpan observations,
+        uint32_t time_count,
+        uint32_t batch_count,
+        std::span<float> predictions,
+        bool reset_state
+    ) noexcept
+    {
+        if (!IsGHGFPlanCurrent_() || time_count == UNSIGNED_ZERO ||
+            batch_count == UNSIGNED_ZERO || batch_count > Profile_.BatchCapacity)
+        {
+            return std::nullopt;
+        }
+        const size_t step_size = static_cast<size_t>(GHGFCache_.ObservationCount_) * batch_count;
+        if (step_size > SIZE_MAX / time_count)
+        {
+            return std::nullopt;
+        }
+        const size_t count = step_size * time_count;
+        if (observations.size() != count || (!predictions.empty() && predictions.size() != count) ||
+            IsInternalBuffer(observations.data(), observations.size()) ||
+            IsInternalBuffer(predictions.data(), predictions.size()))
+        {
+            return std::nullopt;
+        }
+        if (!predictions.empty())
+        {
+            const uintptr_t input = reinterpret_cast<uintptr_t>(observations.data());
+            const uintptr_t output = reinterpret_cast<uintptr_t>(predictions.data());
+            const size_t bytes = observations.size_bytes();
+            if (input <= output ? output - input < bytes : input - output < bytes)
+            {
+                return std::nullopt;
+            }
+        }
+        for (const float value : observations)
+        {
+            if (value != GM::StorageConst::ZERO && value != GM::StorageConst::ONE)
+            {
+                return std::nullopt;
+            }
+        }
+        if (reset_state && !ResetGHGFState())
+        {
+            return std::nullopt;
+        }
+        if (GHGFCache_.Phase_ != GM::GHGFPhase::READY || (GHGFCache_.ActiveBatch_ != UNSIGNED_ZERO && GHGFCache_.ActiveBatch_ != batch_count))
+        {
+            return std::nullopt;
+        }
+        GHGFCache_.ActiveBatch_ = batch_count;
+        double loss = 0.0;
+        for (uint32_t time = 0; time < time_count; ++time)
+        {
+            if (!PredictGHGFBatchNONVectorized_(batch_count))
+            {
+                GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+                return std::nullopt;
+            }
+            const size_t step_begin = static_cast<size_t>(time) * step_size;
+            uint32_t observation = UNSIGNED_ZERO;
+            for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+            {
+                GHGFNode node;
+                APCUseScope use;
+                if (!GetGHGFNode_(slot, node, use) || node.GHGFRole_() != GM::GHGFNodeRole::OBSERVATION)
+                {
+                    continue;
+                }
+                const float* probability = GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_MEAN);
+                const size_t begin = step_begin + static_cast<size_t>(observation++) * batch_count;
+                for (uint32_t lane = 0; lane < batch_count; ++lane)
+                {
+                    const double predicted = probability[lane];
+                    loss -= observations[begin + lane] == GM::StorageConst::ONE ?
+                        std::log(predicted) : std::log1p(-predicted);
+                    if (!predictions.empty())
+                    {
+                        predictions[begin + lane] = probability[lane];
+                    }
+                }
+            }
+            // Score before the current observation changes any belief.
+            if (!UpdateGHGFBatchNONVectorized_(observations.subspan(step_begin, step_size), batch_count))
+            {
+                GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+                return std::nullopt;
+            }
+        }
+        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
+        return loss / static_cast<double>(count);
+    }
+
+
+    std::optional<double> GHGFModelConstructor::FitGHGFParameters(
+        FCSpan observations, 
+        uint32_t time_count, 
+        uint32_t batch_count,
+        std::span<const GM::GHGFParameterRange> parameters, 
+        uint32_t passes
+    ) noexcept
+    {
+        using SC = GM::StorageConst;
+
+        if (!IsGHGFPlanCurrent_() || parameters.empty() || passes == UNSIGNED_ZERO ||
+            IsInternalBuffer(parameters.data(), parameters.size()))
+        {
+            return std::nullopt;
+        }
+        for (size_t index = 0; index < parameters.size(); ++index)
+        {
+            const auto& parameter = parameters[index];
+            GHGFNode node;
+            APCUseScope use;
+            std::optional<float> current = GetGHGFParameter_(parameter.Slot, parameter.Index);
+            if (!current.has_value() ||
+                (!GetGHGFNode_(parameter.Slot, node, use) || 
+                node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION) ||
+                !std::isfinite(parameter.Lower) || 
+                !std::isfinite(parameter.Upper) ||
+                parameter.Lower >= parameter.Upper || 
+                current < parameter.Lower || current > parameter.Upper
+            )
+            {
+                return std::nullopt;
+            }
+            for (size_t previous = 0; previous < index; ++previous)
+            {
+                if (parameters[previous].Slot == parameter.Slot && parameters[previous].Index == parameter.Index)
+                {
+                    return std::nullopt;
+                }
+            }
+        }
+        std::optional<double> mean_log_loss = RunGHGFSequence(observations, time_count, batch_count, {}, true);
+
+        if (!mean_log_loss.has_value())
+        {
+            return std::nullopt;
+        }
+        float step = SC::INITIAL_SEARCH_STEP;
+        for (uint32_t pass = 0; pass < passes && step >= SC::MIN_SEARCH_STEP; ++pass)
+        {
+            for (const auto& parameter : parameters)
+            {
+                std::optional<float> center = GetGHGFParameter_(parameter.Slot, parameter.Index);
+                if (!center.has_value())
+                {
+                    return std::nullopt;
+                }
+                
+                float best = center.value();
+                double best_loss = mean_log_loss.value();
+                for (const float direction : {-SC::ONE, SC::ONE})
+                {
+                    const float candidate = std::clamp(center.value() + direction * step, parameter.Lower, parameter.Upper);
+                    if (candidate == center)
+                    {
+                        continue;
+                    }
+                    SetGHGFParameter_(parameter.Slot, parameter.Index, candidate);
+                    std::optional<double> candidate_loss = RunGHGFSequence(observations, time_count, batch_count, {}, true);
+                    if (candidate_loss.has_value() &&
+                        candidate_loss < best_loss)
+                    {
+                        best = candidate;
+                        best_loss = candidate_loss.value();
+                    }
+                }
+                SetGHGFParameter_(parameter.Slot, parameter.Index, best);
+                mean_log_loss = best_loss;
+            }
+            step *= SC::HALF;
+        }
+        // Leave beliefs corresponding to the selected parameters, not the last trial.
+        return RunGHGFSequence(observations, time_count, batch_count, {}, true);
+    }
 }

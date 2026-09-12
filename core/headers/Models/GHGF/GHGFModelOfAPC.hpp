@@ -36,8 +36,8 @@ namespace BidirectionalInMemGraph
 
         bool SealGHGFModel_() noexcept;
 
-        float GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
-        bool SetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
+        std::optional<float> GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
+        bool SetGHGFParameter_(uint32_t slot, uint32_t index, float value) noexcept;
 
         bool PredictBatchNONVectorized_(uint32_t batch) noexcept;
 
@@ -46,14 +46,10 @@ namespace BidirectionalInMemGraph
         using APCFinilizer::IsFabricActive;
 
         bool RemoveParent(const GM::GHGFConnection& connection) noexcept;
-
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
-
-        bool PredictGHGFNONVectorized(uint32_t batch, std::span<float> prediction)noexcept;
-        bool UpdateGHGFNONVectorized(uint32_t batch, FCSpan observations)noexcept;
-        
+        bool PredictModelNONVectorized(uint32_t batch, std::span<float> prediction)noexcept;
+        bool UpdateModelNONVectorized(uint32_t batch, FCSpan observations)noexcept;
         bool ResetGHGFState() noexcept;
-
         bool InitializeGHGFFabric(
             uint32_t slot_count,
             const GHGFLayerModel::GHGFStorageProfile& profile
@@ -75,6 +71,14 @@ namespace BidirectionalInMemGraph
             uint32_t batch_count,
             std::span<float> predictios,
             bool reset_state
+        ) noexcept;
+
+        std::optional<double> FitGHGFParameters(
+            FCSpan observations, 
+            uint32_t time_count, 
+            uint32_t batch_count,
+            std::span<const GM::GHGFParameterRange> parameters, 
+            uint32_t passes
         ) noexcept;
             
     };

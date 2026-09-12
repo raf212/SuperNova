@@ -46,7 +46,7 @@ namespace BidirectionalInMemGraph
         WEIGHTLESS_LOOKUP = 5,
         WEIGHT_SLOT = 6,
         AUX_SLOT = 7,
-        HETEROGENOUS_PTR = 8,
+        EXTRA_SLOT = 8,
         FREE_SLOT     = 9
     };
 
