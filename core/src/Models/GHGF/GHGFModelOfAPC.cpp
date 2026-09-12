@@ -261,7 +261,7 @@ namespace BidirectionalInMemGraph
         APCUseScope parent_use, child_use;
         if (
             !GetGHGFNode_(connection.Parent, parent, parent_use) ||
-            !GetGHGFNode_(connection.Child, parent, parent_use) ||
+            !GetGHGFNode_(connection.Child, child, child_use) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(connection.Edge)
         )
         {
@@ -307,7 +307,7 @@ namespace BidirectionalInMemGraph
             const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(
                 std::atomic_ref<uint64_t>(*node.APCCache_.GenerationCellPtr_).load(std::memory_order_acquire)
             );
-            if (control.ActiveAccess != UNSIGNED_ZERO)
+            if (control.ActiveAccess != 1u)
             {
                 return false;
             }
@@ -405,7 +405,7 @@ namespace BidirectionalInMemGraph
                     const uint32_t parent = EdgeBuilder::ParentSlot(relation);
                     GHGFNode parent_node;
                     APCUseScope parent_use;
-                    auto ValidParent___ = [&]() noexcept -> bool {return parent <= i;};
+                    auto ValidParent___ = [&]() noexcept -> bool {return parent < i;};
                     if (
                         !ValidParent___() ||
                         !GetGHGFNode_(parent, parent_node, parent_use) ||
@@ -429,19 +429,15 @@ namespace BidirectionalInMemGraph
                     }
                 }
             }
-            if (observation)
-            {
-                if (
+            if (
+                observation &&
+                (
                     has_child ||
                     GHGFParentMask_(i, FabricSegments::VALUE_PARENT_EDGE_TABLE_H) == UNSIGNED_ZERO
                 )
-                {
-                    return false;
-                }
-                else if (!has_child)
-                {
-                    return false;
-                }
+            )
+            {
+                return false;
             }
         }
         
