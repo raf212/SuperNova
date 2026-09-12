@@ -3335,62 +3335,6 @@ inline bool DirectResolverAndABA()
     return replacement.Retire();
 }
 
-namespace Test8_GHGF
-{
-    int TestGHGF()
-    {
-        // using GM = GHGFLayerModel;
-        // using Role = GM::GHGFNodeRole;
-        // static constexpr uint32_t BATCH = 2u;
-        // static constexpr uint32_t TRAIN_STEPS = 128u;
-        // static constexpr uint32_t TEST_STEPS = 64u;
-
-        // GM::GHGFStorageProfile profile{};
-        // if (!GM::MakeDefaultGHGFStorageProfile(profile, BATCH, 2u)) { return 1; }
-
-        // GHGFModelConstructor model;
-        // {
-        //     std::array<GHGFNode, 3u> nodes{};
-        //     const std::array roles{Role::VOLATILE, Role::VALUE, Role::OBSERVATION};
-        //     const std::array<GM::GHGFConnection, 2u> connections{{
-        //         {0u, 1u, FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, 1.0f},
-        //         {1u, 2u, FabricSegments::VALUE_PARENT_EDGE_TABLE_H, 1.0f}
-        //     }};
-        //     GHGFModelConstructor::GHGFModelConstructionValues values{nodes, roles, connections};
-        //     if (!model.ConstructGHGFModel(values, profile)) { return 2; }
-        // } // Temporary handles may die. The model owns the slab, and retains no handle span.
-
-        // std::vector<float> training(TRAIN_STEPS * BATCH);
-        // std::vector<float> testing(TEST_STEPS * BATCH);
-        // for (uint32_t time = 0; time < TRAIN_STEPS + TEST_STEPS; ++time)
-        // {
-        //     // Reproducible toy observations: two independent, complementary lanes.
-        //     const float first = time % 10u < 8u ? 1.0f : 0.0f;
-        //     auto& destination = time < TRAIN_STEPS ? training : testing;
-        //     const uint32_t local_time = time < TRAIN_STEPS ? time : time - TRAIN_STEPS;
-        //     destination[local_time * BATCH] = first;
-        //     destination[local_time * BATCH + 1u] = 1.0f - first;
-        // }
-
-        // double baseline_loss{}, fitted_loss{}, test_loss{};
-        // if (!model.RunGHGFSequence(training, TRAIN_STEPS, BATCH, {}, baseline_loss)) { return 3; }
-        // const std::array<GM::GHGFParameterRange, 1u> parameters{{
-        //     {1u, static_cast<uint32_t>(GM::GHGFErrorValueIndexing::TONIC_VOLATILE), -6.0f, -2.0f}
-        // }};
-        // if (!model.FitGHGFParameters(training, TRAIN_STEPS, BATCH, parameters, 5u, fitted_loss)) { return 4; }
-
-        // std::vector<float> predictions(testing.size());
-        // // Continue the training posterior into the later held-out observations.
-        // // Predictions are scored before each held-out observation is assimilated.
-        // if (!model.RunGHGFSequence(testing, TEST_STEPS, BATCH, predictions, test_loss, false)) { return 5; }
-        // if (!std::isfinite(test_loss) || fitted_loss > baseline_loss) { return 6; }
-
-        // std::cout << "PASS\ntraining log loss: " << baseline_loss << " -> " << fitted_loss
-        //         << "\nheld-out online log loss: " << test_loss << '\n';
-        // model.ShutDownFabric(); // The inherited shutdown; no GHGF shutdown implementation.
-        return 0u;
-    }
-}
 
 inline Result Run()
 {
@@ -3403,8 +3347,6 @@ inline Result Run()
     const bool shutdown_ok = ShutdownDrainsOutstandingView();
     const bool ok = race_ok && stress_ok && retirement_ok && resolver_ok && shutdown_ok;
 
-    const bool ghgf_ok = Test8_GHGF::TestGHGF() == 0u ? true : false;
-
     std::cout
         << "  A--H-->B raced with illegal B--V-->A : " << (race_ok ? "PASS" : "FAIL") << '\n'
         << "  shared-parent mixed H/V stress       : " << (stress_ok ? "PASS" : "FAIL") << '\n'
@@ -3412,23 +3354,262 @@ inline Result Run()
         << "  linked/pinned retirement + ABA reuse : " << (retirement_ok ? "PASS" : "FAIL") << '\n'
         << "  direct slot/generation resolver + ABA: " << (resolver_ok ? "PASS" : "FAIL") << '\n'
         << "  shutdown drains outstanding RegionView: " << (shutdown_ok ? "PASS" : "FAIL") << '\n'
-        << "\nTEST 7 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n'
-        << "\nTEST 8 GHGF: " << (ghgf_ok ? "PASS" : "FAIL") << '\n';
-
+        << "\nTEST 7 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n';
     return ok ? Result::PASS : Result::FAIL;
 }
 } // namespace Test07_ConcurrentDAGAndRetirement
 
+
+namespace Test8_GHGF
+{
+    inline Result Run()
+    {
+        Banner("TEST 8 - GHGF NON-VECTORIZED INFERENCE + PARAMETER FIT");
+
+        using GM = GHGFLayerModel;
+        using Role = GM::GHGFNodeRole;
+
+        static constexpr uint32_t BATCH = 2u;
+        static constexpr uint32_t TRAIN_STEPS = 128u;
+        static constexpr uint32_t TEST_STEPS = 64u;
+
+        GM::GHGFStorageProfile profile{};
+
+        if (!GM::MakeDefaultGHGFStorageProfile(
+            profile,
+            BATCH,
+            2u
+        ))
+        {
+            std::cout << "  profile construction: FAIL\n";
+            return Result::FAIL;
+        }
+
+        GHGFModelConstructor model{};
+
+        {
+            std::array<GHGFNode, 3u> nodes{};
+
+            const std::array roles{
+                Role::VOLATILE,
+                Role::VALUE,
+                Role::OBSERVATION
+            };
+
+            const std::array<GM::GHGFConnection, 2u> connections{{
+                {
+                    0u,
+                    1u,
+                    FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
+                    1.0f
+                },
+                {
+                    1u,
+                    2u,
+                    FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+                    1.0f
+                }
+            }};
+
+            GHGFModelConstructor::GHGFModelConstructionValues values{
+                nodes,
+                roles,
+                connections
+            };
+
+            if (!model.ConstructGHGFModel(
+                values,
+                profile
+            ))
+            {
+                std::cout << "  model construction: FAIL\n";
+                return Result::FAIL;
+            }
+        }
+
+        // The temporary GHGFNode handles above may die here.
+        // GHGFModelConstructor owns the Fabric/slab.
+
+        std::vector<float> training(
+            static_cast<size_t>(TRAIN_STEPS) * BATCH
+        );
+
+        std::vector<float> testing(
+            static_cast<size_t>(TEST_STEPS) * BATCH
+        );
+
+        for (
+            uint32_t time = 0;
+            time < TRAIN_STEPS + TEST_STEPS;
+            ++time
+        )
+        {
+            const float first =
+                time % 10u < 8u
+                    ? 1.0f
+                    : 0.0f;
+
+            std::vector<float>& destination =
+                time < TRAIN_STEPS
+                    ? training
+                    : testing;
+
+            const uint32_t local_time =
+                time < TRAIN_STEPS
+                    ? time
+                    : time - TRAIN_STEPS;
+
+            destination[
+                static_cast<size_t>(local_time) * BATCH
+            ] = first;
+
+            destination[
+                static_cast<size_t>(local_time) * BATCH + 1u
+            ] = 1.0f - first;
+        }
+
+        const std::optional<double> baseline_loss =
+            model.RunGHGFSequence(
+                training,
+                TRAIN_STEPS,
+                BATCH,
+                {},
+                true
+            );
+
+        if (
+            !baseline_loss.has_value() ||
+            !std::isfinite(baseline_loss.value())
+        )
+        {
+            std::cout << "  baseline sequence: FAIL\n";
+            model.ShutDownFabric();
+            return Result::FAIL;
+        }
+
+        const std::array<GM::GHGFParameterRange, 1u> parameters{{
+            {
+                1u,
+                static_cast<uint32_t>(
+                    GM::GHGFErrorValueIndexing::TONIC_VOLATILE
+                ),
+                -6.0f,
+                -2.0f
+            }
+        }};
+
+        const std::optional<double> fitted_loss =
+            model.FitGHGFParameters(
+                training,
+                TRAIN_STEPS,
+                BATCH,
+                parameters,
+                5u
+            );
+
+        if (
+            !fitted_loss.has_value() ||
+            !std::isfinite(fitted_loss.value())
+        )
+        {
+            std::cout << "  parameter fitting: FAIL\n";
+            model.ShutDownFabric();
+            return Result::FAIL;
+        }
+
+        std::vector<float> predictions(
+            static_cast<size_t>(TEST_STEPS) * BATCH
+        );
+
+        // FitGHGFParameters leaves the state corresponding to
+        // the selected parameters after replaying the training set.
+        //
+        // Continue that posterior into held-out observations.
+        const std::optional<double> test_loss =
+            model.RunGHGFSequence(
+                testing,
+                TEST_STEPS,
+                BATCH,
+                predictions,
+                false
+            );
+
+        if (
+            !test_loss.has_value() ||
+            !std::isfinite(test_loss.value())
+        )
+        {
+            std::cout << "  held-out sequence: FAIL\n";
+            model.ShutDownFabric();
+            return Result::FAIL;
+        }
+
+        if (
+            !std::all_of(
+                predictions.begin(),
+                predictions.end(),
+                [](float prediction) noexcept
+                {
+                    return std::isfinite(prediction) &&
+                        prediction > 0.0f &&
+                        prediction < 1.0f;
+                }
+            )
+        )
+        {
+            std::cout << "  prediction validation: FAIL\n";
+            model.ShutDownFabric();
+            return Result::FAIL;
+        }
+
+        if (fitted_loss.value() > baseline_loss.value())
+        {
+            std::cout
+                << "  fitting regression: FAIL\n"
+                << "  training log loss: "
+                << baseline_loss.value()
+                << " -> "
+                << fitted_loss.value()
+                << '\n';
+
+            model.ShutDownFabric();
+            return Result::FAIL;
+        }
+
+        std::cout
+            << "  model construction : PASS\n"
+            << "  scalar inference   : PASS\n"
+            << "  parameter fitting  : PASS\n"
+            << "  held-out inference : PASS\n"
+            << "  training log loss  : "
+            << baseline_loss.value()
+            << " -> "
+            << fitted_loss.value()
+            << '\n'
+            << "  held-out log loss  : "
+            << test_loss.value()
+            << '\n';
+
+        model.ShutDownFabric();
+
+        return Result::PASS;
+    }
+}
+
 inline int RunAll()
 {
-    const std::array<std::pair<const char*, Result>, 7u> results{{
+    const std::array<std::pair<const char*, Result>, 8u> results{{
         {"Test 1 - baseline and benchmark", Test01_Baseline::Run()},
         {"Test 2 - contention sweep", Test02_Contention::Run()},
         {"Test 3 - reader/writer atomicity", Test03_ReaderWriter::Run()},
         {"Test 4 - public mutation API", Test04_PublicMutationAPI::Run()},
         {"Test 5 - combined DAG proof", Test05_CombinedAcyclicity::Run()},
         {"Test 6 - region schema and views", Test06_RegionSchemaAndViews::Run()},
-        {"Test 7 - concurrency and retirement", Test07_ConcurrentDAGAndRetirement::Run()}
+        {"Test 7 - concurrency and retirement", Test07_ConcurrentDAGAndRetirement::Run()},
+        {
+            "Test 8 - GHGF scalar inference + fitting",
+            Test8_GHGF::Run()
+        }
     }};
 
     Banner("APC DUAL-EDGE DAG TEST SUITE SUMMARY");

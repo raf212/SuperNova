@@ -70,7 +70,7 @@ namespace BidirectionalInMemGraph
             uint32_t time_count,
             uint32_t batch_count,
             std::span<float> predictios,
-            bool reset_state
+            bool reset_state = true
         ) noexcept;
 
         std::optional<double> FitGHGFParameters(

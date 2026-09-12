@@ -212,7 +212,7 @@ namespace BidirectionalInMemGraph
 
         if (
             !GetGHGFNode_(connection.Parent, parent, parent_use) ||
-            !GetGHGFNode_(connection.Child, parent, parent_use) ||
+            !GetGHGFNode_(connection.Child, child, child_use) ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(connection.Edge) ||
             !std::isfinite(connection.Coupling) ||
             parent.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION
@@ -232,6 +232,11 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
+        if (!child.AddParent(parent, connection.Edge))
+        {
+            return false;
+        }
+        
         InvalidateGHGFModel_();
 
         const std::span<EdgeBuilder::ParentRelation> retations = ParentRelations_(connection.Edge, connection.Child);
