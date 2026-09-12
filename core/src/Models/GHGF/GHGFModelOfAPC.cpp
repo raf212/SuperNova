@@ -485,4 +485,150 @@ namespace BidirectionalInMemGraph
     }
 
 
+    bool GHGFModelConstructor::PredictBatchNONVectorized_(uint32_t batch) noexcept
+    {
+        for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
+        {
+            GHGFNode node;
+            APCUseScope use;
+            if (GetGHGFNode_(i, node, use) && !node.PredictGHGFNodenNONVectorized_(batch))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool GHGFModelConstructor::UpdateGHGFBatchNONVectorized_(std::span<const float> observations, uint32_t batch) noexcept
+    {
+        using SR = GM::GHGFStateRow;
+        uint32_t observation = UNSIGNED_ZERO;
+        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        {
+            GHGFNode node;
+            APCUseScope use;
+            if (!GetGHGFNode_(slot, node, use))
+            {
+                continue;
+            }
+            float* precision = GHGFStateRow_(slot, SR::PRECISION);
+            const float* marginal = GHGFStateRow_(slot, SR::EXPECTED_PRECISION);
+            float* error = GHGFErrorRow_(slot, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
+            std::copy_n(marginal, batch, precision);
+            if (node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
+            {
+                float* mean = GHGFStateRow_(slot, SR::MEAN);
+                const float* predicted = GHGFStateRow_(slot, SR::EXPECTED_MEAN);
+                for (uint32_t lane = 0; lane < batch; ++lane)
+                {
+                    mean[lane] = observations[static_cast<size_t>(observation) * batch + lane];
+                    error[lane] = (mean[lane] - predicted[lane]) / marginal[lane];
+                }
+                ++observation;
+            }
+            else
+            {
+                std::fill_n(error, batch, GM::StorageConst::ZERO); // Sum of children's weighted corrections.
+            }
+        }
+        for (uint32_t reverse = static_cast<uint32_t>(FabCache_.CountOfAPC_); reverse > 0; --reverse)
+        {
+            const uint32_t slot = reverse - 1u;
+            GHGFNode node;
+            APCUseScope use;
+            if (!GetGHGFNode_(slot, node, use))
+            {
+                continue;
+            }
+            if (node.GHGFRole_() != GM::GHGFNodeRole::OBSERVATION && !node.UpdateGHGFNodeNONVectorized_(batch))
+            {
+                return false;
+            }
+            if (!node.PropogateGHGFErrorNONVectorized_(slot, batch))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool GHGFModelConstructor::CopyGHGFPredictionNONVectorized_(std::span<float> predictions, uint32_t batch) noexcept
+    {
+        uint32_t observation = UNSIGNED_ZERO;
+        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        {
+            GHGFNode node;
+            APCUseScope use;
+            if (GetGHGFNode_(slot, node, use) && node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
+            {
+                std::copy_n(GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_MEAN), batch,
+                    predictions.data() + static_cast<size_t>(observation++) * batch);
+            }
+        }
+        return observation == GHGFCache_.ObservationCount_;
+    }
+
+    bool GHGFModelConstructor::PredictGHGFNONVectorized(uint32_t batch, std::span<float> predictions) noexcept
+    {
+        if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::READY ||
+            batch == UNSIGNED_ZERO || batch > Profile_.BatchCapacity ||
+            (GHGFCache_.ActiveBatch_ != UNSIGNED_ZERO && GHGFCache_.ActiveBatch_ != batch) ||
+            predictions.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
+            IsInternalBuffer(predictions.data(), predictions.size()))
+        {
+            return false;
+        }
+        if (!PredictGHGFBatchNONVectorized_(batch))
+        {
+            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+            return false;
+        }
+        GHGFCache_.ActiveBatch_ = batch;
+        GHGFCache_.Phase_ = GM::GHGFPhase::PREDICTED;
+        if (!CopyGHGFPredictionNONVectorized_(predictions, batch))
+        {
+            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+            return false;
+        }
+        return true;
+    }
+
+    bool GHGFModelConstructor::UpdateGHGFNONVectorized(uint32_t batch, FCSpan observations) noexcept
+    {
+        if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::PREDICTED ||
+            batch != GHGFCache_.ActiveBatch_ || observations.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
+            IsInternalBuffer(observations.data(), observations.size()))
+        {
+            return false;
+        }
+        for (const float value : observations)
+        {
+            if (value != GM::StorageConst::ZERO && value != GM::StorageConst::ONE)
+            {
+                return false;
+            }
+        }
+        if (!UpdateGHGFBatchNONVectorized_(observations, batch))
+        {
+            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
+            return false;
+        }
+        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
+        return true;
+    }
+
+    bool GHGFModelConstructor::PredictGHGFBatchNONVectorized_(uint32_t batch) noexcept
+    {
+        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        {
+            GHGFNode node;
+            APCUseScope use;
+            if (GetGHGFNode_(slot, node, use) && !node.PredictGHGFNodenNONVectorized_(batch))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
 }

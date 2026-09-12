@@ -22,9 +22,9 @@ namespace BidirectionalInMemGraph
         GM::GHGFCache GHGFCache_{};
         GM::GHGFStorageProfile Profile_{};
         bool IsGHGFPlanCurrent_() noexcept;
-        bool PredictGHGFBatch(uint32_t batch) noexcept;
-        bool UpdateGHGFBatch(FCSpan observation, uint32_t batch) noexcept;
-        bool CopyGHGFPrediction_(std::span<float> prediction, uint32_t batch) noexcept;
+        bool PredictGHGFBatchNONVectorized_(uint32_t batch) noexcept;
+        bool CopyGHGFPredictionNONVectorized_(std::span<float> prediction, uint32_t batch) noexcept;
+        bool UpdateGHGFBatchNONVectorized_(FCSpan observatuins, uint32_t batch) noexcept;
 
         float* GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept;
         float* GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept;
@@ -39,6 +39,7 @@ namespace BidirectionalInMemGraph
         float GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
         bool SetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
 
+        bool PredictBatchNONVectorized_(uint32_t batch) noexcept;
 
     public :
         using APCFinilizer::ShutDownFabric;
@@ -47,10 +48,11 @@ namespace BidirectionalInMemGraph
         bool RemoveParent(const GM::GHGFConnection& connection) noexcept;
 
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
+
+        bool PredictGHGFNONVectorized(uint32_t batch, std::span<float> prediction)noexcept;
+        bool UpdateGHGFNONVectorized(uint32_t batch, FCSpan observations)noexcept;
         
         bool ResetGHGFState() noexcept;
-
-        bool PredectBatchSequentialTrial(uint32_t batch) noexcept;
 
         bool InitializeGHGFFabric(
             uint32_t slot_count,
@@ -65,6 +67,14 @@ namespace BidirectionalInMemGraph
         bool ConstructGHGFModel(
             GHGFModelConstructionValues& model_values,
             const GHGFLayerModel::GHGFStorageProfile& profile
+        ) noexcept;
+
+        std::optional<double> RunGHGFSequence(
+            FCSpan observations,
+            uint32_t time_count,
+            uint32_t batch_count,
+            std::span<float> predictios,
+            bool reset_state
         ) noexcept;
             
     };
