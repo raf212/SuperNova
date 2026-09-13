@@ -29,6 +29,8 @@ namespace BidirectionalInMemGraph
         float* GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept;
         float* GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept;
         float* GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept;
+        float* FFRowGHGF_(uint32_t slot, GM::GHGFMessageFForward row) noexcept;
+        float* FBRowGHGF_(uint32_t slot, GM::GHGFMessageFBackward row) noexcept;
 
         void InvalidateGHGFModel_() noexcept;
         uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept;
@@ -38,8 +40,6 @@ namespace BidirectionalInMemGraph
 
         std::optional<float> GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
         bool SetGHGFParameter_(uint32_t slot, uint32_t index, float value) noexcept;
-
-        bool PredictBatchNONVectorized_(uint32_t batch) noexcept;
 
     public :
         using APCFinilizer::ShutDownFabric;

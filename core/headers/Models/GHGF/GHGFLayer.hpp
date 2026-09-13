@@ -49,6 +49,26 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint8_t WEIGHT_ROW_HEIGHT = 1u;
 
+        enum class GHGFMessageFForward : uint8_t
+        {
+            OBSERVATION = 0,
+            VALUE_PRECISION = 1,
+            VALUE_CORRECTION = 2,
+            VOLATILE_PRECISION = 3,
+            VOLATILE_CORRECTION = 4
+        };
+        static constexpr uint8_t FF_MESSEGE_LEN_GHGF = static_cast<uint8_t>(GHGFMessageFForward::VALUE_CORRECTION) + 1u;
+
+        enum class GHGFMessageFBackward : uint8_t
+        {
+            MEAN = 0,
+            EXPECTED_MEAN = 1,
+            EXPECTED_PRECISION = 2
+        };
+        static constexpr uint8_t FB_MESSEGE_LEN_GHGF = static_cast<uint8_t>(GHGFMessageFBackward::EXPECTED_PRECISION) + 1u;
+
+
+
         struct GHGFStorageProfile final
         {
             uint32_t BatchCapacity = UNSIGNED_ZERO;
@@ -84,7 +104,6 @@ namespace BidirectionalInMemGraph
             READY = 1,
             PREDICTED = 2
         };
-
 
         static constexpr uint32_t CouplingIndex(
             FabricSegments edge_table,
@@ -129,6 +148,28 @@ namespace BidirectionalInMemGraph
 
             const uint32_t parameter_count = FIRST_COUPLING_INDEX + (EDGE_COUNT * static_cast<uint32_t>(max_direct_parent_per_axis));
 
+            if (!SD::AttachPrivateFloat32ToTable_(
+                profile.DefaultSchemaTable,
+                MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+                FF_MESSEGE_LEN_GHGF,
+                batch_capacity,
+                SD::SchemaFlags::BATCHED_LAST_DIM
+            ))
+            {
+                return false;
+            }
+
+            if (!SD::AttachPrivateFloat32ToTable_(
+                profile.DefaultSchemaTable,
+                MacroColumnOfAPC::FEEDBACKWARD_MESSAGE,
+                FB_MESSEGE_LEN_GHGF,
+                batch_capacity,
+                SD::SchemaFlags::BATCHED_LAST_DIM
+            ))
+            {
+                return false;
+            }
+            
             if (!SD::AttachPrivateFloat32ToTable_(
                 profile.DefaultSchemaTable,
                 MacroColumnOfAPC::STATE_SLOT,
@@ -195,6 +236,8 @@ namespace BidirectionalInMemGraph
                 ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT)
             );        
 
+            const SD::RegionSchemaRecord& ff = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE)];
+            const SD::RegionSchemaRecord& fb = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE)];
             const SD::RegionSchemaRecord& state = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::STATE_SLOT)];
             const SD::RegionSchemaRecord& error = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::ERROR_SLOT)];
             const SD::RegionSchemaRecord& weight = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::WEIGHT_SLOT)];
@@ -212,18 +255,35 @@ namespace BidirectionalInMemGraph
                 ADS::IsCapacityOfAPCValid(profile.RequiredAPCCells) &&
                 SD::GetActiveMaskOfRegionTable_(profile.DefaultSchemaTable) == expected_mask &&
                 SD::RequiredCellsForSchemaTable_(profile.DefaultSchemaTable) == profile.RequiredAPCCells &&
+
+                ff.Region == MacroColumnOfAPC::FEEDFORWARD_MESSAGE &&
+                ff.Dtype == SD::DataTypeOfMacroColumn::FLOAT32_T &&
+                ff.Protocol == SD::SchemaProtocols::PRIVATE_REGION &&
+                ff.MatrixHeight == FF_MESSEGE_LEN_GHGF &&
+                ff.MatrixWidth == profile.BatchCapacity &&
+                ff.Flags == SD::SchemaFlags::BATCHED_LAST_DIM &&
+
+                fb.Region == MacroColumnOfAPC::FEEDBACKWARD_MESSAGE &&
+                fb.Dtype == SD::DataTypeOfMacroColumn::FLOAT32_T &&
+                fb.Protocol == SD::SchemaProtocols::PRIVATE_REGION &&
+                fb.MatrixHeight == FB_MESSEGE_LEN_GHGF &&
+                fb.MatrixWidth == profile.BatchCapacity &&
+                fb.Flags == SD::SchemaFlags::BATCHED_LAST_DIM &&
+
                 state.Region == MacroColumnOfAPC::STATE_SLOT &&
                 state.Dtype == SD::DataTypeOfMacroColumn::FLOAT32_T &&
                 state.Protocol == SD::SchemaProtocols::PRIVATE_REGION &&
                 state.MatrixHeight == STATE_ROW_COUNT_HEIGHT &&
                 state.MatrixWidth == profile.BatchCapacity &&
                 state.Flags == SD::SchemaFlags::BATCHED_LAST_DIM &&
+
                 error.Region == MacroColumnOfAPC::ERROR_SLOT &&
                 error.Dtype == SD::DataTypeOfMacroColumn::FLOAT32_T &&
                 error.Protocol == SD::SchemaProtocols::PRIVATE_REGION &&
                 error.MatrixHeight == ERROR_ROW_COUNT_HEIGHT &&
                 error.MatrixWidth == profile.BatchCapacity &&
                 error.Flags == SD::SchemaFlags::BATCHED_LAST_DIM &&
+
                 weight.Region == MacroColumnOfAPC::WEIGHT_SLOT &&
                 weight.Dtype == SD::DataTypeOfMacroColumn::FLOAT32_T &&
                 weight.Protocol == SD::SchemaProtocols::PRIVATE_REGION &&
@@ -232,11 +292,12 @@ namespace BidirectionalInMemGraph
                 weight.Flags == SD::SchemaFlags::NONE;
         }
 
-
     private:
         
         struct GHGFCache final
         {
+            uint32_t FFCellOffset_ = UNSIGNED_ZERO;
+            uint32_t FBCellOffset_ = UNSIGNED_ZERO;
             uint32_t StateCellOffset_ = UNSIGNED_ZERO;
             uint32_t ErrorCellOffset_ = UNSIGNED_ZERO;
             uint32_t WeightCellOffset_ = UNSIGNED_ZERO;
@@ -274,7 +335,6 @@ namespace BidirectionalInMemGraph
             static constexpr float MIN_SEARCH_STEP = 1.0e-3f;
             static constexpr uint32_t INVALID_SLOT = ADS::APC_INDEX_BOUND_SENTINAL;
         };
-
     };
     
 }

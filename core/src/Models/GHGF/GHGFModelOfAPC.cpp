@@ -56,6 +56,18 @@ namespace BidirectionalInMemGraph
             static_cast<size_t>(row) * Profile_.BatchCapacity;
     }
 
+    float* GHGFModelConstructor::FFRowGHGF_(uint32_t slot, GM::GHGFMessageFForward row) noexcept
+    {
+        return GHGFRegion_(slot, GHGFCache_.FFCellOffset_) +
+            static_cast<size_t>(row) * Profile_.BatchCapacity;
+    }
+
+    float* GHGFModelConstructor::FBRowGHGF_(uint32_t slot, GM::GHGFMessageFBackward row) noexcept
+    {
+        return GHGFRegion_(slot, GHGFCache_.FBCellOffset_) +
+            static_cast<size_t>(row) * Profile_.BatchCapacity;
+    }
+
     uint64_t GHGFModelConstructor::GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept
     {
         CompiledDAGRecord* record = CompiledDAGRow_(slot);
@@ -107,9 +119,11 @@ namespace BidirectionalInMemGraph
         Profile_ = profile;
 
         for (const SD::RegionSchemaRecord& record : MetrixViewRow_(0u))
-        {
+        {   
             switch (record.Region)
             {
+            case MacroColumnOfAPC::FEEDFORWARD_MESSAGE: GHGFCache_.FFCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::FEEDBACKWARD_MESSAGE: GHGFCache_.FBCellOffset_ = record.CellOffset; break;
             case MacroColumnOfAPC::STATE_SLOT: GHGFCache_.StateCellOffset_ = record.CellOffset; break;
             case MacroColumnOfAPC::ERROR_SLOT: GHGFCache_.ErrorCellOffset_ = record.CellOffset; break;
             case MacroColumnOfAPC::WEIGHT_SLOT: GHGFCache_.WeightCellOffset_ = record.CellOffset; break;
@@ -332,15 +346,46 @@ namespace BidirectionalInMemGraph
                 }
 
                 const SD::RegionSchemaRecord& expected = Profile_.DefaultSchemaTable[region];
-                const uint32_t offset = record.Region == MacroColumnOfAPC::STATE_SLOT ?
-                    GHGFCache_.StateCellOffset_ : record.Region == MacroColumnOfAPC::ERROR_SLOT ?
-                    GHGFCache_.ErrorCellOffset_ : GHGFCache_.WeightCellOffset_;
-                if (record.Dtype != expected.Dtype || record.Protocol != expected.Protocol ||
-                    record.MatrixHeight != expected.MatrixHeight || record.MatrixWidth != expected.MatrixWidth ||
-                    record.Flags != expected.Flags || record.CellOffset != offset)
+
+                uint32_t offset = UNSIGNED_ZERO;
+
+                switch (record.Region)
+                {
+                case MacroColumnOfAPC::FEEDFORWARD_MESSAGE:
+                    offset = GHGFCache_.FFCellOffset_;
+                    break;
+
+                case MacroColumnOfAPC::FEEDBACKWARD_MESSAGE:
+                    offset = GHGFCache_.FBCellOffset_;
+                    break;
+
+                case MacroColumnOfAPC::STATE_SLOT:
+                    offset = GHGFCache_.StateCellOffset_;
+                    break;
+
+                case MacroColumnOfAPC::ERROR_SLOT:
+                    offset = GHGFCache_.ErrorCellOffset_;
+                    break;
+
+                case MacroColumnOfAPC::WEIGHT_SLOT:
+                    offset = GHGFCache_.WeightCellOffset_;
+                    break;
+
+                default:
+                    return false;
+                }
+
+                if (
+                    record.Dtype != expected.Dtype ||
+                    record.Protocol != expected.Protocol ||
+                    record.MatrixHeight != expected.MatrixHeight ||
+                    record.MatrixWidth != expected.MatrixWidth ||
+                    record.Flags != expected.Flags ||
+                    record.CellOffset != offset
+                )
                 {
                     return false;
-                }                
+                }          
             }
             ++GHGFCache_.NodeCount_;
             const bool observation = node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION;
@@ -505,71 +550,83 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    bool GHGFModelConstructor::PredictBatchNONVectorized_(uint32_t batch) noexcept
-    {
-        for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
-        {
-            GHGFNode node;
-            APCUseScope use;
-            if (GetGHGFNode_(i, node, use) && !node.PredictGHGFNodenNONVectorized_(batch))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
 
-    bool GHGFModelConstructor::UpdateGHGFBatchNONVectorized_(std::span<const float> observations, uint32_t batch) noexcept
+    bool GHGFModelConstructor::UpdateGHGFBatchNONVectorized_(
+        std::span<const float> observations,
+        uint32_t batch
+    ) noexcept
     {
         using SR = GM::GHGFStateRow;
+        using ER = GM::GHGFErrorRow;
+        using FR = GM::GHGFMessageFForward;
+
         uint32_t observation = UNSIGNED_ZERO;
+
         for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
         {
             GHGFNode node;
             APCUseScope use;
+
             if (!GetGHGFNode_(slot, node, use))
-            {
                 continue;
-            }
+
             float* precision = GHGFStateRow_(slot, SR::PRECISION);
             const float* marginal = GHGFStateRow_(slot, SR::EXPECTED_PRECISION);
-            float* error = GHGFErrorRow_(slot, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
+            float* error = GHGFErrorRow_(slot, ER::VALUE_PREDICTION_ERROR);
+
             std::copy_n(marginal, batch, precision);
-            if (node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
+
+            if (node.GHGFRole_() != GM::GHGFNodeRole::OBSERVATION)
             {
-                float* mean = GHGFStateRow_(slot, SR::MEAN);
-                const float* predicted = GHGFStateRow_(slot, SR::EXPECTED_MEAN);
-                for (uint32_t lane = 0; lane < batch; ++lane)
-                {
-                    mean[lane] = observations[static_cast<size_t>(observation) * batch + lane];
-                    error[lane] = (mean[lane] - predicted[lane]) / marginal[lane];
-                }
-                ++observation;
+                std::fill_n(error, batch, GM::StorageConst::ZERO);
+                continue;
             }
-            else
+
+            float* message = FFRowGHGF_(slot, FR::OBSERVATION);
+            float* mean = GHGFStateRow_(slot, SR::MEAN);
+            const float* predicted = GHGFStateRow_(slot, SR::EXPECTED_MEAN);
+
+            std::copy_n(
+                observations.data() + static_cast<size_t>(observation) * batch,
+                batch,
+                message
+            );
+
+            for (uint32_t lane = 0; lane < batch; ++lane)
             {
-                std::fill_n(error, batch, GM::StorageConst::ZERO); // Sum of children's weighted corrections.
+                mean[lane] = message[lane];
+                error[lane] = (mean[lane] - predicted[lane]) / marginal[lane];
             }
+
+            if (!node.PublishFForwardMessageGHGF_(batch))
+                return false;
+
+            ++observation;
         }
+
         for (uint32_t reverse = static_cast<uint32_t>(FabCache_.CountOfAPC_); reverse > 0; --reverse)
         {
             const uint32_t slot = reverse - 1u;
+
             GHGFNode node;
             APCUseScope use;
+
             if (!GetGHGFNode_(slot, node, use))
-            {
                 continue;
-            }
-            if (node.GHGFRole_() != GM::GHGFNodeRole::OBSERVATION && !node.UpdateGHGFNodeNONVectorized_(batch))
+
+            if (
+                node.GHGFRole_() != GM::GHGFNodeRole::OBSERVATION &&
+                !node.UpdateGHGFNodeNONVectorized_(batch)
+            )
             {
                 return false;
             }
+
             if (!node.PropogateGHGFErrorNONVectorized_(slot, batch))
-            {
                 return false;
-            }
         }
-        return true;
+
+        return observation == GHGFCache_.ObservationCount_;
     }
 
     bool GHGFModelConstructor::CopyGHGFPredictionNONVectorized_(std::span<float> predictions, uint32_t batch) noexcept
@@ -581,8 +638,14 @@ namespace BidirectionalInMemGraph
             APCUseScope use;
             if (GetGHGFNode_(slot, node, use) && node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
             {
-                std::copy_n(GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_MEAN), batch,
-                    predictions.data() + static_cast<size_t>(observation++) * batch);
+                std::copy_n(
+                    FBRowGHGF_(
+                        slot,
+                        GM::GHGFMessageFBackward::EXPECTED_MEAN
+                    ),
+                    batch,
+                    predictions.data() + static_cast<size_t>(observation++) * batch
+                );
             }
         }
         return observation == GHGFCache_.ObservationCount_;
@@ -721,7 +784,7 @@ namespace BidirectionalInMemGraph
                 {
                     continue;
                 }
-                const float* probability = GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_MEAN);
+                const float* probability = FBRowGHGF_(slot, GM::GHGFMessageFBackward::EXPECTED_MEAN);
                 const size_t begin = step_begin + static_cast<size_t>(observation++) * batch_count;
                 for (uint32_t lane = 0; lane < batch_count; ++lane)
                 {
