@@ -27,6 +27,9 @@ namespace BidirectionalInMemGraph
         bool UpdateGHGFNodeNONVectorized_(uint32_t batch) noexcept;
         bool PropogateGHGFErrorNONVectorized_(uint32_t child, uint32_t batch) noexcept;
 
+        bool PublishFForwardMessageGHGF_(uint32_t batch) noexcept;
+        void PublishFBackwardMessageGHGF_(uint32_t batch) noexcept;
+
         void ResetAPCGHGFStateRegion_() noexcept;
     public:
         bool InitializeGHGFNode(

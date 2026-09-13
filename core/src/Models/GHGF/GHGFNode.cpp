@@ -4,6 +4,89 @@
 
 namespace BidirectionalInMemGraph
 { 
+
+    void GHGFNode::PublishFBackwardMessageGHGF_(uint32_t batch) noexcept
+    {
+        const uint32_t slot = APCCache_.APCSlotIdx_;
+        std::copy_n(
+            GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::MEAN),
+            batch,
+            GHGFFabric_->FBRowGHGF_(slot, GM::GHGFMessageFBackward::MEAN)
+        );
+
+        std::copy_n(
+            GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_MEAN),
+            batch,
+            GHGFFabric_->FBRowGHGF_(slot, GM::GHGFMessageFBackward::EXPECTED_MEAN)
+        );
+
+        std::copy_n(
+            GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_PRECISION),
+            batch,
+            GHGFFabric_->FBRowGHGF_(slot, GM::GHGFMessageFBackward::EXPECTED_PRECISION)
+        );
+    }
+
+    bool GHGFNode::PublishFForwardMessageGHGF_(uint32_t batch) noexcept
+    {
+        const uint32_t slot = APCCache_.APCSlotIdx_;
+        const std::optional<GM::GHGFNodeRole> role = GHGFRole_();
+
+        const float* marginal = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::EXPECTED_PRECISION);
+        const float* precision = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::PRECISION);
+        const float* conditional = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::CONDITIONAL_EXPECTED_PRECISION);
+        const float* effictive = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::EFFECTIVE_PRECISION);
+        const float* value_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
+        const float* volatile_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VOLATILE_PREDICTION_ERROR);
+
+        float* value_precision = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_PRECISION);
+        float* value_correction = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_CORRECTION);
+        float* volatile_precision = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VOLATILE_PRECISION);
+        float* volatile_correction = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VOLATILE_CORRECTION);
+
+        if (role.value() == GM::GHGFNodeRole::OBSERVATION)
+        {
+            for (uint32_t i = 0; i < batch; i++)
+            {
+                value_precision[i] = marginal[i];
+                value_correction[i] = marginal[i] * value_error[i];
+                volatile_precision[i] = GM::StorageConst::ZERO;
+                volatile_correction[i] = GM::StorageConst::ZERO;
+            }
+            return true;
+        }
+        
+        for (uint32_t i = 0; i < batch; i++)
+        {
+            const float information = precision[i] - marginal[i];
+            const float denominator = conditional[i] + information;
+            if (
+                !std::isfinite(denominator) ||
+                denominator <= GM::StorageConst::ZERO
+            )
+            {
+                return false;
+            }
+
+            const float factor = conditional[i] * (information / denominator);
+            const float gain = conditional[i] * (precision[i] / denominator);
+
+            value_precision[i] = factor;
+            value_correction[i] = gain * value_error[i];
+
+            const float effictive_value = effictive[i];
+            const float volatine_value = volatile_error[i];
+
+            volatile_precision[i] = (GM::StorageConst::HALF * effictive_value * effictive_value) +
+                (effictive_value * effictive_value * volatine_value) -
+                (GM::StorageConst::HALF * effictive_value * volatine_value);
+
+            volatile_correction[i] = GM::StorageConst::HALF * effictive_value * volatine_value;
+        }
+        
+        return true;
+    }
+
     bool GHGFNode::InitializeGHGFNode(
         GHGFLayerModel::GHGFNodeRole role
     ) noexcept
@@ -124,6 +207,18 @@ namespace BidirectionalInMemGraph
     void GHGFNode::ResetAPCGHGFStateRegion_() noexcept
     {
         std::fill_n(
+            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->GHGFCache_.FFCellOffset_),
+            static_cast<size_t>(GM::FF_MESSEGE_LEN_GHGF) *
+                GHGFFabric_->Profile_.BatchCapacity,
+                GM::StorageConst::ZERO
+        );
+        std::fill_n(
+            GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->GHGFCache_.FBCellOffset_),
+            static_cast<size_t>(GM::FB_MESSEGE_LEN_GHGF) *
+                GHGFFabric_->Profile_.BatchCapacity,
+                GM::StorageConst::ZERO
+        );
+        std::fill_n(
             GHGFFabric_->GHGFRegion_(APCCache_.APCSlotIdx_, GHGFFabric_->GHGFCache_.StateCellOffset_),
             static_cast<size_t>(GM::STATE_ROW_COUNT_HEIGHT) * GHGFFabric_->Profile_.BatchCapacity, GM::StorageConst::ZERO
         );
@@ -162,100 +257,172 @@ namespace BidirectionalInMemGraph
     bool GHGFNode::PredictGHGFNodenNONVectorized_(uint32_t batch) noexcept
     {
         using SR = GM::GHGFStateRow;
+        using ER = GM::GHGFErrorRow;
+        using FR = GM::GHGFMessageFBackward;
+        using EI = GM::GHGFErrorValueIndexing;
         using SC = GM::StorageConst;
-        
+
         const uint32_t slot = APCCache_.APCSlotIdx_;
-        float* predicted = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_MEAN);
-        float* marginal = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_PRECISION);
         const auto value_axis = FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
         const auto volatile_axis = FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
+
+        float* predicted = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_MEAN);
+        float* marginal = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_PRECISION);
+
         const auto value_relations = GHGFFabric_->ParentRelations_(value_axis, slot);
+
+        // Observation node: Bernoulli prediction from value parents.
         if (GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
         {
             std::fill_n(predicted, batch, SC::ZERO);
-            for (uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, value_axis); mask; mask &= mask - 1u)
+
+            for (
+                uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, value_axis);
+                mask;
+                mask &= mask - 1u
+            )
             {
                 const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
                 const uint32_t parent = EdgeBuilder::ParentSlot(value_relations[ordinal]);
-                const float* parent_mean = GHGFFabric_->GHGFStateRow_(parent, SR::EXPECTED_MEAN);
+                const float* parent_mean = GHGFFabric_->FBRowGHGF_(parent, FR::EXPECTED_MEAN);
+
                 for (uint32_t lane = 0; lane < batch; ++lane)
-                {
                     predicted[lane] += parent_mean[lane];
-                }
             }
+
             for (uint32_t lane = 0; lane < batch; ++lane)
             {
                 if (!std::isfinite(predicted[lane]))
-                {
                     return false;
-                }
+
                 const float exponent = std::exp(-std::abs(predicted[lane]));
-                const float probability = predicted[lane] >= SC::ZERO ?
-                    SC::ONE / (SC::ONE + exponent) : exponent / (SC::ONE + exponent);
+                const float probability =
+                    predicted[lane] >= SC::ZERO
+                        ? SC::ONE / (SC::ONE + exponent)
+                        : exponent / (SC::ONE + exponent);
+
                 predicted[lane] = std::clamp(probability, SC::BINARY_CLIP, SC::ONE - SC::BINARY_CLIP);
+
                 marginal[lane] = predicted[lane] * (SC::ONE - predicted[lane]);
             }
+
+            PublishFBackwardMessageGHGF_(batch);
             return true;
         }
+
         const float* mean = GHGFFabric_->GHGFStateRow_(slot, SR::MEAN);
         const float* precision = GHGFFabric_->GHGFStateRow_(slot, SR::PRECISION);
-        const float* weight = GHGFFabric_->GHGFRegion_(slot, GHGFFabric_->GHGFCache_.WeightCellOffset_);
-        float* conditional = GHGFFabric_->GHGFStateRow_(slot, SR::CONDITIONAL_EXPECTED_PRECISION);
-        float* current_variance = GHGFFabric_->GHGFStateRow_(slot, SR::CURRENT_VARIANCE);
-        float* effective = GHGFFabric_->GHGFStateRow_(slot, SR::EFFECTIVE_PRECISION);
-        // Error rows are temporary prediction workspace until assimilation.
-        float* value_variance = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
-        float* log_volatility = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VOLATILE_PREDICTION_ERROR);
+        const float* weight =
+            GHGFFabric_->GHGFRegion_(slot, GHGFFabric_->GHGFCache_.WeightCellOffset_);
+
+        float* conditional =
+            GHGFFabric_->GHGFStateRow_(slot, SR::CONDITIONAL_EXPECTED_PRECISION);
+        float* current_variance =
+            GHGFFabric_->GHGFStateRow_(slot, SR::CURRENT_VARIANCE);
+        float* effective =
+            GHGFFabric_->GHGFStateRow_(slot, SR::EFFECTIVE_PRECISION);
+        float* value_variance =
+            GHGFFabric_->GHGFErrorRow_(slot, ER::VALUE_PREDICTION_ERROR);
+        float* log_volatility =
+            GHGFFabric_->GHGFErrorRow_(slot, ER::VOLATILE_PREDICTION_ERROR);
+
+        const float auto_connection = weight[static_cast<size_t>(EI::AUTO_CONNECTION)];
+        const float tonic_drift = weight[static_cast<size_t>(EI::TONIC_DRIFT)];
+        const float tonic_volatility = weight[static_cast<size_t>(EI::TONIC_VOLATILE)];
+
         for (uint32_t lane = 0; lane < batch; ++lane)
         {
-            predicted[lane] = weight[static_cast<size_t>(GM::GHGFErrorValueIndexing::AUTO_CONNECTION)] * mean[lane] +
-                weight[static_cast<size_t>(GM::GHGFErrorValueIndexing::TONIC_DRIFT)];
+            predicted[lane] = auto_connection * mean[lane] + tonic_drift;
             current_variance[lane] = SC::ONE / precision[lane];
             value_variance[lane] = SC::ZERO;
-            log_volatility[lane] = weight[static_cast<size_t>(GM::GHGFErrorValueIndexing::TONIC_VOLATILE)];
+            log_volatility[lane] = tonic_volatility;
         }
-        for (uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, value_axis); mask; mask &= mask - 1u)
+
+        // H/value-parent contribution.
+        for (
+            uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, value_axis);
+            mask;
+            mask &= mask - 1u
+        )
         {
             const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
             const uint32_t parent = EdgeBuilder::ParentSlot(value_relations[ordinal]);
-            const float coupling = weight[GM::CouplingIndex(value_axis, ordinal, GHGFFabric_->Profile_.MaxDirectParentPerAxis)];
-            const float* parent_mean = GHGFFabric_->GHGFStateRow_(parent, SR::EXPECTED_MEAN);
-            const float* parent_precision = GHGFFabric_->GHGFStateRow_(parent, SR::EXPECTED_PRECISION);
+            const float coupling = weight[
+                GM::CouplingIndex(
+                    value_axis,
+                    ordinal,
+                    GHGFFabric_->Profile_.MaxDirectParentPerAxis)];
+
+            const float* parent_mean =
+                GHGFFabric_->FBRowGHGF_(parent, FR::EXPECTED_MEAN);
+            const float* parent_precision =
+                GHGFFabric_->FBRowGHGF_(parent, FR::EXPECTED_PRECISION);
+
+            const float coupling_squared = coupling * coupling;
+
             for (uint32_t lane = 0; lane < batch; ++lane)
             {
                 predicted[lane] += coupling * parent_mean[lane];
-                value_variance[lane] += coupling * coupling / parent_precision[lane];
+                value_variance[lane] += coupling_squared / parent_precision[lane];
             }
         }
-        const auto volatile_relations = GHGFFabric_->ParentRelations_(volatile_axis, slot);
-        for (uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, volatile_axis); mask; mask &= mask - 1u)
+
+        // V/volatility-parent contribution.
+        const auto volatile_relations =
+            GHGFFabric_->ParentRelations_(volatile_axis, slot);
+
+        for (uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, volatile_axis);
+            mask;
+            mask &= mask - 1u)
         {
             const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
             const uint32_t parent = EdgeBuilder::ParentSlot(volatile_relations[ordinal]);
-            const float coupling = weight[GM::CouplingIndex(volatile_axis, ordinal, GHGFFabric_->Profile_.MaxDirectParentPerAxis)];
-            const float* parent_mean = GHGFFabric_->GHGFStateRow_(parent, SR::MEAN);
-            const float* parent_precision = GHGFFabric_->GHGFStateRow_(parent, SR::EXPECTED_PRECISION);
+            const float coupling = weight[
+                GM::CouplingIndex(
+                    volatile_axis,
+                    ordinal,
+                    GHGFFabric_->Profile_.MaxDirectParentPerAxis)];
+
+            const float* parent_mean =
+                GHGFFabric_->FBRowGHGF_(parent, FR::MEAN);
+            const float* parent_precision =
+                GHGFFabric_->FBRowGHGF_(parent, FR::EXPECTED_PRECISION);
+
+            const float half_coupling_squared = SC::HALF * coupling * coupling;
+
             for (uint32_t lane = 0; lane < batch; ++lane)
             {
-                log_volatility[lane] += coupling * parent_mean[lane] +
-                    SC::HALF * coupling * coupling / parent_precision[lane];
+                log_volatility[lane] +=
+                    coupling * parent_mean[lane] +
+                    half_coupling_squared / parent_precision[lane];
             }
         }
+
+        // Final predicted precision terms.
         for (uint32_t lane = 0; lane < batch; ++lane)
         {
             const float volatility = std::exp(log_volatility[lane]);
             const float variance = current_variance[lane] + volatility;
+
             conditional[lane] = SC::ONE / variance;
             marginal[lane] = SC::ONE / (variance + value_variance[lane]);
             effective[lane] = volatility * marginal[lane];
-            if (!std::isfinite(predicted[lane]) || !std::isfinite(volatility) || volatility <= SC::ZERO ||
-                !std::isfinite(conditional[lane]) || conditional[lane] <= SC::ZERO ||
-                !std::isfinite(marginal[lane]) || marginal[lane] <= SC::ZERO ||
+
+            if (
+                !std::isfinite(predicted[lane]) ||
+                !std::isfinite(volatility) ||
+                volatility <= SC::ZERO ||
+                !std::isfinite(conditional[lane]) ||
+                conditional[lane] <= SC::ZERO ||
+                !std::isfinite(marginal[lane]) ||
+                marginal[lane] <= SC::ZERO ||
                 !std::isfinite(effective[lane]))
             {
                 return false;
             }
         }
+
+        PublishFBackwardMessageGHGF_(batch);
         return true;
     }
 
@@ -294,65 +461,84 @@ namespace BidirectionalInMemGraph
         return true;
     }
     
-    bool GHGFNode::PropogateGHGFErrorNONVectorized_(uint32_t child, uint32_t batch) noexcept
+    bool GHGFNode::PropogateGHGFErrorNONVectorized_(
+        uint32_t child,
+        uint32_t batch
+    ) noexcept
     {
         using SR = GM::GHGFStateRow;
-        using SC = GM::StorageConst;
+        using ER = GM::GHGFErrorRow;
+        using FR = GM::GHGFMessageFForward;
 
-        if (child != APCCache_.APCSlotIdx_) { return false; }
-        const bool gaussian = GHGFRole_() != GM::GHGFNodeRole::OBSERVATION;
-        const float* weight = GHGFFabric_->GHGFRegion_(child, GHGFFabric_->GHGFCache_.WeightCellOffset_);
-        const float* child_marginal = GHGFFabric_->GHGFStateRow_(child, SR::EXPECTED_PRECISION);
-        const float* child_precision = GHGFFabric_->GHGFStateRow_(child, SR::PRECISION);
-        const float* child_conditional = GHGFFabric_->GHGFStateRow_(child, SR::CONDITIONAL_EXPECTED_PRECISION);
-        const float* child_effective = GHGFFabric_->GHGFStateRow_(child, SR::EFFECTIVE_PRECISION);
-        const float* child_value_error = GHGFFabric_->GHGFErrorRow_(child, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
-        const float* child_volatile_error = GHGFFabric_->GHGFErrorRow_(child, GM::GHGFErrorRow::VOLATILE_PREDICTION_ERROR);
-        for (const auto axis : {FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
-                               FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V})
-        {
-            const auto relations = GHGFFabric_->ParentRelations_(axis, child);
-            for (uint64_t mask = GHGFFabric_->GHGFParentMask_(child, axis); mask; mask &= mask - 1u)
+        if (child != APCCache_.APCSlotIdx_)
+            return false;
+
+        const float* weight = GHGFFabric_->GHGFRegion_(
+            child,
+            GHGFFabric_->GHGFCache_.WeightCellOffset_
+        );
+
+        for (FabricSegments axis :
             {
-                const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-                const uint32_t parent = EdgeBuilder::ParentSlot(relations[ordinal]);
-                const float coupling = weight[GM::CouplingIndex(axis, ordinal, GHGFFabric_->Profile_.MaxDirectParentPerAxis)];
-                float* parent_precision = GHGFFabric_->GHGFStateRow_(parent, SR::PRECISION);
-                float* parent_correction = GHGFFabric_->GHGFErrorRow_(parent, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
-                if (axis == FabricSegments::VALUE_PARENT_EDGE_TABLE_H)
+                FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V
+            })
+        {
+            const bool value_axis =
+                axis == FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+
+            const float* precision_message = GHGFFabric_->FFRowGHGF_(
+                child,
+                value_axis ? FR::VALUE_PRECISION : FR::VOLATILE_PRECISION
+            );
+
+            const float* correction_message = GHGFFabric_->FFRowGHGF_(
+                child,
+                value_axis ? FR::VALUE_CORRECTION : FR::VOLATILE_CORRECTION
+            );
+
+            const auto relations = GHGFFabric_->ParentRelations_(axis, child);
+
+            for (
+                uint64_t mask = GHGFFabric_->GHGFParentMask_(child, axis);
+                mask;
+                mask &= mask - 1u
+            )
+            {
+                const uint8_t ordinal =
+                    static_cast<uint8_t>(std::countr_zero(mask));
+
+                const uint32_t parent =
+                    EdgeBuilder::ParentSlot(relations[ordinal]);
+
+                const float coupling = weight[GM::CouplingIndex(
+                    axis,
+                    ordinal,
+                    GHGFFabric_->Profile_.MaxDirectParentPerAxis
+                )];
+
+                const float coupling_squared = coupling * coupling;
+
+                float* parent_precision =
+                    GHGFFabric_->GHGFStateRow_(parent, SR::PRECISION);
+
+                float* parent_correction =
+                    GHGFFabric_->GHGFErrorRow_(
+                        parent,
+                        ER::VALUE_PREDICTION_ERROR
+                    );
+
+                for (uint32_t lane = 0; lane < batch; ++lane)
                 {
-                    for (uint32_t lane = 0; lane < batch; ++lane)
-                    {
-                        float factor = child_marginal[lane];
-                        float gain = factor;
-                        if (gaussian)
-                        {
-                            const float information = child_precision[lane] - child_marginal[lane];
-                            const float denominator = child_conditional[lane] + information;
-                            if (!std::isfinite(denominator) || denominator <= SC::ZERO)
-                            {
-                                return false;
-                            }
-                            factor = child_conditional[lane] * information / denominator;
-                            gain = child_conditional[lane] * child_precision[lane] / denominator;
-                        }
-                        parent_precision[lane] += coupling * coupling * factor;
-                        parent_correction[lane] += coupling * gain * child_value_error[lane];
-                    }
-                }
-                else
-                {
-                    for (uint32_t lane = 0; lane < batch; ++lane)
-                    {
-                        const float weighted_effective = coupling * child_effective[lane];
-                        parent_precision[lane] += SC::HALF * weighted_effective * weighted_effective +
-                            weighted_effective * weighted_effective * child_volatile_error[lane] -
-                            SC::HALF * coupling * coupling * child_effective[lane] * child_volatile_error[lane];
-                        parent_correction[lane] += SC::HALF * weighted_effective * child_volatile_error[lane];
-                    }
+                    parent_precision[lane] +=
+                        coupling_squared * precision_message[lane];
+
+                    parent_correction[lane] +=
+                        coupling * correction_message[lane];
                 }
             }
         }
+
         return true;
     }
 }
