@@ -57,7 +57,7 @@ namespace BidirectionalInMemGraph
             VOLATILE_PRECISION = 3,
             VOLATILE_CORRECTION = 4
         };
-        static constexpr uint8_t FF_MESSEGE_LEN_GHGF = static_cast<uint8_t>(GHGFMessageFForward::VALUE_CORRECTION) + 1u;
+        static constexpr uint8_t FF_MESSEGE_LEN_GHGF = static_cast<uint8_t>(GHGFMessageFForward::VOLATILE_CORRECTION) + 1u;
 
         enum class GHGFMessageFBackward : uint8_t
         {
@@ -231,6 +231,8 @@ namespace BidirectionalInMemGraph
             const uint32_t expected_paremeter_count = FIRST_COUPLING_INDEX + (EDGE_COUNT * static_cast<uint32_t>(profile.MaxDirectParentPerAxis));
 
             const uint16_t expected_mask = static_cast<uint16_t>(
+                ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
+                ADS::RegionBit(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE) |
                 ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
                 ADS::RegionBit(MacroColumnOfAPC::ERROR_SLOT) |
                 ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT)
