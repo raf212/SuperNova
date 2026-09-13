@@ -52,12 +52,13 @@ namespace BidirectionalInMemGraph
         enum class GHGFMessageFForward : uint8_t
         {
             OBSERVATION = 0,
-            VALUE_PRECISION = 1,
-            VALUE_CORRECTION = 2,
-            VOLATILE_PRECISION = 3,
-            VOLATILE_CORRECTION = 4
+            VALUE_FACTOR = 1,
+            VALUE_GAIN = 2,
+            VALUE_ERROR = 3,
+            EFFECTIVE_PRECISION = 4,
+            VOLATILE_ERROR = 6
         };
-        static constexpr uint8_t FF_MESSEGE_LEN_GHGF = static_cast<uint8_t>(GHGFMessageFForward::VOLATILE_CORRECTION) + 1u;
+        static constexpr uint8_t FF_MESSEGE_LEN_GHGF = static_cast<uint8_t>(GHGFMessageFForward::VOLATILE_ERROR) + 1u;
 
         enum class GHGFMessageFBackward : uint8_t
         {
