@@ -25,10 +25,15 @@ namespace BidirectionalInMemGraph
         bool PredictGHGFBatchNONVectorized_(uint32_t batch) noexcept;
         bool CopyGHGFPredictionNONVectorized_(std::span<float> prediction, uint32_t batch) noexcept;
         bool UpdateGHGFBatchNONVectorized_(FCSpan observatuins, uint32_t batch) noexcept;
-
+        bool LearnGHGFBatchNONVectorized_(
+            uint32_t batch,
+            const GHGFLearningConfig& learning_conf
+        ) noexcept;
+        
         float* GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept;
         float* GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept;
         float* GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept;
+        float* GHGFWeight_(uint32_t slot) noexcept;
         float* FFRowGHGF_(uint32_t slot, GM::GHGFMessageFForward row) noexcept;
         float* FBRowGHGF_(uint32_t slot, GM::GHGFMessageFBackward row) noexcept;
 
@@ -80,6 +85,11 @@ namespace BidirectionalInMemGraph
             std::span<const GM::GHGFParameterRange> parameters, 
             uint32_t passes
         ) noexcept;
-            
+
+        bool TrainModelNONVectorized(
+            uint32_t batch,
+            FCSpan observations,
+            const GHGFLearningConfig& learning_cong
+        ) noexcept;
     };
 }

@@ -4,6 +4,23 @@
 
 namespace BidirectionalInMemGraph
 {
+
+    struct GHGFLearningConfig final
+    {
+        float HCouplingLearningRate = 1.0e-3f;
+        float DriftLearningRate = 1.0e-3f;
+
+        float VolatilityLearningRate = 1.0e-4f;
+        float VCouplingLearningRate = 1.0e-4f;
+
+        float AutoConnectionLearningRate = 1.0e-4f;
+
+        float GradientClip = 10.0f;
+
+        float MinTonicLogVolatility = -20.0f;
+        float MaxTonicLogVolatility = 10.0f;
+    };
+
     class GHGFLayerModel final
     {
         friend class GHGFModelConstructor;
@@ -56,6 +73,7 @@ namespace BidirectionalInMemGraph
             VALUE_GAIN = 2,
             VALUE_ERROR = 3,
             EFFECTIVE_PRECISION = 4,
+            VALUE_LEARNING_SIGNAL = 5,
             VOLATILE_ERROR = 6
         };
         static constexpr uint8_t FF_MESSEGE_LEN_GHGF = static_cast<uint8_t>(GHGFMessageFForward::VOLATILE_ERROR) + 1u;
@@ -293,6 +311,14 @@ namespace BidirectionalInMemGraph
                 weight.MatrixHeight == WEIGHT_ROW_HEIGHT &&
                 weight.MatrixWidth == profile.ParameterCount &&
                 weight.Flags == SD::SchemaFlags::NONE;
+        }
+
+
+        static constexpr bool IsHCouplingParameter(uint32_t index, uint8_t max_direct_parent_per_edge) noexcept
+        {
+            const uint32_t end = FIRST_COUPLING_INDEX + static_cast<uint32_t>(max_direct_parent_per_edge);
+            return 
+                index >= FIRST_COUPLING_INDEX && index < end;
         }
 
     private:

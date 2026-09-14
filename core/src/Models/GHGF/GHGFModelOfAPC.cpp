@@ -56,6 +56,11 @@ namespace BidirectionalInMemGraph
             static_cast<size_t>(row) * Profile_.BatchCapacity;
     }
 
+    float* GHGFModelConstructor::GHGFWeight_(uint32_t slot) noexcept
+    {
+        return GHGFRegion_(slot, GHGFCache_.WeightCellOffset_);
+    }
+
     float* GHGFModelConstructor::FFRowGHGF_(uint32_t slot, GM::GHGFMessageFForward row) noexcept
     {
         return GHGFRegion_(slot, GHGFCache_.FFCellOffset_) +
@@ -237,10 +242,7 @@ namespace BidirectionalInMemGraph
         
         if (
             child.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION &&
-            (
-                connection.Edge != FabricSegments::VALUE_PARENT_EDGE_TABLE_H ||
-                connection.Coupling != GM::StorageConst::ONE
-            )
+            connection.Edge != FabricSegments::VALUE_PARENT_EDGE_TABLE_H 
         )
         {
             return false;
@@ -466,8 +468,7 @@ namespace BidirectionalInMemGraph
                     }                    
                     if (
                         observation && 
-                        (edge_table != FabricSegments::VALUE_PARENT_EDGE_TABLE_H ||
-                        weight[GM::CouplingIndex(edge_table, ordinal, FabCache_.MaxDirectParentsPerAxis_)] != GM::StorageConst::ONE)
+                        edge_table != FabricSegments::VALUE_PARENT_EDGE_TABLE_H
                     )
                     {
                         return false;
@@ -536,16 +537,57 @@ namespace BidirectionalInMemGraph
         return GHGFRegion_(slot, GHGFCache_.WeightCellOffset_)[index];
     }
 
-    bool GHGFModelConstructor::SetGHGFParameter_(uint32_t slot, uint32_t index, float value) noexcept
+    bool GHGFModelConstructor::SetGHGFParameter_(
+        uint32_t slot,
+        uint32_t index,
+        float value
+    ) noexcept
     {
+        using EI = GM::GHGFErrorValueIndexing;
+
         GHGFNode node;
         APCUseScope use;
-        if (!GetGHGFNode_(slot, node, use) || index >= Profile_.ParameterCount ||
-            !std::isfinite(value) || node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
+
+        if (
+            !GetGHGFNode_(slot, node, use) ||
+            index >= Profile_.ParameterCount ||
+            !std::isfinite(value)
+        )
         {
             return false;
         }
-        GHGFRegion_(slot, GHGFCache_.WeightCellOffset_)[index] = value;
+
+        const std::optional<GM::GHGFNodeRole> role = node.GHGFRole_();
+
+        if (!role.has_value())
+        {
+            return false;
+        }
+
+        if (role.value() == GM::GHGFNodeRole::OBSERVATION)
+        {
+            const uint32_t h_begin = GM::FIRST_COUPLING_INDEX;
+
+            const uint32_t h_end =
+                h_begin +
+                static_cast<uint32_t>(
+                    Profile_.MaxDirectParentPerAxis
+                );
+
+            const bool allowed =
+                index == static_cast<uint32_t>(EI::TONIC_DRIFT) ||
+                (
+                    index >= h_begin &&
+                    index < h_end
+                );
+
+            if (!allowed)
+            {
+                return false;
+            }
+        }
+
+        GHGFWeight_(slot)[index] = value;
         GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
         return true;
     }
@@ -830,13 +872,14 @@ namespace BidirectionalInMemGraph
             GHGFNode node;
             APCUseScope use;
             std::optional<float> current = GetGHGFParameter_(parameter.Slot, parameter.Index);
-            if (!current.has_value() ||
-                (!GetGHGFNode_(parameter.Slot, node, use) || 
-                node.GHGFRole_() == GM::GHGFNodeRole::OBSERVATION) ||
-                !std::isfinite(parameter.Lower) || 
+            if (
+                !current.has_value() ||
+                !GetGHGFNode_(parameter.Slot, node, use) ||
+                !std::isfinite(parameter.Lower) ||
                 !std::isfinite(parameter.Upper) ||
-                parameter.Lower >= parameter.Upper || 
-                current < parameter.Lower || current > parameter.Upper
+                parameter.Lower >= parameter.Upper ||
+                current.value() < parameter.Lower ||
+                current.value() > parameter.Upper
             )
             {
                 return std::nullopt;
@@ -875,7 +918,11 @@ namespace BidirectionalInMemGraph
                     {
                         continue;
                     }
-                    SetGHGFParameter_(parameter.Slot, parameter.Index, candidate);
+                    if (!SetGHGFParameter_(parameter.Slot, parameter.Index, candidate))
+                    {
+                        return std::nullopt;
+                    }
+                    
                     std::optional<double> candidate_loss = RunGHGFSequence(observations, time_count, batch_count, {}, true);
                     if (candidate_loss.has_value() &&
                         candidate_loss < best_loss)
@@ -884,7 +931,11 @@ namespace BidirectionalInMemGraph
                         best_loss = candidate_loss.value();
                     }
                 }
-                SetGHGFParameter_(parameter.Slot, parameter.Index, best);
+                if (!SetGHGFParameter_(parameter.Slot, parameter.Index, best))
+                {
+                    return std::nullopt;
+                }
+                
                 mean_log_loss = best_loss;
             }
             step *= SC::HALF;
@@ -892,4 +943,359 @@ namespace BidirectionalInMemGraph
         // Leave beliefs corresponding to the selected parameters, not the last trial.
         return RunGHGFSequence(observations, time_count, batch_count, {}, true);
     }
+
+
+    bool GHGFModelConstructor::LearnGHGFBatchNONVectorized_(
+        uint32_t batch,
+        const GHGFLearningConfig& learning
+    ) noexcept
+    {
+        using EI = GM::GHGFErrorValueIndexing;
+        using FF = GM::GHGFMessageFForward;
+        using FB = GM::GHGFMessageFBackward;
+        using SR = GM::GHGFStateRow;
+        using SC = GM::StorageConst;
+
+        const auto ValidRate___ = [](float value) noexcept
+        {
+            return std::isfinite(value) && value >= 0.0f;
+        };
+
+        if (!IsGHGFPlanCurrent_() ||
+            batch == UNSIGNED_ZERO ||
+            batch > Profile_.BatchCapacity ||
+            !ValidRate___(learning.HCouplingLearningRate) ||
+            !ValidRate___(learning.DriftLearningRate) ||
+            !ValidRate___(learning.VolatilityLearningRate) ||
+            !ValidRate___(learning.VCouplingLearningRate) ||
+            !ValidRate___(learning.AutoConnectionLearningRate) ||
+            !std::isfinite(learning.GradientClip) ||
+            learning.GradientClip <= 0.0f ||
+            !std::isfinite(learning.MinTonicLogVolatility) ||
+            !std::isfinite(learning.MaxTonicLogVolatility) ||
+            learning.MinTonicLogVolatility >= learning.MaxTonicLogVolatility)
+        {
+            return false;
+        }
+
+        const float inverse_batch = SC::ONE / static_cast<float>(batch);
+
+        for (uint32_t child = 0; child < FabCache_.CountOfAPC_; ++child)
+        {
+            GHGFNode node;
+            APCUseScope use;
+
+            if (!GetGHGFNode_(child, node, use))
+                continue;
+
+            const auto maybe_role = node.GHGFRole_();
+            if (!maybe_role.has_value())
+                return false;
+
+            const GM::GHGFNodeRole role = maybe_role.value();
+            const bool observation = role == GM::GHGFNodeRole::OBSERVATION;
+
+            float* weight = GHGFRegion_(child, GHGFCache_.WeightCellOffset_);
+
+            const float* observed =
+                GHGFStateRow_(child, SR::OBSERVED);
+
+            const float* value_signal =
+                FFRowGHGF_(child, FF::VALUE_LEARNING_SIGNAL);
+
+            const float* effective_precision =
+                FFRowGHGF_(child, FF::EFFECTIVE_PRECISION);
+
+            const float* volatile_error =
+                FFRowGHGF_(child, FF::VOLATILE_ERROR);
+
+            const float* previous_mean =
+                FBRowGHGF_(child, FB::MEAN);
+
+            const auto ApplyUpdate___ =
+                [&](uint32_t index, float learning_rate,
+                    float accumulated_direction) noexcept -> bool
+            {
+                if (learning_rate == 0.0f)
+                    return true;
+
+                if (index >= Profile_.ParameterCount ||
+                    !std::isfinite(accumulated_direction))
+                {
+                    return false;
+                }
+
+                float direction = accumulated_direction * inverse_batch;
+                direction = std::clamp(
+                    direction, -learning.GradientClip, learning.GradientClip);
+
+                const float updated =
+                    weight[index] + learning_rate * direction;
+
+                if (!std::isfinite(updated))
+                    return false;
+
+                weight[index] = updated;
+                return true;
+            };
+
+            // -----------------------------------------------------
+            // 1. TONIC DRIFT / BIAS
+            // -----------------------------------------------------
+
+            float drift_direction = 0.0f;
+
+            for (uint32_t lane = 0; lane < batch; ++lane)
+                drift_direction += value_signal[lane];
+
+            if (!ApplyUpdate___(
+                    static_cast<uint32_t>(EI::TONIC_DRIFT),
+                    learning.DriftLearningRate,
+                    drift_direction))
+            {
+                return false;
+            }
+
+            // Observation nodes currently have no temporal or
+            // volatility dynamics of their own.
+            if (!observation)
+            {
+                // -------------------------------------------------
+                // 2. TEMPORAL / AUTO CONNECTION
+                // -------------------------------------------------
+
+                float temporal_direction = 0.0f;
+
+                for (uint32_t lane = 0; lane < batch; ++lane)
+                    temporal_direction += value_signal[lane] * previous_mean[lane];
+
+                const uint32_t auto_connection =
+                    static_cast<uint32_t>(EI::AUTO_CONNECTION);
+
+                if (!ApplyUpdate___(
+                        auto_connection,
+                        learning.AutoConnectionLearningRate,
+                        temporal_direction))
+                {
+                    return false;
+                }
+
+                weight[auto_connection] =
+                    std::clamp(weight[auto_connection], 0.0f, 1.0f);
+
+                // -------------------------------------------------
+                // 3. TONIC VOLATILITY
+                // -------------------------------------------------
+
+                float volatility_direction = 0.0f;
+
+                for (uint32_t lane = 0; lane < batch; ++lane)
+                {
+                    const float gate =
+                        observed[lane] != SC::ZERO ? SC::ONE : SC::ZERO;
+
+                    const float volatility_signal =
+                        SC::HALF *
+                        effective_precision[lane] *
+                        volatile_error[lane];
+
+                    volatility_direction += gate * volatility_signal;
+                }
+
+                const uint32_t tonic_volatile =
+                    static_cast<uint32_t>(EI::TONIC_VOLATILE);
+
+                if (!ApplyUpdate___(
+                        tonic_volatile,
+                        learning.VolatilityLearningRate,
+                        volatility_direction))
+                {
+                    return false;
+                }
+
+                weight[tonic_volatile] = std::clamp(
+                    weight[tonic_volatile],
+                    learning.MinTonicLogVolatility,
+                    learning.MaxTonicLogVolatility);
+            }
+
+            // -----------------------------------------------------
+            // 4. H COUPLING LEARNING
+            // -----------------------------------------------------
+
+            const auto h_axis =
+                FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+
+            const auto h_relations = ParentRelations_(h_axis, child);
+
+            for (uint64_t mask = GHGFParentMask_(child, h_axis);
+                mask;
+                mask &= mask - 1u)
+            {
+                const uint8_t ordinal =
+                    static_cast<uint8_t>(std::countr_zero(mask));
+
+                const uint32_t parent =
+                    EdgeBuilder::ParentSlot(h_relations[ordinal]);
+
+                const uint32_t parameter_index = GM::CouplingIndex(
+                    h_axis,
+                    ordinal,
+                    Profile_.MaxDirectParentPerAxis);
+
+                const float* parent_feature =
+                    FBRowGHGF_(parent, FB::EXPECTED_MEAN);
+
+                float coupling_direction = 0.0f;
+
+                for (uint32_t lane = 0; lane < batch; ++lane)
+                    coupling_direction +=
+                        value_signal[lane] * parent_feature[lane];
+
+                if (!ApplyUpdate___(
+                        parameter_index,
+                        learning.HCouplingLearningRate,
+                        coupling_direction))
+                {
+                    return false;
+                }
+            }
+
+            if (observation)
+                continue;
+
+            // -----------------------------------------------------
+            // 5. V COUPLING LEARNING
+            // -----------------------------------------------------
+
+            const auto v_axis =
+                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
+
+            const auto v_relations = ParentRelations_(v_axis, child);
+
+            for (uint64_t mask = GHGFParentMask_(child, v_axis);
+                mask;
+                mask &= mask - 1u)
+            {
+                const uint8_t ordinal =
+                    static_cast<uint8_t>(std::countr_zero(mask));
+
+                const uint32_t parent =
+                    EdgeBuilder::ParentSlot(v_relations[ordinal]);
+
+                const uint32_t parameter_index = GM::CouplingIndex(
+                    v_axis,
+                    ordinal,
+                    Profile_.MaxDirectParentPerAxis);
+
+                const float coupling = weight[parameter_index];
+
+                const float* parent_mean =
+                    FBRowGHGF_(parent, FB::MEAN);
+
+                const float* parent_precision =
+                    FBRowGHGF_(parent, FB::EXPECTED_PRECISION);
+
+                float coupling_direction = 0.0f;
+
+                for (uint32_t lane = 0; lane < batch; ++lane)
+                {
+                    if (!std::isfinite(parent_precision[lane]) ||
+                        parent_precision[lane] <= SC::ZERO)
+                    {
+                        return false;
+                    }
+
+                    const float gate =
+                        observed[lane] != SC::ZERO ? SC::ONE : SC::ZERO;
+
+                    const float volatility_signal =
+                        SC::HALF *
+                        effective_precision[lane] *
+                        volatile_error[lane];
+
+                    const float feature =
+                        parent_mean[lane] +
+                        coupling / parent_precision[lane];
+
+                    coupling_direction +=
+                        gate * volatility_signal * feature;
+                }
+
+                if (!ApplyUpdate___(
+                        parameter_index,
+                        learning.VCouplingLearningRate,
+                        coupling_direction))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+
+    bool GHGFModelConstructor::TrainModelNONVectorized(
+        uint32_t batch,
+        FCSpan observations,
+        const GHGFLearningConfig& learning
+    ) noexcept
+    {
+        if (
+            !IsGHGFPlanCurrent_() ||
+            GHGFCache_.Phase_ != GM::GHGFPhase::PREDICTED ||
+            batch != GHGFCache_.ActiveBatch_ ||
+            observations.size() !=
+                static_cast<size_t>(
+                    GHGFCache_.ObservationCount_
+                ) * batch ||
+            IsInternalBuffer(
+                observations.data(),
+                observations.size()
+            )
+        )
+        {
+            return false;
+        }
+
+        for (const float value : observations)
+        {
+            if (
+                value != GM::StorageConst::ZERO &&
+                value != GM::StorageConst::ONE
+            )
+            {
+                return false;
+            }
+        }
+
+        if (!UpdateGHGFBatchNONVectorized_(
+            observations,
+            batch
+        ))
+        {
+            GHGFCache_.Phase_ =
+                GM::GHGFPhase::NEEDS_RESET;
+
+            return false;
+        }
+
+        if (!LearnGHGFBatchNONVectorized_(
+            batch,
+            learning
+        ))
+        {
+            GHGFCache_.Phase_ =
+                GM::GHGFPhase::NEEDS_RESET;
+
+            return false;
+        }
+
+        GHGFCache_.Phase_ =
+            GM::GHGFPhase::READY;
+
+        return true;
+    }
+
 }

@@ -36,6 +36,7 @@ namespace BidirectionalInMemGraph
         const float* precision = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::PRECISION);
         const float* conditional = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::CONDITIONAL_EXPECTED_PRECISION);
         const float* effictive = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::EFFECTIVE_PRECISION);
+        const float* observed = GHGFFabric_->GHGFStateRow_(slot, GM::GHGFStateRow::OBSERVED);
         const float* value_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
         const float* volatile_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VOLATILE_PREDICTION_ERROR);
 
@@ -44,6 +45,7 @@ namespace BidirectionalInMemGraph
         float* value_error_ff = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_ERROR);
         float* effective_precision = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::EFFECTIVE_PRECISION);
         float* volatile_error_ff = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VOLATILE_ERROR);
+        float* value_learning_signal = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_LEARNING_SIGNAL);
 
         if (role.value() == GM::GHGFNodeRole::OBSERVATION)
         {
@@ -52,6 +54,8 @@ namespace BidirectionalInMemGraph
                 value_factor[i] = marginal[i];
                 value_gain[i] = marginal[i];
                 value_error_ff[i] = value_error[i];
+                value_learning_signal[i] = observed[i] != GM::StorageConst::ZERO
+                        ? marginal[i] * value_error[i] : GM::StorageConst::ZERO;
                 effective_precision[i] = GM::StorageConst::ZERO;
                 volatile_error_ff[i] = GM::StorageConst::ZERO;
             }
@@ -74,6 +78,9 @@ namespace BidirectionalInMemGraph
             value_gain[i] = conditional[i] * precision[i] / denominator;
             effective_precision[i] = effictive[i];
             volatile_error_ff[i] = volatile_error[i];
+            value_error_ff[i] = value_error[i];
+            value_learning_signal[i] = observed[i] != GM::StorageConst::ZERO 
+                ? precision[i] * value_error[i] : GM::StorageConst::ZERO;
         }
         
         return true;
@@ -260,13 +267,16 @@ namespace BidirectionalInMemGraph
 
         float* predicted = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_MEAN);
         float* marginal = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_PRECISION);
+        const float* weight = GHGFFabric_->GHGFWeight_(slot);
 
         const auto value_relations = GHGFFabric_->ParentRelations_(value_axis, slot);
 
         // Observation node: Bernoulli prediction from value parents.
         if (GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
         {
-            std::fill_n(predicted, batch, SC::ZERO);
+            const float bias = weight[static_cast<size_t>(EI::TONIC_DRIFT)];
+
+            std::fill_n(predicted, batch, bias);
 
             for (
                 uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, value_axis);
@@ -275,25 +285,51 @@ namespace BidirectionalInMemGraph
             )
             {
                 const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-                const uint32_t parent = EdgeBuilder::ParentSlot(value_relations[ordinal]);
-                const float* parent_mean = GHGFFabric_->FBRowGHGF_(parent, FR::EXPECTED_MEAN);
+
+                const uint32_t parent = EdgeBuilder::ParentSlot(
+                        value_relations[ordinal]
+                );
+                const uint32_t coupling_index =
+                    GM::CouplingIndex(
+                        value_axis,
+                        ordinal,
+                        GHGFFabric_->Profile_.MaxDirectParentPerAxis
+                    );
+
+                const float coupling = weight[coupling_index];
+                const float* parent_mean =
+                    GHGFFabric_->FBRowGHGF_(
+                        parent,
+                        FR::EXPECTED_MEAN
+                    );
 
                 for (uint32_t lane = 0; lane < batch; ++lane)
-                    predicted[lane] += parent_mean[lane];
+                {
+                    predicted[lane] +=
+                        coupling * parent_mean[lane];
+                }
             }
 
             for (uint32_t lane = 0; lane < batch; ++lane)
             {
                 if (!std::isfinite(predicted[lane]))
+                {
                     return false;
+                }
 
                 const float exponent = std::exp(-std::abs(predicted[lane]));
+
                 const float probability =
                     predicted[lane] >= SC::ZERO
                         ? SC::ONE / (SC::ONE + exponent)
                         : exponent / (SC::ONE + exponent);
 
-                predicted[lane] = std::clamp(probability, SC::BINARY_CLIP, SC::ONE - SC::BINARY_CLIP);
+                predicted[lane] =
+                    std::clamp(
+                        probability,
+                        SC::BINARY_CLIP,
+                        SC::ONE - SC::BINARY_CLIP
+                    );
 
                 marginal[lane] = predicted[lane] * (SC::ONE - predicted[lane]);
             }
@@ -302,10 +338,9 @@ namespace BidirectionalInMemGraph
             return true;
         }
 
+
         const float* mean = GHGFFabric_->GHGFStateRow_(slot, SR::MEAN);
         const float* precision = GHGFFabric_->GHGFStateRow_(slot, SR::PRECISION);
-        const float* weight =
-            GHGFFabric_->GHGFRegion_(slot, GHGFFabric_->GHGFCache_.WeightCellOffset_);
 
         float* conditional =
             GHGFFabric_->GHGFStateRow_(slot, SR::CONDITIONAL_EXPECTED_PRECISION);
@@ -528,11 +563,24 @@ namespace BidirectionalInMemGraph
                 {
                     for (uint32_t lane = 0; lane < batch; ++lane)
                     {
-                        const float weighted_effective = coupling * effictive_precision[lane];
-                        const float weight_effictive_sq = weighted_effective * weighted_effective;
-                        parent_precision[lane] += GM::StorageConst::HALF * weight_effictive_sq + weight_effictive_sq - volatile_error[lane] -
-                            coupling_squared * effictive_precision[lane] * volatile_error[lane];
-                        parent_correction[lane] = GM::StorageConst::HALF * weighted_effective * volatile_error[lane];
+                        const float weighted_effective =
+                            coupling * effictive_precision[lane];
+
+                        const float weighted_effective_sq =
+                            weighted_effective * weighted_effective;
+
+                        parent_precision[lane] +=
+                            GM::StorageConst::HALF * weighted_effective_sq +
+                            weighted_effective_sq * volatile_error[lane] -
+                            GM::StorageConst::HALF *
+                                coupling_squared *
+                                effictive_precision[lane] *
+                                volatile_error[lane];
+
+                        parent_correction[lane] +=
+                            GM::StorageConst::HALF *
+                            weighted_effective *
+                            volatile_error[lane];
                     }
                 }
             }
