@@ -39,19 +39,21 @@ namespace BidirectionalInMemGraph
         const float* value_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
         const float* volatile_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VOLATILE_PREDICTION_ERROR);
 
-        float* value_precision = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_PRECISION);
-        float* value_correction = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_CORRECTION);
-        float* volatile_precision = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VOLATILE_PRECISION);
-        float* volatile_correction = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VOLATILE_CORRECTION);
+        float* value_factor  = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_FACTOR);
+        float* value_gain = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_GAIN);
+        float* value_error_ff = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VALUE_ERROR);
+        float* effective_precision = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::EFFECTIVE_PRECISION);
+        float* volatile_error_ff = GHGFFabric_->FFRowGHGF_(slot, GM::GHGFMessageFForward::VOLATILE_ERROR);
 
         if (role.value() == GM::GHGFNodeRole::OBSERVATION)
         {
             for (uint32_t i = 0; i < batch; i++)
             {
-                value_precision[i] = marginal[i];
-                value_correction[i] = marginal[i] * value_error[i];
-                volatile_precision[i] = GM::StorageConst::ZERO;
-                volatile_correction[i] = GM::StorageConst::ZERO;
+                value_factor[i] = marginal[i];
+                value_gain[i] = marginal[i];
+                value_error_ff[i] = value_error[i];
+                effective_precision[i] = GM::StorageConst::ZERO;
+                volatile_error_ff[i] = GM::StorageConst::ZERO;
             }
             return true;
         }
@@ -68,20 +70,10 @@ namespace BidirectionalInMemGraph
                 return false;
             }
 
-            const float factor = conditional[i] * (information / denominator);
-            const float gain = conditional[i] * (precision[i] / denominator);
-
-            value_precision[i] = factor;
-            value_correction[i] = gain * value_error[i];
-
-            const float effictive_value = effictive[i];
-            const float volatine_value = volatile_error[i];
-
-            volatile_precision[i] = (GM::StorageConst::HALF * effictive_value * effictive_value) +
-                (effictive_value * effictive_value * volatine_value) -
-                (GM::StorageConst::HALF * effictive_value * volatine_value);
-
-            volatile_correction[i] = GM::StorageConst::HALF * effictive_value * volatine_value;
+            value_factor[i] = conditional[i] * information / denominator;
+            value_gain[i] = conditional[i] * precision[i] / denominator;
+            effective_precision[i] = effictive[i];
+            volatile_error_ff[i] = volatile_error[i];
         }
         
         return true;
@@ -458,7 +450,7 @@ namespace BidirectionalInMemGraph
                 return false;
             }
         }
-        return true;
+        return PublishFForwardMessageGHGF_(batch);
     }
     
     bool GHGFNode::PropogateGHGFErrorNONVectorized_(
@@ -477,47 +469,38 @@ namespace BidirectionalInMemGraph
             child,
             GHGFFabric_->GHGFCache_.WeightCellOffset_
         );
+        const float* value_factor = GHGFFabric_->FFRowGHGF_(child, FR::VALUE_FACTOR);
+        const float* value_gain = GHGFFabric_->FFRowGHGF_(child, FR::VALUE_GAIN);
+        const float* value_error = GHGFFabric_->FFRowGHGF_(child, FR::VALUE_ERROR);
+        const float* effictive_precision = GHGFFabric_->FFRowGHGF_(child, FR::EFFECTIVE_PRECISION);
+        const float* volatile_error = GHGFFabric_->FFRowGHGF_(child, FR::VOLATILE_ERROR);
 
-        for (FabricSegments axis :
+        for (FabricSegments edge :
             {
                 FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
                 FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V
             })
         {
-            const bool value_axis =
-                axis == FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
 
-            const float* precision_message = GHGFFabric_->FFRowGHGF_(
-                child,
-                value_axis ? FR::VALUE_PRECISION : FR::VOLATILE_PRECISION
-            );
-
-            const float* correction_message = GHGFFabric_->FFRowGHGF_(
-                child,
-                value_axis ? FR::VALUE_CORRECTION : FR::VOLATILE_CORRECTION
-            );
-
-            const auto relations = GHGFFabric_->ParentRelations_(axis, child);
+            const auto relations = GHGFFabric_->ParentRelations_(edge, child);
 
             for (
-                uint64_t mask = GHGFFabric_->GHGFParentMask_(child, axis);
+                uint64_t mask = GHGFFabric_->GHGFParentMask_(child, edge);
                 mask;
                 mask &= mask - 1u
             )
             {
-                const uint8_t ordinal =
-                    static_cast<uint8_t>(std::countr_zero(mask));
-
-                const uint32_t parent =
-                    EdgeBuilder::ParentSlot(relations[ordinal]);
+                const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
+                const uint32_t parent = EdgeBuilder::ParentSlot(relations[ordinal]);
 
                 const float coupling = weight[GM::CouplingIndex(
-                    axis,
+                    edge,
                     ordinal,
                     GHGFFabric_->Profile_.MaxDirectParentPerAxis
                 )];
 
                 const float coupling_squared = coupling * coupling;
+                
 
                 float* parent_precision =
                     GHGFFabric_->GHGFStateRow_(parent, SR::PRECISION);
@@ -528,13 +511,29 @@ namespace BidirectionalInMemGraph
                         ER::VALUE_PREDICTION_ERROR
                     );
 
-                for (uint32_t lane = 0; lane < batch; ++lane)
+                
+                if (edge == FabricSegments::VALUE_PARENT_EDGE_TABLE_H)
                 {
-                    parent_precision[lane] +=
-                        coupling_squared * precision_message[lane];
+                    for (uint32_t lane = 0; lane < batch; ++lane)
+                    {
 
-                    parent_correction[lane] +=
-                        coupling * correction_message[lane];
+                            parent_precision[lane] +=
+                                coupling_squared * value_factor[lane];
+
+                            parent_correction[lane] +=
+                                coupling * value_gain[lane] * value_error[lane];
+                    }
+                }
+                else
+                {
+                    for (uint32_t lane = 0; lane < batch; ++lane)
+                    {
+                        const float weighted_effective = coupling * effictive_precision[lane];
+                        const float weight_effictive_sq = weighted_effective * weighted_effective;
+                        parent_precision[lane] += GM::StorageConst::HALF * weight_effictive_sq + weight_effictive_sq - volatile_error[lane] -
+                            coupling_squared * effictive_precision[lane] * volatile_error[lane];
+                        parent_correction[lane] = GM::StorageConst::HALF * weighted_effective * volatile_error[lane];
+                    }
                 }
             }
         }
