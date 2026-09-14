@@ -536,8 +536,8 @@ public:
 
         const SD::FabricRegionConfig region_config{
             static_cast<std::uint16_t>(
-                ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
-                ADS::RegionBit(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE)
+                ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT) |
+                ADS::RegionBit(MacroColumnOfAPC::TOP_DOWN_SLOT)
             ),
             0u,
             matrix_width
@@ -558,9 +558,9 @@ public:
 
 
 
-        SD::RegionSchemaRecord& ff_schema_prop = schemas[static_cast<std::size_t>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE)];
-        SD::RegionSchemaRecord& fb_schema = schemas[static_cast<std::size_t>(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE)];
-        ff_schema_prop.Region = MacroColumnOfAPC::FEEDFORWARD_MESSAGE;
+        SD::RegionSchemaRecord& ff_schema_prop = schemas[static_cast<std::size_t>(MacroColumnOfAPC::BOTTOM_UP_SLOT)];
+        SD::RegionSchemaRecord& fb_schema = schemas[static_cast<std::size_t>(MacroColumnOfAPC::TOP_DOWN_SLOT)];
+        ff_schema_prop.Region = MacroColumnOfAPC::BOTTOM_UP_SLOT;
         ff_schema_prop.Dtype = SD::DataTypeOfMacroColumn::UINT64_T;
         ff_schema_prop.Protocol = SD::SchemaProtocols::PRIVATE_REGION;
         ff_schema_prop.MatrixHeight = 1u;
@@ -568,7 +568,7 @@ public:
         ff_schema_prop.Flags = SD::SchemaFlags::BATCHED_LAST_DIM;
 
         fb_schema = ff_schema_prop;
-        fb_schema.Region = MacroColumnOfAPC::FEEDBACKWARD_MESSAGE;
+        fb_schema.Region = MacroColumnOfAPC::TOP_DOWN_SLOT;
         fb_schema.Protocol = SD::SchemaProtocols::ATOMIC_WORD_ARRAY;
 
         if (
@@ -605,10 +605,10 @@ public:
             if constexpr (PayloadWords > 0u)
             {
                 auto direct = Nodes_[i].template BuildAViewOverRegion<std::uint64_t>(
-                    MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+                    MacroColumnOfAPC::BOTTOM_UP_SLOT
                 );
                 auto atomic = Nodes_[i].template BuildAViewOverRegion<std::uint64_t>(
-                    MacroColumnOfAPC::FEEDBACKWARD_MESSAGE
+                    MacroColumnOfAPC::TOP_DOWN_SLOT
                 );
 
                 if (
@@ -1968,7 +1968,7 @@ constexpr SD::FabricRegionConfig OneRegionConfig(
 ) noexcept
 {
     return SD::FabricRegionConfig{
-        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
+        ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT),
         0u,
         batch_capacity
     };
@@ -2084,7 +2084,7 @@ inline bool SchemaABIAndGeometry() noexcept
     }
 
     SD::RegionSchemaRecord ordinary{};
-    ordinary.Region = MacroColumnOfAPC::FEEDFORWARD_MESSAGE;
+    ordinary.Region = MacroColumnOfAPC::BOTTOM_UP_SLOT;
     ordinary.Dtype = SD::DataTypeOfMacroColumn::UINT16_T;
     ordinary.Protocol = SD::SchemaProtocols::PRIVATE_REGION;
     ordinary.MatrixHeight = 3u;
@@ -2160,14 +2160,14 @@ inline bool SchemaABIAndGeometry() noexcept
         );
 
     constexpr std::uint16_t sparse_mask =
-        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
+        ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT) |
         ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
         ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT) |
         ADS::RegionBit(MacroColumnOfAPC::EXTRA_SLOT);
 
     const bool compact_ok =
         ADS::CompactRegionIndex(
-            sparse_mask, MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+            sparse_mask, MacroColumnOfAPC::BOTTOM_UP_SLOT
         ) == 0u &&
         ADS::CompactRegionIndex(
             sparse_mask, MacroColumnOfAPC::STATE_SLOT
@@ -2229,7 +2229,7 @@ inline bool FabricConfigurationValidation() noexcept
         VIEW_WIDTH
     };
     constexpr SD::FabricRegionConfig zero_batch{
-        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
+        ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT),
         0u,
         0u
     };
@@ -2266,7 +2266,7 @@ inline bool CreationValidationAndRollback() noexcept
     SD::MakeDisabledSchemaTable(valid);
     if (!MakeSchema(
         valid,
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         SD::DataTypeOfMacroColumn::UINT64_T,
         SD::SchemaProtocols::PRIVATE_REGION,
         1u,
@@ -2292,7 +2292,7 @@ inline bool CreationValidationAndRollback() noexcept
     SD::MakeDisabledSchemaTable(wrong_batch);
     const bool wrong_batch_defined = MakeSchema(
         wrong_batch,
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         SD::DataTypeOfMacroColumn::UINT64_T,
         SD::SchemaProtocols::PRIVATE_REGION,
         1u,
@@ -2307,7 +2307,7 @@ inline bool CreationValidationAndRollback() noexcept
     SD::MakeDisabledSchemaTable(oversized);
     const bool oversized_defined = MakeSchema(
         oversized,
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         SD::DataTypeOfMacroColumn::UINT64_T,
         SD::SchemaProtocols::PRIVATE_REGION,
         MINIMUM_APC_CELL_COUNT,
@@ -2380,7 +2380,7 @@ bool CreateTyped(
     SD::MakeDisabledSchemaTable(schemas);
     return MakeSchema(
         schemas,
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         dtype_value.value(),
         region_protocol,
         1u,
@@ -2405,8 +2405,8 @@ bool PrivateCase() noexcept
         return false;
     }
 
-    auto view = apc.BuildAViewOverRegion<T>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE);
-    auto wrong = apc.BuildAViewOverRegion<WrongType<T>>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE);
+    auto view = apc.BuildAViewOverRegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
+    auto wrong = apc.BuildAViewOverRegion<WrongType<T>>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
     if (
         !view.has_value() || !view->IsValid() || view->Size() != VIEW_WIDTH ||
         view->GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION ||
@@ -2414,7 +2414,7 @@ bool PrivateCase() noexcept
         view->AtomicStore(0u, FirstValue<T>()) ||
         view->AtomicStore(view->Size(), FirstValue<T>()) ||
         apc.BuildAViewOverRegion<T>(
-            MacroColumnOfAPC::FEEDFORWARD_MESSAGE, 1u
+            MacroColumnOfAPC::BOTTOM_UP_SLOT, 1u
         ).has_value() ||
         apc.BuildAViewOverRegion<T>(
             MacroColumnOfAPC::ERROR_SLOT
@@ -2428,7 +2428,7 @@ bool PrivateCase() noexcept
     span.value()[0u] = FirstValue<T>();
     span.value()[span->size() / 2u] = SecondValue<T>();
     span.value().back() = FirstValue<T>();
-    if (!apc.ZeroARegion<T>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE)) return false;
+    if (!apc.ZeroARegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT)) return false;
     return std::all_of(span->begin(), span->end(), [](T value) { return value == T{}; });
 }
 
@@ -2447,8 +2447,8 @@ bool AtomicCase() noexcept
         return false;
     }
 
-    auto view = apc.BuildAViewOverRegion<T>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE);
-    auto wrong = apc.BuildAViewOverRegion<WrongType<T>>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE);
+    auto view = apc.BuildAViewOverRegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
+    auto wrong = apc.BuildAViewOverRegion<WrongType<T>>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
     if (
         !view.has_value() || !view->IsValid() || view->Size() != VIEW_WIDTH ||
         view->GetProtocol() != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
@@ -2479,7 +2479,7 @@ bool AtomicCase() noexcept
             std::memory_order_acq_rel,
             std::memory_order_acquire
         ) ||
-        !apc.ZeroARegion<T>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE)
+        !apc.ZeroARegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT)
     )
     {
         return false;
@@ -2508,7 +2508,7 @@ bool ImmutableCase() noexcept
     }
 
     auto view = apc.BuildAViewOverRegion<T>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     return
         view.has_value() &&
@@ -2517,7 +2517,7 @@ bool ImmutableCase() noexcept
         view->GetProtocol() == SD::SchemaProtocols::IMMUTABLE_SNAPSHOT &&
         !view->RawMutableSpan().has_value() &&
         !view->AtomicStore(0u, FirstValue<T>()) &&
-        !apc.ZeroARegion<T>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE);
+        !apc.ZeroARegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
 }
 
 template <typename T>
@@ -2539,7 +2539,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     constexpr std::uint32_t batch = 4u;
     constexpr std::uint32_t slot_count = 3u;
     constexpr std::uint16_t active_mask =
-        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
+        ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT) |
         ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
         ADS::RegionBit(MacroColumnOfAPC::ERROR_SLOT) |
         ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT) |
@@ -2583,7 +2583,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     if (
         !MakeSchema(
             schemas,
-            MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+            MacroColumnOfAPC::BOTTOM_UP_SLOT,
             SD::DataTypeOfMacroColumn::FLOAT32_T,
             SD::SchemaProtocols::PRIVATE_REGION,
             3u,
@@ -2648,7 +2648,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     SD::RegionSchemaTable second_schemas = schemas;
     if (!MakeSchema(
         second_schemas,
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         SD::DataTypeOfMacroColumn::FLOAT32_T,
         SD::SchemaProtocols::PRIVATE_REGION,
         5u,
@@ -2672,7 +2672,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     const std::span<const SD::RegionSchemaRecord> second_row =
         fabric.SchemaRow(second_apc.GetThisSlotIdx());
     constexpr std::array<MacroColumnOfAPC, active_count> expected_regions{
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         MacroColumnOfAPC::STATE_SLOT,
         MacroColumnOfAPC::ERROR_SLOT,
         MacroColumnOfAPC::WEIGHT_SLOT,
@@ -2743,7 +2743,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     }
 
     auto feedforward = apc.BuildAViewOverRegion<float>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     auto state = apc.BuildAViewOverRegion<float>(MacroColumnOfAPC::STATE_SLOT);
     auto weight = apc.BuildAViewOverRegion<float>(MacroColumnOfAPC::WEIGHT_SLOT);
@@ -2752,13 +2752,13 @@ inline bool DeviceViewAndProtocolStorage() noexcept
         MacroColumnOfAPC::AUX_SLOT
     );
     auto wrong_type = apc.BuildAViewOverRegion<double>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     auto inactive = apc.BuildAViewOverRegion<float>(
         MacroColumnOfAPC::EXTRA_SLOT
     );
     auto second_feedforward = second_apc.BuildAViewOverRegion<float>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
 
     const bool public_views_ok =
@@ -2823,7 +2823,7 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
     SD::MakeDisabledSchemaTable(first_schema);
     if (!MakeSchema(
         first_schema,
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         SD::DataTypeOfMacroColumn::UINT64_T,
         SD::SchemaProtocols::PRIVATE_REGION,
         1u,
@@ -2844,7 +2844,7 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
     const std::uint32_t retired_slot = first.GetThisSlotIdx();
     {
         auto first_view = first.BuildAViewOverRegion<std::uint64_t>(
-            MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+            MacroColumnOfAPC::BOTTOM_UP_SLOT
         );
         if (!first_view.has_value() || !first_view->RawMutableSpan().has_value())
         {
@@ -2866,7 +2866,7 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
     SD::MakeDisabledSchemaTable(replacement_schema);
     if (!MakeSchema(
         replacement_schema,
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+        MacroColumnOfAPC::BOTTOM_UP_SLOT,
         SD::DataTypeOfMacroColumn::UINT32_T,
         SD::SchemaProtocols::ATOMIC_WORD_ARRAY,
         2u,
@@ -2890,10 +2890,10 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
     }
 
     auto replacement_view = replacement.BuildAViewOverRegion<std::uint32_t>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     auto stale_dtype = replacement.BuildAViewOverRegion<std::uint64_t>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     bool zeroed =
         replacement_view.has_value() &&
@@ -3090,7 +3090,7 @@ inline bool MixedAxisStress(std::uint64_t& retries_out)
 constexpr SchemaDefinition::FabricRegionConfig AtomicRegionConfig() noexcept
 {
     return SchemaDefinition::FabricRegionConfig{
-        ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE),
+        ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT),
         0u,
         8u
     };
@@ -3104,9 +3104,9 @@ inline bool CreateAtomic(
     SchemaDefinition::MakeDisabledSchemaTable(schemas);
 
     SchemaDefinition::RegionSchemaRecord& schema = schemas[static_cast<std::size_t>(
-            MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+            MacroColumnOfAPC::BOTTOM_UP_SLOT
     )];
-    schema.Region = MacroColumnOfAPC::FEEDFORWARD_MESSAGE;
+    schema.Region = MacroColumnOfAPC::BOTTOM_UP_SLOT;
     schema.Dtype = SchemaDefinition::DataTypeOfMacroColumn::UINT64_T;
     schema.Protocol = SchemaDefinition::SchemaProtocols::ATOMIC_WORD_ARRAY;
     schema.MatrixHeight = 1u;
@@ -3152,7 +3152,7 @@ inline bool RetirementAndABA()
     }
 
     auto held_view = child.BuildAViewOverRegion<std::uint64_t>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     if (!held_view.has_value() || child.Retire(1u))
     {
@@ -3164,7 +3164,7 @@ inline bool RetirementAndABA()
         !child.Retire() ||
         child.IsActiveAPC() ||
         child.BuildAViewOverRegion<std::uint64_t>(
-            MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+            MacroColumnOfAPC::BOTTOM_UP_SLOT
         ).has_value() ||
         !CreateAtomic(fabric, replacement) ||
         replacement.GetThisSlotIdx() != child_slot ||
@@ -3194,7 +3194,7 @@ inline bool ShutdownDrainsOutstandingView()
     }
 
     auto held_view = apc.BuildAViewOverRegion<std::uint64_t>(
-        MacroColumnOfAPC::FEEDFORWARD_MESSAGE
+        MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     if (!held_view.has_value())
     {

@@ -122,8 +122,8 @@ namespace BidirectionalInMemGraph
         {   
             switch (record.Region)
             {
-            case MacroColumnOfAPC::FEEDFORWARD_MESSAGE: GHGFCache_.FFCellOffset_ = record.CellOffset; break;
-            case MacroColumnOfAPC::FEEDBACKWARD_MESSAGE: GHGFCache_.FBCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::BOTTOM_UP_SLOT: GHGFCache_.FFCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::TOP_DOWN_SLOT: GHGFCache_.FBCellOffset_ = record.CellOffset; break;
             case MacroColumnOfAPC::STATE_SLOT: GHGFCache_.StateCellOffset_ = record.CellOffset; break;
             case MacroColumnOfAPC::ERROR_SLOT: GHGFCache_.ErrorCellOffset_ = record.CellOffset; break;
             case MacroColumnOfAPC::WEIGHT_SLOT: GHGFCache_.WeightCellOffset_ = record.CellOffset; break;
@@ -351,11 +351,11 @@ namespace BidirectionalInMemGraph
 
                 switch (record.Region)
                 {
-                case MacroColumnOfAPC::FEEDFORWARD_MESSAGE:
+                case MacroColumnOfAPC::BOTTOM_UP_SLOT:
                     offset = GHGFCache_.FFCellOffset_;
                     break;
 
-                case MacroColumnOfAPC::FEEDBACKWARD_MESSAGE:
+                case MacroColumnOfAPC::TOP_DOWN_SLOT:
                     offset = GHGFCache_.FBCellOffset_;
                     break;
 

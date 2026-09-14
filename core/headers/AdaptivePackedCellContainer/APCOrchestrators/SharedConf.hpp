@@ -38,8 +38,8 @@ namespace BidirectionalInMemGraph
 
     enum class MacroColumnOfAPC : uint8_t
     {
-        FEEDFORWARD_MESSAGE  = 0,
-        FEEDBACKWARD_MESSAGE = 1,
+        BOTTOM_UP_SLOT  = 0,
+        TOP_DOWN_SLOT = 1,
         LATERAL_MESAGE = 2,
         STATE_SLOT = 3,
         ERROR_SLOT = 4,

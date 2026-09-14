@@ -151,7 +151,7 @@ namespace BidirectionalInMemGraph
 
             if (!SD::AttachPrivateFloat32ToTable_(
                 profile.DefaultSchemaTable,
-                MacroColumnOfAPC::FEEDFORWARD_MESSAGE,
+                MacroColumnOfAPC::BOTTOM_UP_SLOT,
                 FF_MESSEGE_LEN_GHGF,
                 batch_capacity,
                 SD::SchemaFlags::BATCHED_LAST_DIM
@@ -162,7 +162,7 @@ namespace BidirectionalInMemGraph
 
             if (!SD::AttachPrivateFloat32ToTable_(
                 profile.DefaultSchemaTable,
-                MacroColumnOfAPC::FEEDBACKWARD_MESSAGE,
+                MacroColumnOfAPC::TOP_DOWN_SLOT,
                 FB_MESSEGE_LEN_GHGF,
                 batch_capacity,
                 SD::SchemaFlags::BATCHED_LAST_DIM
@@ -232,15 +232,15 @@ namespace BidirectionalInMemGraph
             const uint32_t expected_paremeter_count = FIRST_COUPLING_INDEX + (EDGE_COUNT * static_cast<uint32_t>(profile.MaxDirectParentPerAxis));
 
             const uint16_t expected_mask = static_cast<uint16_t>(
-                ADS::RegionBit(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) |
-                ADS::RegionBit(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE) |
+                ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT) |
+                ADS::RegionBit(MacroColumnOfAPC::TOP_DOWN_SLOT) |
                 ADS::RegionBit(MacroColumnOfAPC::STATE_SLOT) |
                 ADS::RegionBit(MacroColumnOfAPC::ERROR_SLOT) |
                 ADS::RegionBit(MacroColumnOfAPC::WEIGHT_SLOT)
             );        
 
-            const SD::RegionSchemaRecord& ff = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE)];
-            const SD::RegionSchemaRecord& fb = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::FEEDBACKWARD_MESSAGE)];
+            const SD::RegionSchemaRecord& ff = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::BOTTOM_UP_SLOT)];
+            const SD::RegionSchemaRecord& fb = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::TOP_DOWN_SLOT)];
             const SD::RegionSchemaRecord& state = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::STATE_SLOT)];
             const SD::RegionSchemaRecord& error = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::ERROR_SLOT)];
             const SD::RegionSchemaRecord& weight = profile.DefaultSchemaTable[static_cast<uint8_t>(MacroColumnOfAPC::WEIGHT_SLOT)];
@@ -259,14 +259,14 @@ namespace BidirectionalInMemGraph
                 SD::GetActiveMaskOfRegionTable_(profile.DefaultSchemaTable) == expected_mask &&
                 SD::RequiredCellsForSchemaTable_(profile.DefaultSchemaTable) == profile.RequiredAPCCells &&
 
-                ff.Region == MacroColumnOfAPC::FEEDFORWARD_MESSAGE &&
+                ff.Region == MacroColumnOfAPC::BOTTOM_UP_SLOT &&
                 ff.Dtype == SD::DataTypeOfMacroColumn::FLOAT32_T &&
                 ff.Protocol == SD::SchemaProtocols::PRIVATE_REGION &&
                 ff.MatrixHeight == FF_MESSEGE_LEN_GHGF &&
                 ff.MatrixWidth == profile.BatchCapacity &&
                 ff.Flags == SD::SchemaFlags::BATCHED_LAST_DIM &&
 
-                fb.Region == MacroColumnOfAPC::FEEDBACKWARD_MESSAGE &&
+                fb.Region == MacroColumnOfAPC::TOP_DOWN_SLOT &&
                 fb.Dtype == SD::DataTypeOfMacroColumn::FLOAT32_T &&
                 fb.Protocol == SD::SchemaProtocols::PRIVATE_REGION &&
                 fb.MatrixHeight == FB_MESSEGE_LEN_GHGF &&

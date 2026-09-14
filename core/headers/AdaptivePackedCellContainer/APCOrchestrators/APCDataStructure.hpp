@@ -40,7 +40,7 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint8_t CountOfMacroColumn() noexcept
         {
-            return static_cast<uint8_t>(MacroColumnOfAPC::FREE_SLOT) - static_cast<uint8_t>(MacroColumnOfAPC::FEEDFORWARD_MESSAGE) + 1;
+            return static_cast<uint8_t>(MacroColumnOfAPC::FREE_SLOT) - static_cast<uint8_t>(MacroColumnOfAPC::BOTTOM_UP_SLOT) + 1;
         }
 
         static constexpr uint16_t RegionBit(MacroColumnOfAPC column) noexcept
