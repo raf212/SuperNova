@@ -17,8 +17,67 @@ namespace BidirectionalInMemGraph
         static constexpr uint32_t FABRIC_MAGIC = 0x41504643u;
         static constexpr uint32_t FABRIC_META_EOF = 0x41474946u;
         static constexpr uint8_t EACH_TABLE_RECORD_SENTINAL = UINT8_MAX;
-        static constexpr uint32_t HASH32_GRATIO_1 = 2654435769u;
-        static constexpr uint32_t HASH32_GRATIO_2 = 123456789u;
+
+        static constexpr uint8_t FORMAT_VERSION = 1u;
+
+        enum class FabricBackigOwnership : uint8_t
+        {
+            NONE = 0,
+            OWNED = 1,
+            BORROWED = 2
+        };
+
+        struct alignas(uint64_t) FabricCache 
+        {
+            uint32_t FormateVersion_{UNSIGNED_ZERO};
+            ///FABRIC CONSTRUCTION
+            uint32_t PerAPCRuntimeCellCount_{UNSIGNED_ZERO};
+            uint32_t CountOfAPC_{UNSIGNED_ZERO};
+            uint64_t SlabCellCount_{UNSIGNED_ZERO};
+
+            // RECORD BOOK / SEGMENT POOL
+            uint64_t RecordBookBeginIndex_{UNSIGNED_ZERO};
+            uint64_t RecordBookEndIndex_{UNSIGNED_ZERO};
+            uint64_t SegmentPoolBegin_{UNSIGNED_ZERO};
+            uint32_t FirstFreeIdx_{UNSIGNED_ZERO};
+
+            // EDGE GEOMETRY
+            uint8_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
+            uint16_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
+
+            ///MATRIX CONSTRUCTION
+            uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
+            uint16_t ActiveRegionMask_{UNSIGNED_ZERO};
+            uint16_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
+            uint32_t MatrixBatchCapacity_{UNSIGNED_ZERO};
+            uint64_t RegionAlignmentCellCount_{UNSIGNED_ZERO};
+
+            // HOT TABLE BEGIN INDICES
+            uint64_t HorizontalEdgeBeginIdx_{UNSIGNED_ZERO};
+            uint64_t VerticalEdgeBeginIdx_{UNSIGNED_ZERO};
+            uint64_t CompiledDAGTableBeginIdx_{UNSIGNED_ZERO};
+            uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
+            uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
+
+            //OWNERSHIP
+            FabricBackigOwnership BackingOwnership_ = FabricBackigOwnership::NONE;
+        };
+
+
+        struct DetachFabric final
+        {
+            uint64_t* Slab_{nullptr};
+            uint64_t CellCount_{UNSIGNED_ZERO};
+            FabricBackigOwnership Ownership_ = FabricBackigOwnership::NONE;
+
+            explicit constexpr operator bool() const noexcept
+            {
+                return Slab_ != nullptr && CellCount_ != UNSIGNED_ZERO;
+            }
+        };
+        
+
+        static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
 
         enum class RecordBookInternalIndexing : uint8_t
         {
@@ -27,28 +86,8 @@ namespace BidirectionalInMemGraph
         };
         static constexpr uint8_t RECORD_BOOK_WIDTH = static_cast<uint8_t>(RecordBookInternalIndexing::END64) + 1u;
 
-        enum class FabricMetaIndicies : uint8_t
-        {
-            MAGIC = 0,
-            TOTAL_CELLS = 1,
-            PER_APC_RUNTIME_CELL_COUNT = 2,
-            RECORD_BOOK_OF_TSC_BEGIN = 3,
-            RECORD_BOOK_OF_TSC_END = 4,
-            SEGMENT_POOL_BEGIN_IDX = 5,
-            FIRST_FREE_IDX = 6,
-            MAX_DIRECT_PARENTS_PER_AXIS = 7,
-            EDGE_TABLE_RECORD_WIDTH = 8,
 
-            ACTIVE_REGION_MASK = 9,
-            ACTIVE_REGION_COUNT = 10,
-            REGION_SCHEMA_RECORD_CELL_COUNT = 11,
-            DEVICE_VIEW_ROW_CELL_COUNT = 12,
-            MATRIC_BATCH_CAPACITY = 13,
-            REGION_ALLIGNMENT_CELL_COUNT = 14,
-
-            EOF_FABRIC_HEADER = 15
-        };
-        static constexpr uint8_t FABRIC_UNIT_COUNT = static_cast<uint8_t>(FabricMetaIndicies::EOF_FABRIC_HEADER) + 1u;
+        static constexpr uint8_t FABRIC_UNIT_COUNT = sizeof(FabricCache);
 
         static constexpr bool IsValidEdgeTable(FabricSegments table_class) noexcept
         {
@@ -62,6 +101,10 @@ namespace BidirectionalInMemGraph
             const uint8_t alignment_value_15 = 16 - 1;
             return (value + alignment_value_15) & ~static_cast<size_t>(alignment_value_15);
         }
+
+
+
+
     
     };
 

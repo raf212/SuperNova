@@ -1994,7 +1994,7 @@ public:
         if (
             !range.IsValid ||
             local_cell >= range.EndIndex - range.BeginIndex ||
-            range.BeginIndex + local_cell >= FabCache_.SlabCellCount_
+            range.BeginIndex + local_cell >= FabCache_->SlabCellCount_
         )
         {
             return std::nullopt;
@@ -2034,13 +2034,13 @@ public:
 
     std::size_t MatrixViewBegin() const noexcept
     {
-        return FabCache_.MatrixViewTableBeginIndex_;
+        return FabCache_->MatrixViewTableBeginIndex_;
     }
 
-    std::uint16_t ActiveMask() const noexcept { return FabCache_.ActiveRegionMask_; }
-    std::uint8_t ActiveCount() const noexcept { return FabCache_.ActiveRegionCount_; }
-    std::uint16_t ViewRowCells() const noexcept { return FabCache_.MatrixViewRowCellCount_; }
-    std::uint32_t BatchCapacity() const noexcept { return FabCache_.MatrixBatchCapacity_; }
+    std::uint16_t ActiveMask() const noexcept { return FabCache_->ActiveRegionMask_; }
+    std::uint8_t ActiveCount() const noexcept { return FabCache_->ActiveRegionCount_; }
+    std::uint16_t ViewRowCells() const noexcept { return FabCache_->MatrixViewRowCellCount_; }
+    std::uint32_t BatchCapacity() const noexcept { return FabCache_->MatrixBatchCapacity_; }
 };
 
 inline bool MakeSchema(

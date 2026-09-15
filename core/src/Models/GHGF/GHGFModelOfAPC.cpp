@@ -180,7 +180,7 @@ namespace BidirectionalInMemGraph
             InvalidateGHGFModel_();
         };
         
-        for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
+        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
         {
             if (!CreateNodeOfGHGF(model_values.APCNodes[i], model_values.RoleSpan[i]))
             {
@@ -256,14 +256,14 @@ namespace BidirectionalInMemGraph
         InvalidateGHGFModel_();
 
         const std::span<EdgeBuilder::ParentRelation> retations = ParentRelations_(connection.Edge, connection.Child);
-        for (uint8_t i = 0; i < FabCache_.MaxDirectParentsPerAxis_; i++)
+        for (uint8_t i = 0; i < FabCache_->MaxDirectParentsPerAxis_; i++)
         {
             if (
                 !EdgeBuilder::IsEmpty(retations[i]) &&
                 EdgeBuilder::ParentSlot(retations[i]) == connection.Parent
             )
             {
-                GHGFRegion_(connection.Child, GHGFCache_.WeightCellOffset_)[GM::CouplingIndex(connection.Edge, i, FabCache_.MaxDirectParentsPerAxis_)] = connection.Coupling;
+                GHGFRegion_(connection.Child, GHGFCache_.WeightCellOffset_)[GM::CouplingIndex(connection.Edge, i, FabCache_->MaxDirectParentsPerAxis_)] = connection.Coupling;
                 return true;
             }
         }
@@ -307,9 +307,9 @@ namespace BidirectionalInMemGraph
         const bool same_topology = GHGFCache_.ModelPrepared_ && GHGFCache_.PreparedRevision_ == revision;
         GHGFCache_.ModelPrepared_ = false;
         GHGFCache_.NodeCount_ = GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
-        const uint64_t allowed_mask = MaskLowBitsForU64(FabCache_.MaxDirectParentsPerAxis_);
+        const uint64_t allowed_mask = MaskLowBitsForU64(FabCache_->MaxDirectParentsPerAxis_);
 
-        for (uint32_t i = 0; i < FabCache_.CountOfAPC_; i++)
+        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
         {
 
             GHGFNode node;
@@ -427,13 +427,13 @@ namespace BidirectionalInMemGraph
                 auto ValidMask___ = [&]() noexcept -> bool {return (mask & ~allowed_mask) == UNSIGNED_ZERO;};
                 if (
                     !ValidMask___() ||
-                    relations.size() != FabCache_.MaxDirectParentsPerAxis_
+                    relations.size() != FabCache_->MaxDirectParentsPerAxis_
                 )
                 {
                     return false;
                 }
 
-                for (uint8_t ordinal = 0; ordinal < FabCache_.MaxDirectParentsPerAxis_; ordinal++)
+                for (uint8_t ordinal = 0; ordinal < FabCache_->MaxDirectParentsPerAxis_; ordinal++)
                 {
                     const EdgeBuilder::ParentRelation& relation = relations[ordinal];
                     const bool occupied = (mask & EdgeBuilder::DirtyBit(ordinal)) != UNSIGNED_ZERO;
@@ -512,7 +512,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
         
-        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; ++slot)
         {
             GHGFNode node;
             APCUseScope use;
@@ -604,7 +604,7 @@ namespace BidirectionalInMemGraph
 
         uint32_t observation = UNSIGNED_ZERO;
 
-        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; ++slot)
         {
             GHGFNode node;
             APCUseScope use;
@@ -646,7 +646,7 @@ namespace BidirectionalInMemGraph
             ++observation;
         }
 
-        for (uint32_t reverse = static_cast<uint32_t>(FabCache_.CountOfAPC_); reverse > 0; --reverse)
+        for (uint32_t reverse = static_cast<uint32_t>(FabCache_->CountOfAPC_); reverse > 0; --reverse)
         {
             const uint32_t slot = reverse - 1u;
 
@@ -674,7 +674,7 @@ namespace BidirectionalInMemGraph
     bool GHGFModelConstructor::CopyGHGFPredictionNONVectorized_(std::span<float> predictions, uint32_t batch) noexcept
     {
         uint32_t observation = UNSIGNED_ZERO;
-        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; ++slot)
         {
             GHGFNode node;
             APCUseScope use;
@@ -744,7 +744,7 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::PredictGHGFBatchNONVectorized_(uint32_t batch) noexcept
     {
-        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; ++slot)
         {
             GHGFNode node;
             APCUseScope use;
@@ -818,7 +818,7 @@ namespace BidirectionalInMemGraph
             }
             const size_t step_begin = static_cast<size_t>(time) * step_size;
             uint32_t observation = UNSIGNED_ZERO;
-            for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; ++slot)
+            for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; ++slot)
             {
                 GHGFNode node;
                 APCUseScope use;
@@ -980,7 +980,7 @@ namespace BidirectionalInMemGraph
 
         const float inverse_batch = SC::ONE / static_cast<float>(batch);
 
-        for (uint32_t child = 0; child < FabCache_.CountOfAPC_; ++child)
+        for (uint32_t child = 0; child < FabCache_->CountOfAPC_; ++child)
         {
             GHGFNode node;
             APCUseScope use;
