@@ -32,13 +32,9 @@ namespace BidirectionalInMemGraph
 
     void SlabToFabricConverterAndCordinator::ResetScalarsofTheFabric_() noexcept
     {
+        FabCache_->BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         SlabBasePtr_ = nullptr;
-        FabCache_->SlabCellCount_ = UNSIGNED_ZERO;
-        FabCache_->PerAPCRuntimeCellCount_ = UNSIGNED_ZERO;
-        FabCache_->CountOfAPC_ = UNSIGNED_ZERO;
-        FabCache_->MaxDirectParentsPerAxis_ = UNSIGNED_ZERO;
-        FabCache_->EdgeTableRecordWidth_ = UNSIGNED_ZERO;
-        FabCache_->SegmentPoolBegin_ = CoreOfFabricCoordinator::FABRIC_UNIT_COUNT;
+        FabCache_ = nullptr;
         FabricInitialized_.store(false, std::memory_order_release);
         InitializationInProgress_.store(false, std::memory_order_release);
     }
@@ -243,61 +239,68 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        FabCache_->MaxDirectParentsPerAxis_ = max_direct_parent_per_axis;
-        FabCache_->EdgeTableRecordWidth_ = static_cast<uint16_t>(EdgeBuilder::EdgeTableRecordWidth(FabCache_->MaxDirectParentsPerAxis_));
-        FabCache_->CountOfAPC_ = static_cast<uint64_t>(slot_count);
-        FabCache_->PerAPCRuntimeCellCount_ = static_cast<uint32_t>(slot_cell_count);
+        FabricCache cache{};
 
-        FabCache_->ActiveRegionMask_ = active_mask;
-        FabCache_->ActiveRegionCount_ = active_count;
-        FabCache_->MatrixBatchCapacity_ = region_conf.BatchCapacity;
-        FabCache_->MatrixViewRowCellCount_ = static_cast<uint16_t>(
+        cache.FormateVersion_ = CoreOfFabricCoordinator::FORMAT_VERSION;
+        cache.CountOfAPC_ = slot_count;
+        cache.PerAPCRuntimeCellCount_ = slot_cell_count;
+        cache.MaxDirectParentsPerAxis_ = max_direct_parent_per_axis;
+        cache.EdgeTableRecordWidth_ = EdgeBuilder::EdgeTableRecordWidth(max_direct_parent_per_axis);
+        cache.ActiveRegionMask_ = active_mask;
+        cache.ActiveRegionMask_ = active_mask;
+        cache.MatrixBatchCapacity_ = region_conf.BatchCapacity;
+        cache.MatrixViewRowCellCount_ = static_cast<uint16_t>(
             static_cast<uint16_t>(FabCache_->ActiveRegionCount_) *
             SD::RegionSchemaCellCount()
         );
-
+        cache.RegionAlignmentCellCount_ = SD::REGION_ALIGNMENT_CELLS;
+        cache.FirstFreeIdx_ = UNSIGNED_ZERO;
+        
         size_t cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(CoreOfFabricCoordinator::FABRIC_UNIT_COUNT);
         const size_t record_book_begin = cursor;
         const size_t record_book_end = record_book_begin + static_cast<size_t>(RecordBookConf::RECORD_BOOK_INTERNAL_SEGMENT_COUNT) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(record_book_end);
         const size_t horizontal_edge_begin = cursor;
-        const size_t horizontal_edge_end = horizontal_edge_begin + static_cast<size_t>(FabCache_->CountOfAPC_) * FabCache_->EdgeTableRecordWidth_;
+        const size_t horizontal_edge_end = horizontal_edge_begin + static_cast<size_t>(cache.CountOfAPC_) * cache.EdgeTableRecordWidth_;
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(horizontal_edge_end);
         const size_t matrix_view_table_begin = cursor;
-        const size_t matrix_view_table_end = matrix_view_table_begin + static_cast<size_t>(FabCache_->CountOfAPC_ * FabCache_->MatrixViewRowCellCount_);
+        const size_t matrix_view_table_end = matrix_view_table_begin + static_cast<size_t>(cache.CountOfAPC_ * cache.MatrixViewRowCellCount_);
         
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(matrix_view_table_end);
         const size_t vertical_edge_begin = cursor;
         const size_t vertical_edge_end = vertical_edge_begin + 
-                static_cast<size_t>(FabCache_->CountOfAPC_) * FabCache_->EdgeTableRecordWidth_;
+                static_cast<size_t>(cache.CountOfAPC_) * cache.EdgeTableRecordWidth_;
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(vertical_edge_end);
         const size_t apc_handle_table_begin = cursor;
-        const size_t apc_handle_table_end = apc_handle_table_begin + static_cast<size_t>(FabCache_->CountOfAPC_ * HandleOfAPCStatic::HANDLE_TABLE_WIDTH);
+        const size_t apc_handle_table_end = apc_handle_table_begin + static_cast<size_t>(cache.CountOfAPC_ * HandleOfAPCStatic::HANDLE_TABLE_WIDTH);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(apc_handle_table_end);
         const size_t compiled_dag_begin = cursor;
-        const size_t compiled_dag_end = compiled_dag_begin + static_cast<size_t>(FabCache_->CountOfAPC_ * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
+        const size_t compiled_dag_end = compiled_dag_begin + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(compiled_dag_end);
         const size_t device_planner_begain = cursor;
-        const size_t device_planner_end = device_planner_begain + static_cast<size_t>(FabCache_->CountOfAPC_ * CoreOfFabricCoordinator::DEVICE_PLANNER_RECORD_LEN);
+        const size_t device_planner_end = device_planner_begain + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::DEVICE_PLANNER_RECORD_LEN);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(device_planner_end);
         const size_t work_queue_begin = cursor;
-        const size_t work_queue_end = work_queue_begin + static_cast<size_t>(FabCache_->CountOfAPC_ * CoreOfFabricCoordinator::WORK_RECORD_WIDTH_OF_FABRIC);
+        const size_t work_queue_end = work_queue_begin + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::WORK_RECORD_WIDTH_OF_FABRIC);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(work_queue_end);
-        FabCache_->SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
-        FabCache_->SlabCellCount_ = FabCache_->SegmentPoolBegin_ + static_cast<size_t>(FabCache_->CountOfAPC_ * FabCache_->PerAPCRuntimeCellCount_);
-
-        if (FabCache_->SlabCellCount_ == UNSIGNED_ZERO || FabCache_->SlabCellCount_ >= FABRIC_CELL_SENTINAL)
+        cache.SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
+        cache.SlabCellCount_ = cache.SegmentPoolBegin_ + static_cast<size_t>(cache.CountOfAPC_ * cache.PerAPCRuntimeCellCount_);
+        cache.HorizontalEdgeBeginIdx_ = horizontal_edge_begin;
+        cache.VerticalEdgeBeginIdx_ = vertical_edge_begin;
+        cache.HandleTableBeginIndex_ = apc_handle_table_begin;
+        cache.MatrixViewTableBeginIndex_ = matrix_view_table_begin;
+        if (cache.SlabCellCount_ == UNSIGNED_ZERO || cache.SlabCellCount_ >= FABRIC_CELL_SENTINAL)
         {
             return false;
         }
-        SlabBasePtr_ = AllocatePackedCellRaw_(FabCache_->SlabCellCount_);
+        SlabBasePtr_ = AllocatePackedCellRaw_(cache.SlabCellCount_);
         if (!SlabBasePtr_)
         {
             return false;
@@ -308,7 +311,7 @@ namespace BidirectionalInMemGraph
             DirectlyStoreFabricUnit64(idx, UNSIGNED_ZERO);
         }
 
-        InitializeCompleateFabricMetaIndices_(record_book_begin, record_book_end);
+        FabCache_ = std::construct_at(reinterpret_cast<FabricCache*>(SlabBasePtr_), cache);
 
         //RECORD_BOOK_OF_TABLE_SEGMENT_CLASS - ENTRIES
         WriteARecordBookOfTSCEntry_(FabricSegments::SLAB_RECORD_MAP, record_book_begin, record_book_end);
@@ -321,10 +324,7 @@ namespace BidirectionalInMemGraph
         WriteARecordBookOfTSCEntry_(FabricSegments::MATRIX_VIEW_TABLE, matrix_view_table_begin, matrix_view_table_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::SEGMENT_POOL, FabCache_->SegmentPoolBegin_, FabCache_->SlabCellCount_);
 
-        FabCache_->HorizontalEdgeBeginIdx_ = horizontal_edge_begin;
-        FabCache_->VerticalEdgeBeginIdx_ = vertical_edge_begin;
-        FabCache_->HandleTableBeginIndex_ = apc_handle_table_begin;
-        FabCache_->MatrixViewTableBeginIndex_ = matrix_view_table_begin;
+
 
         if (!ConstructMatrixViewRecords_(matrix_view_table_begin, matrix_view_table_end))
         {

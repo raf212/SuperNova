@@ -1040,7 +1040,7 @@ namespace BidirectionalInMemGraph
                 {
                     continue;
                 }
-                uint64_t expected = maybe_First_free.value();
+                uint32_t expected = maybe_First_free.value();
                 UpdateFirstFreeIdx_(expected, description_idx);
                 return description_idx;
             }
@@ -1048,8 +1048,8 @@ namespace BidirectionalInMemGraph
 
         if (maybe_First_free.has_value())
         {
-            uint64_t expected = maybe_First_free.value();
-            UpdateFirstFreeIdx_(expected, FABRIC_CELL_SENTINAL);
+            uint32_t expected = maybe_First_free.value();
+            UpdateFirstFreeIdx_(expected, ADS::APC_INDEX_BOUND_SENTINAL);
         }
         
         for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; slot++)

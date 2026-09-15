@@ -140,7 +140,7 @@ namespace BidirectionalInMemGraph
 
         std::optional<uint32_t> ReadFirstFreeAPCIdx_() noexcept;
 
-        void UpdateFirstFreeIdx_(uint64_t& expected_value, uint64_t desired_value) noexcept;
+        void UpdateFirstFreeIdx_(uint32_t& expected_value, uint32_t desired_value) noexcept;
     };
 
 

@@ -42,7 +42,7 @@ namespace BidirectionalInMemGraph
             bool IsValid = false;
         };
 
-        static constexpr size_t RawEdgeTableRecordWidth(
+        static constexpr uint16_t RawEdgeTableRecordWidth(
             uint8_t max_direct_parents
         ) noexcept
         {
@@ -51,15 +51,13 @@ namespace BidirectionalInMemGraph
                 (sizeof(ParentRelation) / sizeof(uint64_t));
         }
 
-        static constexpr size_t EdgeTableRecordWidth(
+        static constexpr uint16_t EdgeTableRecordWidth(
             uint8_t max_direct_parents
         ) noexcept
         {
-            constexpr size_t cells_per_cacheline =
-                ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
-            const size_t raw = RawEdgeTableRecordWidth(max_direct_parents);
-            return (raw + cells_per_cacheline - 1u) &
-                ~(cells_per_cacheline - 1u);
+            constexpr uint16_t cells_per_cacheline = ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
+            const uint16_t raw = RawEdgeTableRecordWidth(max_direct_parents);
+            return (raw + cells_per_cacheline - 1u) & ~(cells_per_cacheline - 1u);
         }
 
         static constexpr bool IsValidConfigurableParentCapacity(

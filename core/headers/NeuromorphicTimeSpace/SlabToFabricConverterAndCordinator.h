@@ -26,9 +26,9 @@ namespace BidirectionalInMemGraph
             return reinterpret_cast<T*>(SlabBasePtr_ + SlotBegin_(slot) + cell_offset);
         }
 
-
-
     public:
+        using CFC = CoreOfFabricCoordinator;
+
         SlabToFabricConverterAndCordinator(/* args */) noexcept = default;
 
         ~SlabToFabricConverterAndCordinator() noexcept
@@ -56,6 +56,16 @@ namespace BidirectionalInMemGraph
             const SchemaDefinition::FabricRegionConfig& region_conf,
             uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
         ) noexcept;
+
+        bool SaveFabric(std::span<uint64_t> destination) noexcept;
+
+        bool AttachFabric(
+            uint64_t* raw_cells,
+            uint64_t cell_count,
+            CFC::FabricBackigOwnership ownership = CFC::FabricBackigOwnership::BORROWED
+        ) noexcept;
+
+        CFC::DetachFabric DetachFabric() noexcept;
         
     };
 
