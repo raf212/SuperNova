@@ -2,6 +2,15 @@
 
 namespace BidirectionalInMemGraph
 {
+    bool RecordBookConstructor::CheckRecordBookRange_(FabricSegments segment, uint64_t expected_begin, uint64_t expected_end) noexcept
+    {
+        RecordBookConf::FabricSegmentBounds bounds{};
+        return
+            GetRecordMapCarrierRanges_(segment, bounds) &&
+            bounds.IsValid &&
+            bounds.BeginIndex == expected_begin &&
+            bounds.EndIndex == expected_end;
+    }
 
     void RecordBookConstructor::IdleAFabricTableClassRangesMemory_(FabricSegments table_class) noexcept
     {
@@ -81,7 +90,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {   uint64_t record_map_begin = UNSIGNED_ZERO;
         const bool read_ok = ReadAFabricU64Directly(
-            static_cast<size_t>(CoreOfFabricCoordinator::FabricMetaIndicies::RECORD_BOOK_OF_TSC_BEGIN),
+            static_cast<size_t>(FabCache_->RecordBookBeginIndex_),
             record_map_begin
         );
         if (

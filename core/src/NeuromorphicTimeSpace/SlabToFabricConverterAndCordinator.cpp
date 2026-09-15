@@ -6,7 +6,6 @@
 namespace BidirectionalInMemGraph
 {
 
-
     uint64_t* SlabToFabricConverterAndCordinator::AllocatePackedCellRaw_(size_t count_of_cells) noexcept
     {
         auto allocation_function = AllocatorOfFabric_.AllocatePackedCellStorage ? 
@@ -19,7 +18,6 @@ namespace BidirectionalInMemGraph
         return allocation_function(count_of_cells, alignment, AllocatorOfFabric_.User);
 
     }
-
 
     void SlabToFabricConverterAndCordinator::FreeRawPackedCells_(uint64_t* packed_cell_memory_ptr, size_t packed_cell_count) noexcept
     {
@@ -45,34 +43,43 @@ namespace BidirectionalInMemGraph
         InitializationInProgress_.store(false, std::memory_order_release);
     }
 
-
-
-    void SlabToFabricConverterAndCordinator::InitializeCompleateFabricMetaIndices_(size_t record_book_begin, size_t record_book_end) noexcept
+    bool SlabToFabricConverterAndCordinator::ValidateAttachedFabricLayout_() noexcept
     {
-        using FMI = CoreOfFabricCoordinator::FabricMetaIndicies;
-
-        for (size_t i = 0; i < CoreOfFabricCoordinator::FABRIC_UNIT_COUNT; i++)
+        if (!FabCache_ || !SlabBasePtr_)
         {
-            DirectlyStoreFabricUnit64(i, UNSIGNED_ZERO);
+            return false;
         }
 
-        SlabBasePtr_[static_cast<size_t>(FMI::MAGIC)] = CoreOfFabricCoordinator::FABRIC_MAGIC;
-        SlabBasePtr_[static_cast<size_t>(FMI::TOTAL_CELLS)] = FabCache_->SlabCellCount_;
-        SlabBasePtr_[static_cast<size_t>(FMI::SEGMENT_POOL_BEGIN_IDX)] = FabCache_->SegmentPoolBegin_;
-        SlabBasePtr_[static_cast<size_t>(FMI::PER_APC_RUNTIME_CELL_COUNT)] = FabCache_->PerAPCRuntimeCellCount_;
-        SlabBasePtr_[static_cast<size_t>(FMI::RECORD_BOOK_OF_TSC_BEGIN)] = record_book_begin;
-        SlabBasePtr_[static_cast<size_t>(FMI::RECORD_BOOK_OF_TSC_END)] = record_book_end;
-        SlabBasePtr_[static_cast<size_t>(FMI::FIRST_FREE_IDX)] = UNSIGNED_ZERO;
-        SlabBasePtr_[static_cast<size_t>(FMI::EDGE_TABLE_RECORD_WIDTH)] = FabCache_->EdgeTableRecordWidth_;
-        SlabBasePtr_[static_cast<size_t>(FMI::MAX_DIRECT_PARENTS_PER_AXIS)] = FabCache_->MaxDirectParentsPerAxis_;
-        SlabBasePtr_[static_cast<size_t>(FMI::ACTIVE_REGION_MASK)] = FabCache_->ActiveRegionMask_;
-        SlabBasePtr_[static_cast<size_t>(FMI::ACTIVE_REGION_COUNT)] = FabCache_->ActiveRegionCount_;
-        SlabBasePtr_[static_cast<size_t>(FMI::REGION_SCHEMA_RECORD_CELL_COUNT)] = SD::RegionSchemaCellCount();
-        SlabBasePtr_[static_cast<size_t>(FMI::DEVICE_VIEW_ROW_CELL_COUNT)] = FabCache_->MatrixViewRowCellCount_;
-        SlabBasePtr_[static_cast<size_t>(FMI::MATRIC_BATCH_CAPACITY)] = FabCache_->MatrixBatchCapacity_;
-        SlabBasePtr_[static_cast<size_t>(FMI::REGION_ALLIGNMENT_CELL_COUNT)] = SD::REGION_ALIGNMENT_CELLS;
-        SlabBasePtr_[static_cast<size_t>(FMI::EOF_FABRIC_HEADER)] = CoreOfFabricCoordinator::FABRIC_META_EOF;
+        const uint64_t count = FabCache_->CountOfAPC_;
+        const uint64_t matrix_end = FabCache_->MatrixViewTableBeginIndex_ + count * FabCache_->MatrixViewRowCellCount_;
+        const uint64_t value_edge_end = FabCache_->HorizontalEdgeBeginIdx_ + count * FabCache_->EdgeTableRecordWidth_;
+        const uint64_t volatile_edge_end = FabCache_->VerticalEdgeBeginIdx_ + count * FabCache_->EdgeTableRecordWidth_;
+        const uint64_t handle_end = FabCache_->HandleTableBeginIndex_ + count * HandleOfAPCStatic::HANDLE_TABLE_WIDTH;
+        const uint64_t dag_end = FabCache_->CompiledDAGTableBeginIdx_ + count * CoreOfFabricCoordinator::COMPILED_DAG_LEN;
+        const uint64_t segment_end = FabCache_->SegmentPoolBegin_ + count * FabCache_->PerAPCRuntimeCellCount_;
+
+        if (
+            value_edge_end > FabCache_->SlabCellCount_ ||
+            matrix_end > FabCache_->SlabCellCount_ ||
+            volatile_edge_end > FabCache_->SlabCellCount_ ||
+            handle_end > FabCache_->SlabCellCount_ ||
+            dag_end > FabCache_->SlabCellCount_ ||
+            segment_end > FabCache_->SlabCellCount_
+        )
+        {
+            return false;
+        }
+        
+        return
+            CheckRecordBookRange_(FabricSegments::SLAB_RECORD_MAP, FabCache_->RecordBookBeginIndex_, FabCache_->RecordBookEndIndex_) &&
+            CheckRecordBookRange_(FabricSegments::MATRIX_VIEW_TABLE, FabCache_->MatrixViewTableBeginIndex_, matrix_end) &&
+            CheckRecordBookRange_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H, FabCache_->HorizontalEdgeBeginIdx_, value_edge_end) &&
+            CheckRecordBookRange_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, FabCache_->VerticalEdgeBeginIdx_, volatile_edge_end) &&
+            CheckRecordBookRange_(FabricSegments::COMPILED_DAG_TABLE, FabCache_->CompiledDAGTableBeginIdx_, dag_end) &&
+            CheckRecordBookRange_(FabricSegments::APC_HANDLE_TABLE, FabCache_->HandleTableBeginIndex_, handle_end) &&
+            CheckRecordBookRange_(FabricSegments::SEGMENT_POOL, FabCache_->SegmentPoolBegin_, segment_end);
     }
+
 
 
     bool SlabToFabricConverterAndCordinator::InitializeFabric(

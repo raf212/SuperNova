@@ -9,11 +9,8 @@ namespace BidirectionalInMemGraph
     private:
 
         uint64_t* AllocatePackedCellRaw_(size_t count_of_cells) noexcept;
-        
-        /// @brief INITIALIZES: All FabricMetaIndicies
-        /// @param table_directory_begin 
-        /// @param table_directory_end 
-        void InitializeCompleateFabricMetaIndices_(size_t record_book_begin, size_t record_book_end) noexcept;
+        bool ValidateAttachedFabricLayout_() noexcept;
+        bool QuiesceFabric_() noexcept;
 
     protected :
         SD::RegionSchemaTable DefaultRegionTable_{};
@@ -27,6 +24,8 @@ namespace BidirectionalInMemGraph
         {
             return reinterpret_cast<T*>(SlabBasePtr_ + SlotBegin_(slot) + cell_offset);
         }
+
+
 
     public:
         SlabToFabricConverterAndCordinator(/* args */) noexcept = default;

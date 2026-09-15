@@ -28,6 +28,8 @@ namespace BidirectionalInMemGraph
             size_t end 
         ) noexcept;
 
+        bool CheckRecordBookRange_(FabricSegments segment, uint64_t expected_begin, uint64_t expected_end) noexcept;
+
     };
 
 
