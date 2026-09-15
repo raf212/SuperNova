@@ -11,6 +11,7 @@ namespace BidirectionalInMemGraph
         uint64_t* AllocatePackedCellRaw_(size_t count_of_cells) noexcept;
         bool ValidateAttachedFabricLayout_() noexcept;
         bool QuiesceFabric_() noexcept;
+        bool ReopenLiveAPCGenerations_() noexcept;
 
     protected :
         SD::RegionSchemaTable DefaultRegionTable_{};

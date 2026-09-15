@@ -81,6 +81,98 @@ namespace BidirectionalInMemGraph
     }
 
 
+    bool SlabToFabricConverterAndCordinator::QuiesceFabric_() noexcept
+    {
+        if (!SlabBasePtr_ || !FabCache_)
+        {
+            return false;
+        }
+
+        FabricInitialized_.store(false, std::memory_order_release);
+        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
+        {
+            uint64_t* control_cell = GetAPCGenerationPtr_(i);
+            if (!control_cell)
+            {
+                return false;
+            }
+            
+            std::atomic_ref<uint64_t>(*control_cell).fetch_or(HandleOfAPCStatic::CLOSED_MASK, std::memory_order_acq_rel);
+        }
+
+        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
+        {
+            uint64_t* control_cell = GetAPCGenerationPtr_(i);
+            if (!control_cell)
+            {
+                return false;
+            }
+            std::atomic_ref<uint64_t> control(*control_cell);
+            for (;;)
+            {
+                HandleOfAPCStatic::ControlValues values = HandleOfAPCStatic::ReadControlCell(
+                    control.load(std::memory_order_acquire)
+                );
+                if (values.ActiveAccess != UNSIGNED_ZERO)
+                {
+                    break;
+                }
+                std::this_thread::yield();
+            }
+        }
+        
+        return true;
+    }
+
+
+    bool SlabToFabricConverterAndCordinator::ReopenLiveAPCGenerations_() noexcept
+    {
+        if (!SlabBasePtr_ || !FabCache_)
+        {
+            return false;
+        }
+
+        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
+        {
+            uint64_t* control_cell = GetAPCGenerationPtr_(i);
+            if (!control_cell)
+            {
+                return false;
+            }
+
+            const uint64_t raw = std::atomic_ref<uint64_t>(*control_cell).load(std::memory_order_acquire);
+            const HandleOfAPCStatic::ControlValues values = HandleOfAPCStatic::ReadControlCell(raw);
+            if (
+                values.ActiveAccess != UNSIGNED_ZERO ||
+                !values.Closed ||
+                !HandleOfAPCStatic::IsGenerationValid(values.Generation)
+            )
+            {
+                return false;
+            }
+
+            const DSA::SeqLockAndStateStruct state = ReadAPCStateAtomically_(i);
+            if (!state.IsValid)
+            {
+                return false;
+            }
+            
+            if (state.StateOfTheAPC == StateOfAPC::RESERVED)
+            {
+                return false;
+            }
+            
+            if (state.StateOfTheAPC == StateOfAPC::LIVE)
+            {
+                if (!!OpenAPCGeneration_(i, values.Generation))
+                {
+                    return false;
+                }   
+            }
+        }
+        return true;
+    }
+
 
     bool SlabToFabricConverterAndCordinator::InitializeFabric(
         uint32_t slot_count,
