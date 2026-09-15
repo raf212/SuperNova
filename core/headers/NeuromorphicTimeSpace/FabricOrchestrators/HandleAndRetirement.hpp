@@ -83,7 +83,7 @@ namespace BidirectionalInMemGraph
 
     struct APCRelocationDef : public CoreOfFabricCoordinator
     {
-        static constexpr bool ValidateFabricHeader(const FabricCache& cache, uint64_t supplied_cell_count) noexcept
+        static constexpr bool ValidateFabricCache(const FabricCache& cache, uint64_t supplied_cell_count) noexcept
         {
             if (
                 cache.FormateVersion_ != FORMAT_VERSION ||

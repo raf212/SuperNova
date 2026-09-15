@@ -15,7 +15,8 @@ namespace BidirectionalInMemGraph
         uint64_t* SlabBasePtr_{nullptr};
 
         FabricCache* FabCache_{nullptr};
-    
+
+        CoreOfFabricCoordinator::FabricBackigOwnership BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         std::atomic<bool> FabricInitialized_{false};
         std::atomic<bool> InitializationInProgress_{false};
         RawPackedCellAllocator AllocatorOfFabric_{};

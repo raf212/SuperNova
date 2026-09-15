@@ -12,7 +12,7 @@ namespace BidirectionalInMemGraph
     {
         if (
             !IsFabricActive() ||
-            !HasDefaultRegionTable_ ||
+            !FabCache_->HasDefaultRegionTable_ ||
             !CreateAPC(desired_apc, DefaultRegionTable_)
         )
         {
@@ -107,7 +107,7 @@ namespace BidirectionalInMemGraph
         GHGFCache_.NodeCount_ = UNSIGNED_ZERO;
         GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         DefaultRegionTable_ = profile.DefaultSchemaTable;
-        HasDefaultRegionTable_ = true;
+        FabCache_->HasDefaultRegionTable_ = true;
 
         if (
             !InitializeFabric(

@@ -58,9 +58,8 @@ namespace BidirectionalInMemGraph
             uint64_t CompiledDAGTableBeginIdx_{UNSIGNED_ZERO};
             uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
             uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
+            bool HasDefaultRegionTable_{false};
 
-            //OWNERSHIP
-            FabricBackigOwnership BackingOwnership_ = FabricBackigOwnership::NONE;
         };
 
 

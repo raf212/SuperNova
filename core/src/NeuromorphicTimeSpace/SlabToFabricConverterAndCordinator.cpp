@@ -32,7 +32,7 @@ namespace BidirectionalInMemGraph
 
     void SlabToFabricConverterAndCordinator::ResetScalarsofTheFabric_() noexcept
     {
-        FabCache_->BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
+        BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
         FabricInitialized_.store(false, std::memory_order_release);
@@ -255,7 +255,7 @@ namespace BidirectionalInMemGraph
         );
         cache.RegionAlignmentCellCount_ = SD::REGION_ALIGNMENT_CELLS;
         cache.FirstFreeIdx_ = UNSIGNED_ZERO;
-        
+
         size_t cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(CoreOfFabricCoordinator::FABRIC_UNIT_COUNT);
         const size_t record_book_begin = cursor;
         const size_t record_book_end = record_book_begin + static_cast<size_t>(RecordBookConf::RECORD_BOOK_INTERNAL_SEGMENT_COUNT) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
@@ -296,6 +296,7 @@ namespace BidirectionalInMemGraph
         cache.VerticalEdgeBeginIdx_ = vertical_edge_begin;
         cache.HandleTableBeginIndex_ = apc_handle_table_begin;
         cache.MatrixViewTableBeginIndex_ = matrix_view_table_begin;
+        cache.HasDefaultRegionTable_ = region_conf.IsDefault;
         if (cache.SlabCellCount_ == UNSIGNED_ZERO || cache.SlabCellCount_ >= FABRIC_CELL_SENTINAL)
         {
             return false;
@@ -331,7 +332,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        if (HasDefaultRegionTable_)
+        if (FabCache_->HasDefaultRegionTable_)
         {
             for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
             {
@@ -419,4 +420,111 @@ namespace BidirectionalInMemGraph
     }
 
 
+    bool SlabToFabricConverterAndCordinator::SaveFabric(std::span<uint64_t> destination) noexcept
+    {
+        if (
+            !IsFabricActive() ||
+            !FabCache_ ||
+            destination.data() == nullptr ||
+            destination.size() < FabCache_->SlabCellCount_ ||
+            IsInternalBuffer(destination.data(), destination.size())
+        )
+        {
+            return false;
+        }
+        
+        if (!QuiesceFabric_())
+        {
+            return false;
+        }
+
+        std::memcpy(
+            destination.data(),
+            SlabBasePtr_,
+            FabCache_->SlabCellCount_ * sizeof(uint64_t)
+        );
+
+        bool reopened = ReopenLiveAPCGenerations_();
+
+        FabricInitialized_.store(reopened, std::memory_order_release);
+
+        return reopened;
+    }
+
+    bool SlabToFabricConverterAndCordinator::AttachFabric(
+        uint64_t* raw_cells,
+        uint64_t cell_count,
+        CFC::FabricBackigOwnership ownership 
+    ) noexcept
+    {
+        if (
+            !raw_cells || cell_count < CFC::FABRIC_UNIT_COUNT || 
+            ownership == CFC::FabricBackigOwnership::NONE ||
+            (reinterpret_cast<uintptr_t>(raw_cells) % alignof(FabricCache) != UNSIGNED_ZERO)
+        )
+        {
+            return false;
+        }
+
+        FabricCache cache{};
+        std::memcpy(
+            &cache,
+            raw_cells,
+            sizeof(cache)
+        );
+
+        if (!APCRelocationDef::ValidateFabricCache(cache, cell_count))
+        {
+            return false;
+        }
+
+        ShutDownFabric();
+
+        SlabBasePtr_ = raw_cells;
+        FabCache_ = reinterpret_cast<FabricCache*>(std::memcpy(
+            raw_cells,
+            &cache,
+            sizeof(cache)
+        ));
+
+        BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        DefaultRegionTable_ = SD::RegionSchemaTable{};
+
+        if (!ValidateAttachedFabricLayout_())
+        {
+            ResetScalarsofTheFabric_();
+            return false;
+        }
+        
+        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
+        {
+            uint64_t* cell = GetAPCGenerationPtr_(i);
+            if (!cell)
+            {
+                ResetScalarsofTheFabric_();
+                return false;
+            }
+
+            const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(std::atomic_ref<const uint64_t>(*cell).load(std::memory_order_acquire));
+
+            if (!control.Closed || control.ActiveAccess != UNSIGNED_ZERO || HandleOfAPCStatic::IsGenerationValid(control.Generation))
+            {
+                ResetScalarsofTheFabric_();
+                return false;
+            }
+        }
+        if (!ReopenLiveAPCGenerations_())
+        {
+            QuiesceFabric_();
+            ResetScalarsofTheFabric_();
+            return false;
+        }
+        
+        BackingOwnership_ = ownership;
+        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
+        FabricInitialized_.store(true, std::memory_order_release);
+
+        return true;
+        
+    }
 }

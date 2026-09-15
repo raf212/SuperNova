@@ -868,13 +868,13 @@ namespace BidirectionalInMemGraph
         }
 
         if (
-            !HasDefaultRegionTable_ ||
+            !FabCache_->HasDefaultRegionTable_ ||
             override_table ||
             control_values.Generation != HandleOfAPCStatic::FIRST_GENERATION
 
         )
         {
-            if (!PrepareMatrixViewRow_(slot, HasDefaultRegionTable_ && !override_table ? DefaultRegionTable_ : region_schemas))
+            if (!PrepareMatrixViewRow_(slot, FabCache_->HasDefaultRegionTable_ && !override_table ? DefaultRegionTable_ : region_schemas))
             {
                 AbortCreation___();
                 return false;
@@ -1362,7 +1362,7 @@ namespace BidirectionalInMemGraph
 
     constexpr bool APCFinilizer::IsNodePolicyReConfigurable_(const SD::RegionSchemaTable& table) noexcept
     {
-        if (!HasDefaultRegionTable_)
+        if (!FabCache_->HasDefaultRegionTable_)
         {
             return true;
         }
