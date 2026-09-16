@@ -12,9 +12,6 @@ namespace BidirectionalInMemGraph
         using DSA = DescriptionOfAPC;
         using RBC = RecordBookConf;
 
-        /// @return LOGICALLY AND SISTAMICALLY UINT64_MAX -> INVALID
-        uint64_t GetStartingOfAnyFabricTable_(FabricSegments desired_table) noexcept;
-        
         bool GetRecordMapCarrierRanges_(
             const FabricSegments table_class,
             RecordBookConf::FabricSegmentBounds& return_bounds

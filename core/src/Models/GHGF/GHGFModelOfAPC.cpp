@@ -107,8 +107,6 @@ namespace BidirectionalInMemGraph
         GHGFCache_.NodeCount_ = UNSIGNED_ZERO;
         GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         DefaultRegionTable_ = profile.DefaultSchemaTable;
-        FabCache_->HasDefaultRegionTable_ = true;
-
         if (
             !InitializeFabric(
                 slot_count,

@@ -150,7 +150,8 @@ namespace BidirectionalInMemGraph
         static constexpr bool MakeDefaultGHGFStorageProfile(
             GHGFStorageProfile& profile,
             uint32_t batch_capacity = DEFAULT_BATCH_CAPACITY,
-            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
+            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS,
+            bool is_default_profile = true
         ) noexcept
         {
             profile = GHGFStorageProfile{};
@@ -241,6 +242,7 @@ namespace BidirectionalInMemGraph
             profile.FabricConfig.BatchCapacity = profile.BatchCapacity;
 
             profile.IsValid = true;
+            profile.FabricConfig.IsDefault = is_default_profile;
 
             return true;
         }

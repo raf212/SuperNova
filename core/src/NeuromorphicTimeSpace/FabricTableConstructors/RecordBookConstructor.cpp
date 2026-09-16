@@ -33,7 +33,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         return_bounds = {};
-        const uint64_t entry_idx = GetStartingOfAnyFabricTable_(table_class);
+        const uint64_t entry_idx = CoreOfFabricCoordinator::GetStartingOfAnyFabricTable_(table_class);
         if (
             entry_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FabCache_->SlabCellCount_ ||
             !ReadAFabricU64Directly(
@@ -62,7 +62,7 @@ namespace BidirectionalInMemGraph
         size_t end
     ) noexcept
     {
-        const size_t base_idx = GetStartingOfAnyFabricTable_(table_class);
+        const size_t base_idx = CoreOfFabricCoordinator::GetStartingOfAnyFabricTable_(table_class);
         if (
             !ADS::IsValidFabricUnit(base_idx) || 
             (base_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FabCache_->SlabCellCount_) ||
@@ -82,25 +82,6 @@ namespace BidirectionalInMemGraph
             end
         );                
         
-    }
-
-
-    uint64_t RecordBookConstructor::GetStartingOfAnyFabricTable_(
-        FabricSegments table_class
-    ) noexcept
-    {   uint64_t record_map_begin = UNSIGNED_ZERO;
-        const bool read_ok = ReadAFabricU64Directly(
-            static_cast<size_t>(FabCache_->RecordBookBeginIndex_),
-            record_map_begin
-        );
-        if (
-            !read_ok ||
-            !ADS::IsValidFabricUnit(record_map_begin)
-        )
-        {
-            return FABRIC_CELL_SENTINAL;
-        }
-        return static_cast<uint64_t>(record_map_begin + (static_cast<uint8_t>(table_class) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH));        
     }
 
         

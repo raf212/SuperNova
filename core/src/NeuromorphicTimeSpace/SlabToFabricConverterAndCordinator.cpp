@@ -109,7 +109,7 @@ namespace BidirectionalInMemGraph
                 HandleOfAPCStatic::ControlValues values = HandleOfAPCStatic::ReadControlCell(
                     control.load(std::memory_order_acquire)
                 );
-                if (values.ActiveAccess != UNSIGNED_ZERO)
+                if (values.ActiveAccess == UNSIGNED_ZERO)
                 {
                     break;
                 }
@@ -160,7 +160,7 @@ namespace BidirectionalInMemGraph
             
             if (state.StateOfTheAPC == StateOfAPC::LIVE)
             {
-                if (!!OpenAPCGeneration_(i, values.Generation))
+                if (!OpenAPCGeneration_(i, values.Generation))
                 {
                     return false;
                 }   
@@ -247,7 +247,7 @@ namespace BidirectionalInMemGraph
         cache.MaxDirectParentsPerAxis_ = max_direct_parent_per_axis;
         cache.EdgeTableRecordWidth_ = EdgeBuilder::EdgeTableRecordWidth(max_direct_parent_per_axis);
         cache.ActiveRegionMask_ = active_mask;
-        cache.ActiveRegionMask_ = active_mask;
+        cache.ActiveRegionCount_ = active_count;
         cache.MatrixBatchCapacity_ = region_conf.BatchCapacity;
         cache.MatrixViewRowCellCount_ = static_cast<uint16_t>(
             static_cast<uint16_t>(FabCache_->ActiveRegionCount_) *
@@ -290,6 +290,9 @@ namespace BidirectionalInMemGraph
         const size_t work_queue_end = work_queue_begin + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::WORK_RECORD_WIDTH_OF_FABRIC);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(work_queue_end);
+        cache.RecordBookBeginIndex_ = record_book_begin;
+        cache.RecordBookEndIndex_ = record_book_end;
+        cache.CompiledDAGTableBeginIdx_ = compiled_dag_begin;
         cache.SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
         cache.SlabCellCount_ = cache.SegmentPoolBegin_ + static_cast<size_t>(cache.CountOfAPC_ * cache.PerAPCRuntimeCellCount_);
         cache.HorizontalEdgeBeginIdx_ = horizontal_edge_begin;
@@ -307,12 +310,10 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        for (size_t idx = 0; idx < FabCache_->SlabCellCount_; idx++)
-        {
-            DirectlyStoreFabricUnit64(idx, UNSIGNED_ZERO);
-        }
+        std::fill_n(SlabBasePtr_, static_cast<size_t>(cache.SlabCellCount_), uint64_t{UNSIGNED_ZERO});
 
         FabCache_ = std::construct_at(reinterpret_cast<FabricCache*>(SlabBasePtr_), cache);
+        BackingOwnership_ = CFC::FabricBackigOwnership::OWNED;
 
         //RECORD_BOOK_OF_TABLE_SEGMENT_CLASS - ENTRIES
         WriteARecordBookOfTSCEntry_(FabricSegments::SLAB_RECORD_MAP, record_book_begin, record_book_end);
@@ -380,41 +381,19 @@ namespace BidirectionalInMemGraph
     
     void SlabToFabricConverterAndCordinator::ShutDownFabric() noexcept
     {
-        const bool was_active = FabricInitialized_.exchange(false, std::memory_order_acq_rel);
-
-        if (was_active && SlabBasePtr_)
-        {
-            for (uint32_t slot = 0u; slot < FabCache_->CountOfAPC_; ++slot)
-            {
-                std::atomic_ref<uint64_t>(*GetAPCGenerationPtr_(slot)).fetch_or(
-                    HandleOfAPCStatic::CLOSED_MASK,
-                    std::memory_order_acq_rel
-                );
-            }
-
-            for (uint32_t slot = 0u; slot < FabCache_->CountOfAPC_; ++slot)
-            {
-                std::atomic_ref<uint64_t> control(*GetAPCGenerationPtr_(slot));
-                while (
-                    HandleOfAPCStatic::ReadControlCell(control.load(std::memory_order_acquire)).ActiveAccess != UNSIGNED_ZERO
-                )
-                {
-                    std::this_thread::yield();
-                }
-            }
-        }
-
         uint64_t* old_ptr = SlabBasePtr_;
-        const size_t old_count = FabCache_->SlabCellCount_;
+        const size_t old_count = FabCache_ ? FabCache_->SlabCellCount_ : UNSIGNED_ZERO;
+        const CFC::FabricBackigOwnership old_ownership = BackingOwnership_;
         SlabBasePtr_ = nullptr;
         FabCache_->SlabCellCount_ = UNSIGNED_ZERO;
+        BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        FabricInitialized_.store(false, std::memory_order_release);
 
-        if (old_ptr)
+        if (old_ptr && old_ownership == CFC::FabricBackigOwnership::OWNED)
         {
             FreeRawPackedCells_(old_ptr, old_count);
         }
 
-        FabCache_->CompiledDAGTableBeginIdx_ = UNSIGNED_ZERO;
         SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         ResetScalarsofTheFabric_();
     }
@@ -507,7 +486,7 @@ namespace BidirectionalInMemGraph
 
             const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(std::atomic_ref<const uint64_t>(*cell).load(std::memory_order_acquire));
 
-            if (!control.Closed || control.ActiveAccess != UNSIGNED_ZERO || HandleOfAPCStatic::IsGenerationValid(control.Generation))
+            if (!control.Closed || control.ActiveAccess != UNSIGNED_ZERO || !HandleOfAPCStatic::IsGenerationValid(control.Generation))
             {
                 ResetScalarsofTheFabric_();
                 return false;
@@ -527,4 +506,29 @@ namespace BidirectionalInMemGraph
         return true;
         
     }
+
+    CoreOfFabricCoordinator::DetachFabric SlabToFabricConverterAndCordinator::DetachFabric() noexcept
+    {
+        CFC::DetachFabric detached{};
+        if (
+            !IsFabricActive() ||
+            !FabCache_ ||
+            !QuiesceFabric_()
+        )
+        {
+            return detached;
+        }
+
+        detached.Slab_ = SlabBasePtr_;
+        detached.CellCount_ = FabCache_->SlabCellCount_;
+        detached.Ownership_ = BackingOwnership_;
+
+        SlabBasePtr_ = nullptr;
+        FabCache_ = nullptr;
+        BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        FabricInitialized_.store(false, std::memory_order_release);
+        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
+        return detached;
+    }
+
 }

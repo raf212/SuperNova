@@ -86,7 +86,7 @@ namespace BidirectionalInMemGraph
         static constexpr uint8_t RECORD_BOOK_WIDTH = static_cast<uint8_t>(RecordBookInternalIndexing::END64) + 1u;
 
 
-        static constexpr uint8_t FABRIC_UNIT_COUNT = sizeof(FabricCache);
+        static constexpr uint8_t FABRIC_UNIT_COUNT = sizeof(FabricCache) / sizeof(uint64_t);
 
         static constexpr bool IsValidEdgeTable(FabricSegments table_class) noexcept
         {
@@ -101,6 +101,14 @@ namespace BidirectionalInMemGraph
             return (value + alignment_value_15) & ~static_cast<size_t>(alignment_value_15);
         }
 
+        static constexpr uint64_t GetStartingOfAnyFabricTable_(
+            FabricSegments table_class
+        ) noexcept
+        {
+            const uint64_t offset = static_cast<uint64_t>(table_class) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
+            const uint64_t entry = FABRIC_UNIT_COUNT  + offset;
+            return entry;        
+        }
 
 
 
