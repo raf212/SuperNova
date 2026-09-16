@@ -81,6 +81,42 @@ namespace BidirectionalInMemGraph
         (HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u
     );
 
+    struct APCRelocationDef : public CoreOfFabricCoordinator
+    {
+        static constexpr bool ValidateFabricCache(const FabricCache& cache, uint64_t supplied_cell_count) noexcept
+        {
+            if (
+                cache.FormateVersion_ != FORMAT_VERSION ||
+                cache.SlabCellCount_ != supplied_cell_count ||
+                cache.SlabCellCount_ <  FABRIC_UNIT_COUNT ||
+                cache.SlabCellCount_ >= FABRIC_CELL_SENTINAL ||
+                cache.CountOfAPC_ == UNSIGNED_ZERO ||
+                cache.CountOfAPC_ > UINT32_MAX ||
+                cache.CountOfAPC_ > (uint64_t{1u} << EdgeBuilder::RELATION_SLOT_BITS) ||
+                cache.PerAPCRuntimeCellCount_ > UINT32_MAX ||
+                !ADS::IsCapacityOfAPCValid(cache.PerAPCRuntimeCellCount_) ||
+                !EdgeBuilder::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_) ||
+                cache.EdgeTableRecordWidth_ != EdgeBuilder::EdgeTableRecordWidth(cache.MaxDirectParentsPerAxis_) ||
+                cache.ActiveRegionMask_ == UNSIGNED_ZERO ||
+                (cache.ActiveRegionMask_ & ~ADS::ValidRegionMask()) != UNSIGNED_ZERO ||
+                cache.ActiveRegionCount_ != std::popcount(cache.ActiveRegionMask_) ||
+                cache.ActiveRegionCount_ == UNSIGNED_ZERO ||
+                cache.MatrixBatchCapacity_ == UNSIGNED_ZERO ||
+                cache.MatrixViewRowCellCount_ != cache.ActiveRegionCount_ * SchemaDefinition::RegionSchemaCellCount() ||
+                cache.RecordBookBeginIndex_ >=  cache.RecordBookEndIndex_ ||
+                cache.RecordBookEndIndex_ > cache.SlabCellCount_ ||
+                cache.SegmentPoolBegin_ >= cache.SlabCellCount_ ||
+                cache.CountOfAPC_ > ((UINT64_MAX - cache.SegmentPoolBegin_) / cache.PerAPCRuntimeCellCount_) 
+            )
+            {
+                return false;
+            }
+            
+            return 
+                (cache.SegmentPoolBegin_ + (cache.CountOfAPC_ * cache.PerAPCRuntimeCellCount_)) == cache.SlabCellCount_;
+        }
+    };
+    
 
 
 

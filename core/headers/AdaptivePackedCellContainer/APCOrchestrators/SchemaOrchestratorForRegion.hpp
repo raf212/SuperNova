@@ -74,6 +74,7 @@ namespace BidirectionalInMemGraph
             uint16_t ActiveRegionMask = UNSIGNED_ZERO;
             uint16_t Reserved = UNSIGNED_ZERO;
             uint32_t BatchCapacity = UNSIGNED_ZERO;
+            bool IsDefault = false;
         };
 
         using RegionSchemaTable = std::array<RegionSchemaRecord, ADS::CountOfMacroColumn()>;

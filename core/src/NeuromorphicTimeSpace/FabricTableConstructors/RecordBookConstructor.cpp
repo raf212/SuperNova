@@ -2,6 +2,15 @@
 
 namespace BidirectionalInMemGraph
 {
+    bool RecordBookConstructor::CheckRecordBookRange_(FabricSegments segment, uint64_t expected_begin, uint64_t expected_end) noexcept
+    {
+        RecordBookConf::FabricSegmentBounds bounds{};
+        return
+            GetRecordMapCarrierRanges_(segment, bounds) &&
+            bounds.IsValid &&
+            bounds.BeginIndex == expected_begin &&
+            bounds.EndIndex == expected_end;
+    }
 
     void RecordBookConstructor::IdleAFabricTableClassRangesMemory_(FabricSegments table_class) noexcept
     {
@@ -24,9 +33,9 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         return_bounds = {};
-        const uint64_t entry_idx = GetStartingOfAnyFabricTable_(table_class);
+        const uint64_t entry_idx = CoreOfFabricCoordinator::GetStartingOfAnyFabricTable_(table_class);
         if (
-            entry_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FabCache_.SlabCellCount_ ||
+            entry_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FabCache_->SlabCellCount_ ||
             !ReadAFabricU64Directly(
                 entry_idx + static_cast<uint8_t>(CoreOfFabricCoordinator::RecordBookInternalIndexing::BEGIN64),
                 return_bounds.BeginIndex
@@ -36,7 +45,7 @@ namespace BidirectionalInMemGraph
                 return_bounds.EndIndex
             ) ||
             return_bounds.BeginIndex >= return_bounds.EndIndex ||
-            return_bounds.EndIndex > FabCache_.SlabCellCount_
+            return_bounds.EndIndex > FabCache_->SlabCellCount_
         )
         {
             return_bounds.IsValid = false;
@@ -53,11 +62,11 @@ namespace BidirectionalInMemGraph
         size_t end
     ) noexcept
     {
-        const size_t base_idx = GetStartingOfAnyFabricTable_(table_class);
+        const size_t base_idx = CoreOfFabricCoordinator::GetStartingOfAnyFabricTable_(table_class);
         if (
             !ADS::IsValidFabricUnit(base_idx) || 
-            (base_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FabCache_.SlabCellCount_) ||
-            begin >= end || end > FabCache_.SlabCellCount_
+            (base_idx + CoreOfFabricCoordinator::RECORD_BOOK_WIDTH > FabCache_->SlabCellCount_) ||
+            begin >= end || end > FabCache_->SlabCellCount_
         )
         {
             return;
@@ -73,25 +82,6 @@ namespace BidirectionalInMemGraph
             end
         );                
         
-    }
-
-
-    uint64_t RecordBookConstructor::GetStartingOfAnyFabricTable_(
-        FabricSegments table_class
-    ) noexcept
-    {   uint64_t record_map_begin = UNSIGNED_ZERO;
-        const bool read_ok = ReadAFabricU64Directly(
-            static_cast<size_t>(CoreOfFabricCoordinator::FabricMetaIndicies::RECORD_BOOK_OF_TSC_BEGIN),
-            record_map_begin
-        );
-        if (
-            !read_ok ||
-            !ADS::IsValidFabricUnit(record_map_begin)
-        )
-        {
-            return FABRIC_CELL_SENTINAL;
-        }
-        return static_cast<uint64_t>(record_map_begin + (static_cast<uint8_t>(table_class) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH));        
     }
 
         

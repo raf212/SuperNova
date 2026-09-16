@@ -9,15 +9,12 @@ namespace BidirectionalInMemGraph
     private:
 
         uint64_t* AllocatePackedCellRaw_(size_t count_of_cells) noexcept;
-        
-        /// @brief INITIALIZES: All FabricMetaIndicies
-        /// @param table_directory_begin 
-        /// @param table_directory_end 
-        void InitializeCompleateFabricMetaIndices_(size_t record_book_begin, size_t record_book_end) noexcept;
+        bool ValidateAttachedFabricLayout_() noexcept;
+        bool QuiesceFabric_() noexcept;
+        bool ReopenLiveAPCGenerations_() noexcept;
 
     protected :
         SD::RegionSchemaTable DefaultRegionTable_{};
-        bool HasDefaultRegionTable_{false};
 
         void FreeRawPackedCells_(uint64_t*packed_cell_memory_ptr, size_t packed_cell_count) noexcept;
         void ResetScalarsofTheFabric_() noexcept;
@@ -29,6 +26,8 @@ namespace BidirectionalInMemGraph
         }
 
     public:
+        using CFC = CoreOfFabricCoordinator;
+
         SlabToFabricConverterAndCordinator(/* args */) noexcept = default;
 
         ~SlabToFabricConverterAndCordinator() noexcept
@@ -46,8 +45,9 @@ namespace BidirectionalInMemGraph
             return
                 FabricInitialized_.load(std::memory_order_acquire) &&
                 SlabBasePtr_ &&
-                ADS::IsValid32BitAPCUnit(FabCache_.PerAPCRuntimeCellCount_) &&
-                ADS::IsValid32BitAPCUnit(FabCache_.CountOfAPC_);
+                FabCache_ &&
+                ADS::IsValid32BitAPCUnit(FabCache_->PerAPCRuntimeCellCount_) &&
+                ADS::IsValid32BitAPCUnit(FabCache_->CountOfAPC_);
         }
 
         bool InitializeFabric(
@@ -56,6 +56,16 @@ namespace BidirectionalInMemGraph
             const SchemaDefinition::FabricRegionConfig& region_conf,
             uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
         ) noexcept;
+
+        bool SaveFabric(std::span<uint64_t> destination) noexcept;
+
+        bool AttachFabric(
+            uint64_t* raw_cells,
+            uint64_t cell_count,
+            CFC::FabricBackigOwnership ownership = CFC::FabricBackigOwnership::BORROWED
+        ) noexcept;
+
+        CFC::DetachFabric DetachFabric() noexcept;
         
     };
 

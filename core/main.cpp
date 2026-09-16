@@ -5,5 +5,6 @@
 
 int main()
 {
+    APCDAGTests::RunAll();
     return GHGFTestKit::RunAll();
 }

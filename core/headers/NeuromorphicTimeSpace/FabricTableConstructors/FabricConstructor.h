@@ -5,28 +5,7 @@
 namespace BidirectionalInMemGraph
 {
 
-    struct FabricCache 
-    {
-        ///FABRIC CONSTRUCTION
-        uint32_t PerAPCRuntimeCellCount_{UNSIGNED_ZERO};
-        uint64_t CountOfAPC_{UNSIGNED_ZERO};
-        size_t SlabCellCount_{UNSIGNED_ZERO};
-        size_t SegmentPoolBegin_{CoreOfFabricCoordinator::FABRIC_UNIT_COUNT};
-        uint8_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
-        uint16_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
-        uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
-        ///MATRIX CONSTRUCTION
-        uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
-        uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
-        uint16_t ActiveRegionMask_{UNSIGNED_ZERO};
-        uint16_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
-        uint32_t MatrixBatchCapacity_{UNSIGNED_ZERO};
-        ///EDGE CONSTRUCTION
-        uint64_t HorizontalEdgeBeginIdx_{UNSIGNED_ZERO};
-        uint64_t VerticalEdgeBeginIdx_{UNSIGNED_ZERO};
-        uint64_t CompiledDAGTableBeginIdx_{UNSIGNED_ZERO};
-
-    };
+    using FabricCache = CoreOfFabricCoordinator::FabricCache;
 
     class FabricConstructor
     {
@@ -35,8 +14,9 @@ namespace BidirectionalInMemGraph
     protected:
         uint64_t* SlabBasePtr_{nullptr};
 
-        FabricCache FabCache_{};
-    
+        FabricCache* FabCache_{nullptr};
+
+        CoreOfFabricCoordinator::FabricBackigOwnership BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         std::atomic<bool> FabricInitialized_{false};
         std::atomic<bool> InitializationInProgress_{false};
         RawPackedCellAllocator AllocatorOfFabric_{};
@@ -85,7 +65,7 @@ namespace BidirectionalInMemGraph
 
         constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
         {
-            if (SlabBasePtr_ && desired_idx < FabCache_.SlabCellCount_)
+            if (FabCache_ && SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
             {
                 return true;
             }
@@ -94,19 +74,19 @@ namespace BidirectionalInMemGraph
 
         constexpr size_t SlotBegin_(uint32_t slot) noexcept
         {
-            return FabCache_.SegmentPoolBegin_ + static_cast<size_t>(slot) * FabCache_.PerAPCRuntimeCellCount_;
+            return FabCache_->SegmentPoolBegin_ + static_cast<size_t>(slot) * FabCache_->PerAPCRuntimeCellCount_;
         }
 
         template<typename T>
         bool IsInternalBuffer(const T* data, size_t count) noexcept
         {
-            if (!SlabBasePtr_ || count == UNSIGNED_ZERO)
+            if (!FabCache_ || !SlabBasePtr_ || count == UNSIGNED_ZERO)
             {
                 return false;
             }
             if (
                 count > SIZE_MAX / sizeof(T) ||
-                FabCache_.SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
+                FabCache_->SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
             )
             {
                 return true;
@@ -115,7 +95,7 @@ namespace BidirectionalInMemGraph
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
             const uintptr_t slab = reinterpret_cast<uintptr_t>(SlabBasePtr_);
             const size_t bytes = count * sizeof(T);
-            const size_t slab_bytes = FabCache_.SlabCellCount_ * sizeof(uint64_t);
+            const size_t slab_bytes = FabCache_->SlabCellCount_ * sizeof(uint64_t);
 
             return begin >= slab
                 ? begin - slab < slab_bytes
@@ -161,7 +141,7 @@ namespace BidirectionalInMemGraph
 
         std::optional<uint32_t> ReadFirstFreeAPCIdx_() noexcept;
 
-        void UpdateFirstFreeIdx_(uint64_t& expected_value, uint64_t desired_value) noexcept;
+        void UpdateFirstFreeIdx_(uint32_t& expected_value, uint32_t desired_value) noexcept;
     };
 
 

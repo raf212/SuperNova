@@ -99,7 +99,7 @@ namespace BidirectionalInMemGraph
             !IsDesiredIndexValidInSLab(slab_starting_idx + number_of_cells - 1) ||
             !desired_units ||
             number_of_cells == UNSIGNED_ZERO ||
-            number_of_cells > FabCache_.SlabCellCount_ - slab_starting_idx
+            number_of_cells > FabCache_->SlabCellCount_ - slab_starting_idx
         )
         {
             return false;
@@ -127,21 +127,21 @@ namespace BidirectionalInMemGraph
     {
         if (
             !SlabBasePtr_ ||
-            slot >= FabCache_.CountOfAPC_ ||
-            FabCache_.HandleTableBeginIndex_ >= FabCache_.SlabCellCount_
+            slot >= FabCache_->CountOfAPC_ ||
+            FabCache_->HandleTableBeginIndex_ >= FabCache_->SlabCellCount_
         )
         {
             return nullptr;
         }
         
-        const size_t idx = FabCache_.HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
+        const size_t idx = FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
 
-        return idx < FabCache_.SlabCellCount_ ? &SlabBasePtr_[idx] : nullptr;
+        return idx < FabCache_->SlabCellCount_ ? &SlabBasePtr_[idx] : nullptr;
     }
 
     bool APCHandleAndRetirement::InitializeAPCGenerationTable_() noexcept
     {
-        for (uint32_t slot = 0; slot < FabCache_.CountOfAPC_; slot++)
+        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; slot++)
         {
             uint64_t* cell = GetAPCGenerationPtr_(slot);
             if (!cell)
@@ -268,32 +268,34 @@ namespace BidirectionalInMemGraph
 
     std::optional<uint32_t> APCHandleAndRetirement::ReadFirstFreeAPCIdx_() noexcept
     {
-        uint8_t first_free = static_cast<uint8_t>(CoreOfFabricCoordinator::FabricMetaIndicies::FIRST_FREE_IDX);
-        if (!IsDesiredIndexValidInSLab(first_free))
+        if (!FabCache_)
         {
             return std::nullopt;
         }
 
-        std::atomic_ref<const uint64_t> fab_u64_ref(SlabBasePtr_[first_free]);
-        uint64_t first_free_apc = fab_u64_ref.load(std::memory_order_acquire);
+        const uint32_t first_free = std::atomic_ref<const uint32_t>(FabCache_->FirstFreeIdx_).load(std::memory_order_acquire);
 
-        if (!ADS::IsValid32BitAPCUnit(first_free_apc))
+        if (!ADS::IsValid32BitAPCUnit(first_free))
         {
             return std::nullopt;
         }
         
-        return static_cast<uint32_t>(first_free_apc);
+        return first_free;
     }
 
-    void APCHandleAndRetirement::UpdateFirstFreeIdx_(uint64_t& expected_value, uint64_t desired_value) noexcept
+    void APCHandleAndRetirement::UpdateFirstFreeIdx_(uint32_t& expected_value, uint32_t desired_value) noexcept
     {
-        uint8_t first_free = static_cast<uint8_t>(CoreOfFabricCoordinator::FabricMetaIndicies::FIRST_FREE_IDX);
-        if (!IsDesiredIndexValidInSLab(first_free))
+        if (!FabCache_)
         {
             return;
         }
-        std::atomic_ref<uint64_t> fab_u64_ref(SlabBasePtr_[first_free]);
-        fab_u64_ref.compare_exchange_strong(expected_value, desired_value, std::memory_order_acq_rel, std::memory_order_acquire);
+        
+        std::atomic_ref<uint32_t>(FabCache_->FirstFreeIdx_).compare_exchange_strong(
+            expected_value,
+            desired_value,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire
+        );
     }
 
 
