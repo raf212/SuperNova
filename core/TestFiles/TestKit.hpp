@@ -9,14 +9,14 @@
 //
 // Add core/headers to the compiler include path and link the production .cpp files.
 // Tests 1-5 and 7 use only public APC/Fabric operations. The APC adapter resolves
-// returned nodes by slab slot identity; it never compares host-object addresses. Test 6 additionally uses
-// a read-only derived Fabric probe to verify the protected DEVICE_VIEW_TABLE ABI,
-// compact row geometry, Fabric metadata, and MPMC sequence-cell initialization.
+// returned nodes by slab slot identity; it never compares host-object addresses.
+// Test 6 uses a read-only derived Fabric probe to verify the compact schema-table
+// geometry and protocol storage. Test 8 exercises whole-slab Save/Attach/Detach
+// relocation without involving GHGF.
 
 #ifndef APC_DAG_TEST_EXTERNAL_TYPES
 #include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
 #include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "Models/GHGF/GHGFModelOfAPC.hpp"
 
 #endif
 
@@ -33,6 +33,7 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -2005,17 +2006,10 @@ public:
         ).load(std::memory_order_acquire);
     }
 
-    std::optional<std::uint64_t> FabricMeta(
-        CoreOfFabricCoordinator::FabricMetaIndicies index
-    ) noexcept
+    const CoreOfFabricCoordinator::FabricCache*
+    FabricHeader() const noexcept
     {
-        if (!SlabBasePtr_)
-        {
-            return std::nullopt;
-        }
-        return std::atomic_ref<const std::uint64_t>(
-            SlabBasePtr_[static_cast<std::size_t>(index)]
-        ).load(std::memory_order_acquire);
+        return FabCache_;
     }
 
     std::optional<ADS::RangeOfAPC> TableRange(FabricSegments table) noexcept
@@ -2558,24 +2552,42 @@ inline bool DeviceViewAndProtocolStorage() noexcept
         return false;
     }
 
-    using FMI = CoreOfFabricCoordinator::FabricMetaIndicies;
-    const auto matrix_range = fabric.TableRange(FabricSegments::MATRIX_VIEW_TABLE);
+    const auto matrix_range =
+        fabric.TableRange(
+            FabricSegments::MATRIX_VIEW_TABLE
+        );
+
+    const CoreOfFabricCoordinator::FabricCache*
+        header = fabric.FabricHeader();
+
     const bool fabric_metadata_ok =
+        header != nullptr &&
         fabric.ActiveMask() == active_mask &&
         fabric.ActiveCount() == active_count &&
         fabric.ViewRowCells() == row_cells &&
         fabric.BatchCapacity() == batch &&
         matrix_range.has_value() &&
-        matrix_range->EndIndex - matrix_range->BeginIndex ==
-            static_cast<std::size_t>(slot_count) * row_cells &&
-        fabric.MatrixViewBegin() == matrix_range->BeginIndex &&
-        fabric.FabricMeta(FMI::ACTIVE_REGION_MASK) == active_mask &&
-        fabric.FabricMeta(FMI::ACTIVE_REGION_COUNT) == active_count &&
-        fabric.FabricMeta(FMI::REGION_SCHEMA_RECORD_CELL_COUNT) ==
-            SD::RegionSchemaCellCount() &&
-        fabric.FabricMeta(FMI::DEVICE_VIEW_ROW_CELL_COUNT) == row_cells &&
-        fabric.FabricMeta(FMI::MATRIC_BATCH_CAPACITY) == batch &&
-        fabric.FabricMeta(FMI::REGION_ALLIGNMENT_CELL_COUNT) ==
+        matrix_range->EndIndex -
+            matrix_range->BeginIndex ==
+            static_cast<std::size_t>(
+                slot_count
+            ) * row_cells &&
+        fabric.MatrixViewBegin() ==
+            matrix_range->BeginIndex &&
+        header->FormateVersion_ ==
+            CoreOfFabricCoordinator::
+                FORMAT_VERSION &&
+        header->CountOfAPC_ ==
+            slot_count &&
+        header->ActiveRegionMask_ ==
+            active_mask &&
+        header->ActiveRegionCount_ ==
+            active_count &&
+        header->MatrixViewRowCellCount_ ==
+            row_cells &&
+        header->MatrixBatchCapacity_ ==
+            batch &&
+        header->RegionAlignmentCellCount_ ==
             SD::REGION_ALIGNMENT_CELLS;
 
     SD::RegionSchemaTable schemas{};
@@ -3361,16 +3373,600 @@ inline Result Run()
 
 
 
+// -----------------------------------------------------------------------------
+// Test 8: full-slab Save / Attach / Detach relocation.
+//
+// This is deliberately a Fabric/APC test, not a GHGF test. It proves that a
+// quiescent slab image can move to a different host address without rebuilding
+// APCs, schemas, payloads, or the H relation.
+// -----------------------------------------------------------------------------
+
+namespace Test08_FabricRelocation
+{
+using SD = SchemaDefinition;
+
+constexpr std::uint32_t VIEW_WIDTH = 8u;
+constexpr std::uint32_t SLOT_COUNT = 4u;
+constexpr std::uint8_t PARENT_CAPACITY = 2u;
+
+class RelocationFabric final : public APCFinilizer
+{
+public:
+    bool ResolveExistingForTest(
+        std::uint32_t slot,
+        AdaptivePackedCellContainer& apc,
+        APCUseScope& use,
+        std::optional<std::uint32_t> expected_generation =
+            std::nullopt
+    ) noexcept
+    {
+        return GetExistingAPC_(
+            slot,
+            apc,
+            use,
+            expected_generation
+        );
+    }
+
+    std::uint64_t* SlabAddressForTest() noexcept
+    {
+        return SlabBasePtr_;
+    }
+
+    std::uint64_t SlabCellCountForTest() const noexcept
+    {
+        return FabCache_
+            ? FabCache_->SlabCellCount_
+            : UNSIGNED_ZERO;
+    }
+};
+
+constexpr SD::FabricRegionConfig
+RegionConfig() noexcept
+{
+    return SD::FabricRegionConfig{
+        ADS::RegionBit(
+            MacroColumnOfAPC::BOTTOM_UP_SLOT
+        ),
+        0u,
+        VIEW_WIDTH,
+        false
+    };
+}
+
+inline bool CreateAtomicNode(
+    APCFinilizer& fabric,
+    AdaptivePackedCellContainer& apc
+) noexcept
+{
+    SD::RegionSchemaTable schemas{};
+    SD::MakeDisabledSchemaTable(schemas);
+
+    SD::RegionSchemaRecord& schema =
+        schemas[static_cast<std::size_t>(
+            MacroColumnOfAPC::BOTTOM_UP_SLOT
+        )];
+
+    schema.Region =
+        MacroColumnOfAPC::BOTTOM_UP_SLOT;
+    schema.Dtype =
+        SD::DataTypeOfMacroColumn::UINT64_T;
+    schema.Protocol =
+        SD::SchemaProtocols::ATOMIC_WORD_ARRAY;
+    schema.MatrixHeight = 1u;
+    schema.MatrixWidth = VIEW_WIDTH;
+    schema.Flags =
+        SD::SchemaFlags::BATCHED_LAST_DIM;
+
+    return
+        SD::SealDesiredSchema(
+            schema,
+            0u
+        ) &&
+        fabric.CreateAPC(
+            apc,
+            schemas
+        );
+}
+
+inline bool WritePayload(
+    AdaptivePackedCellContainer& apc,
+    std::uint64_t seed
+) noexcept
+{
+    auto view =
+        apc.BuildAViewOverRegion<std::uint64_t>(
+            MacroColumnOfAPC::BOTTOM_UP_SLOT
+        );
+
+    if (
+        !view.has_value() ||
+        !view->IsValid() ||
+        view->Size() != VIEW_WIDTH
+    )
+    {
+        return false;
+    }
+
+    for (
+        std::size_t i = 0u;
+        i < VIEW_WIDTH;
+        ++i
+    )
+    {
+        if (!view->AtomicStore(
+            i,
+            seed +
+                static_cast<std::uint64_t>(i),
+            std::memory_order_release
+        ))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+inline bool CheckPayload(
+    AdaptivePackedCellContainer& apc,
+    std::uint64_t seed
+) noexcept
+{
+    auto view =
+        apc.BuildAViewOverRegion<std::uint64_t>(
+            MacroColumnOfAPC::BOTTOM_UP_SLOT
+        );
+
+    if (
+        !view.has_value() ||
+        !view->IsValid() ||
+        view->Size() != VIEW_WIDTH
+    )
+    {
+        return false;
+    }
+
+    for (
+        std::size_t i = 0u;
+        i < VIEW_WIDTH;
+        ++i
+    )
+    {
+        if (
+            view->AtomicLoad(
+                i,
+                std::memory_order_acquire
+            ) !=
+            seed +
+                static_cast<std::uint64_t>(i)
+        )
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+inline bool ResolveNode(
+    RelocationFabric& fabric,
+    std::uint32_t slot,
+    std::uint32_t generation,
+    AdaptivePackedCellContainer& node
+) noexcept
+{
+    APCUseScope use{};
+
+    if (!fabric.ResolveExistingForTest(
+        slot,
+        node,
+        use,
+        generation
+    ))
+    {
+        return false;
+    }
+
+    use.Release();
+    return node.IsActiveAPC();
+}
+
+inline bool CheckHParent(
+    AdaptivePackedCellContainer& child,
+    std::uint32_t expected_parent_slot
+) noexcept
+{
+    AdaptivePackedCellContainer parent =
+        child.FindParent(
+            FabricSegments::
+                VALUE_PARENT_EDGE_TABLE_H,
+            0u
+        );
+
+    return
+        parent.IsActiveAPC() &&
+        parent.GetThisSlotIdx() ==
+            expected_parent_slot;
+}
+
+inline Result Run()
+{
+    Banner(
+        "TEST 8 - FULL-SLAB SAVE / ATTACH / DETACH RELOCATION"
+    );
+
+    static constexpr std::uint64_t
+        PARENT_SEED = 0xA100u;
+
+    static constexpr std::uint64_t
+        CHILD_SEED = 0xB200u;
+
+    RelocationFabric source{};
+    TestAPC source_parent{};
+    TestAPC source_child{};
+
+    if (
+        !source.InitializeFabric(
+            SLOT_COUNT,
+            MINIMUM_APC_CELL_COUNT,
+            RegionConfig(),
+            PARENT_CAPACITY
+        ) ||
+        !CreateAtomicNode(
+            source,
+            source_parent
+        ) ||
+        !CreateAtomicNode(
+            source,
+            source_child
+        )
+    )
+    {
+        std::cout
+            << "  source construction                         FAIL\n"
+            << "\nTEST 8 OVERALL: FAIL\n";
+        return Result::FAIL;
+    }
+
+    const std::uint32_t parent_slot =
+        source_parent.GetThisSlotIdx();
+
+    const std::uint32_t child_slot =
+        source_child.GetThisSlotIdx();
+
+    const std::uint32_t parent_generation =
+        source_parent.GenerationForTest();
+
+    const std::uint32_t child_generation =
+        source_child.GenerationForTest();
+
+    const bool source_setup =
+        ADS::IsValid32BitAPCUnit(parent_slot) &&
+        ADS::IsValid32BitAPCUnit(child_slot) &&
+        HandleOfAPCStatic::
+            IsGenerationValid(
+                parent_generation
+            ) &&
+        HandleOfAPCStatic::
+            IsGenerationValid(
+                child_generation
+            ) &&
+        source_child.AddParent(
+            source_parent,
+            FabricSegments::
+                VALUE_PARENT_EDGE_TABLE_H
+        ) &&
+        WritePayload(
+            source_parent,
+            PARENT_SEED
+        ) &&
+        WritePayload(
+            source_child,
+            CHILD_SEED
+        );
+
+    if (!source_setup)
+    {
+        std::cout
+            << "  source topology/payload                     FAIL\n"
+            << "\nTEST 8 OVERALL: FAIL\n";
+        return Result::FAIL;
+    }
+
+    const std::uint64_t cell_count =
+        source.SlabCellCountForTest();
+
+    std::uint64_t* const source_address =
+        source.SlabAddressForTest();
+
+    std::vector<std::uint64_t> snapshot(
+        static_cast<std::size_t>(
+            cell_count
+        )
+    );
+
+    const bool save_ok =
+        source_address != nullptr &&
+        cell_count != UNSIGNED_ZERO &&
+        source.SaveFabric(
+            std::span<std::uint64_t>(
+                snapshot.data(),
+                snapshot.size()
+            )
+        );
+
+    const bool source_resumed =
+        save_ok &&
+        source.IsFabricActive() &&
+        source_parent.IsActiveAPC() &&
+        source_child.IsActiveAPC() &&
+        CheckPayload(
+            source_parent,
+            PARENT_SEED
+        ) &&
+        CheckPayload(
+            source_child,
+            CHILD_SEED
+        ) &&
+        CheckHParent(
+            source_child,
+            parent_slot
+        );
+
+    std::vector<std::uint64_t>
+        relocated_one = snapshot;
+
+    const bool first_address_changed =
+        !relocated_one.empty() &&
+        relocated_one.data() !=
+            source_address;
+
+    RelocationFabric first_target{};
+
+    const bool first_attach =
+        save_ok &&
+        first_address_changed &&
+        first_target.AttachFabric(
+            relocated_one.data(),
+            static_cast<std::uint64_t>(
+                relocated_one.size()
+            ),
+            CoreOfFabricCoordinator::
+                FabricBackigOwnership::
+                    BORROWED
+        );
+
+    AdaptivePackedCellContainer
+        first_parent{};
+
+    AdaptivePackedCellContainer
+        first_child{};
+
+    const bool first_resolve =
+        first_attach &&
+        ResolveNode(
+            first_target,
+            parent_slot,
+            parent_generation,
+            first_parent
+        ) &&
+        ResolveNode(
+            first_target,
+            child_slot,
+            child_generation,
+            first_child
+        );
+
+    const bool first_payload =
+        first_resolve &&
+        CheckPayload(
+            first_parent,
+            PARENT_SEED
+        ) &&
+        CheckPayload(
+            first_child,
+            CHILD_SEED
+        );
+
+    const bool first_topology =
+        first_resolve &&
+        CheckHParent(
+            first_child,
+            parent_slot
+        );
+
+    const CoreOfFabricCoordinator::
+        DetachFabric detached =
+            first_attach
+                ? first_target.DetachFabric()
+                : CoreOfFabricCoordinator::
+                    DetachFabric{};
+
+    const bool detach_ok =
+        static_cast<bool>(detached) &&
+        detached.Slab_ ==
+            relocated_one.data() &&
+        detached.CellCount_ ==
+            cell_count &&
+        detached.Ownership_ ==
+            CoreOfFabricCoordinator::
+                FabricBackigOwnership::
+                    BORROWED &&
+        !first_target.IsFabricActive();
+
+    // Detach intentionally leaves a quiescent image. Copy that image to another
+    // allocation to prove a second address can interpret the same Fabric.
+    std::vector<std::uint64_t>
+        relocated_two{};
+
+    if (detach_ok)
+    {
+        relocated_two.assign(
+            detached.Slab_,
+            detached.Slab_ +
+                detached.CellCount_
+        );
+    }
+
+    const bool second_address_changed =
+        !relocated_two.empty() &&
+        relocated_two.data() !=
+            detached.Slab_;
+
+    RelocationFabric second_target{};
+
+    const bool second_attach =
+        detach_ok &&
+        second_address_changed &&
+        second_target.AttachFabric(
+            relocated_two.data(),
+            static_cast<std::uint64_t>(
+                relocated_two.size()
+            ),
+            CoreOfFabricCoordinator::
+                FabricBackigOwnership::
+                    BORROWED
+        );
+
+    AdaptivePackedCellContainer
+        second_parent{};
+
+    AdaptivePackedCellContainer
+        second_child{};
+
+    const bool second_resolve =
+        second_attach &&
+        ResolveNode(
+            second_target,
+            parent_slot,
+            parent_generation,
+            second_parent
+        ) &&
+        ResolveNode(
+            second_target,
+            child_slot,
+            child_generation,
+            second_child
+        );
+
+    const bool second_payload =
+        second_resolve &&
+        CheckPayload(
+            second_parent,
+            PARENT_SEED
+        ) &&
+        CheckPayload(
+            second_child,
+            CHILD_SEED
+        );
+
+    const bool second_topology =
+        second_resolve &&
+        CheckHParent(
+            second_child,
+            parent_slot
+        );
+
+    const bool address_independent =
+        first_address_changed &&
+        second_address_changed &&
+        relocated_two.data() !=
+            source_address;
+
+    // Leave second_target attached until its destructor. Because the backing is
+    // BORROWED and relocated_two was declared before second_target, the backing
+    // stays alive for the complete shutdown.
+    const bool ok =
+        save_ok &&
+        source_resumed &&
+        first_attach &&
+        first_resolve &&
+        first_payload &&
+        first_topology &&
+        detach_ok &&
+        second_attach &&
+        second_resolve &&
+        second_payload &&
+        second_topology &&
+        address_independent;
+
+    std::cout
+        << "  SaveFabric succeeds and source resumes       "
+        << (source_resumed ? "PASS" : "FAIL")
+        << '\n'
+        << "  first attach uses different slab address     "
+        << (
+            first_attach &&
+            first_address_changed
+                ? "PASS"
+                : "FAIL"
+        )
+        << '\n'
+        << "  first relocated payload                      "
+        << (first_payload ? "PASS" : "FAIL")
+        << '\n'
+        << "  first relocated H topology                   "
+        << (first_topology ? "PASS" : "FAIL")
+        << '\n'
+        << "  DetachFabric preserves borrowed image        "
+        << (detach_ok ? "PASS" : "FAIL")
+        << '\n'
+        << "  second attach uses another slab address      "
+        << (
+            second_attach &&
+            second_address_changed
+                ? "PASS"
+                : "FAIL"
+        )
+        << '\n'
+        << "  second relocated payload                     "
+        << (second_payload ? "PASS" : "FAIL")
+        << '\n'
+        << "  second relocated H topology                  "
+        << (second_topology ? "PASS" : "FAIL")
+        << '\n'
+        << "  address-independent slab image               "
+        << (address_independent ? "PASS" : "FAIL")
+        << '\n'
+        << "  source address                               "
+        << static_cast<const void*>(
+            source_address
+        )
+        << '\n'
+        << "  first relocated address                      "
+        << static_cast<const void*>(
+            relocated_one.data()
+        )
+        << '\n'
+        << "  second relocated address                     "
+        << static_cast<const void*>(
+            relocated_two.data()
+        )
+        << '\n'
+        << "\nTEST 8 OVERALL: "
+        << (ok ? "PASS" : "FAIL")
+        << '\n';
+
+    return ok
+        ? Result::PASS
+        : Result::FAIL;
+}
+
+} // namespace Test08_FabricRelocation
+
+
 inline int RunAll()
 {
-    const std::array<std::pair<const char*, Result>, 7u> results{{
+    const std::array<std::pair<const char*, Result>, 8u> results{{
         {"Test 1 - baseline and benchmark", Test01_Baseline::Run()},
         {"Test 2 - contention sweep", Test02_Contention::Run()},
         {"Test 3 - reader/writer atomicity", Test03_ReaderWriter::Run()},
         {"Test 4 - public mutation API", Test04_PublicMutationAPI::Run()},
         {"Test 5 - combined DAG proof", Test05_CombinedAcyclicity::Run()},
         {"Test 6 - region schema and views", Test06_RegionSchemaAndViews::Run()},
-        {"Test 7 - concurrency and retirement", Test07_ConcurrentDAGAndRetirement::Run()}
+        {"Test 7 - concurrency and retirement", Test07_ConcurrentDAGAndRetirement::Run()},
+        {"Test 8 - full-slab relocation", Test08_FabricRelocation::Run()}
     }};
 
     Banner("APC DUAL-EDGE DAG TEST SUITE SUMMARY");

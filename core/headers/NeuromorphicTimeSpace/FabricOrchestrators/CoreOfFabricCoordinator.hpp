@@ -95,7 +95,7 @@ namespace BidirectionalInMemGraph
                 table_class == FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
         }
 
-        static constexpr size_t DefaultFabricAlignment16Cell_(size_t value) noexcept
+        static constexpr size_t DefaultFabricAlignment16Cell(size_t value) noexcept
         {
             const uint8_t alignment_value_15 = 16 - 1;
             return (value + alignment_value_15) & ~static_cast<size_t>(alignment_value_15);
@@ -106,7 +106,7 @@ namespace BidirectionalInMemGraph
         ) noexcept
         {
             const uint64_t offset = static_cast<uint64_t>(table_class) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
-            const uint64_t entry = FABRIC_UNIT_COUNT  + offset;
+            const uint64_t entry = DefaultFabricAlignment16Cell(FABRIC_UNIT_COUNT)  + offset;
             return entry;        
         }
 

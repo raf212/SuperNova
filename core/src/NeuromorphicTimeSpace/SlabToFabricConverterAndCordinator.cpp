@@ -250,50 +250,50 @@ namespace BidirectionalInMemGraph
         cache.ActiveRegionCount_ = active_count;
         cache.MatrixBatchCapacity_ = region_conf.BatchCapacity;
         cache.MatrixViewRowCellCount_ = static_cast<uint16_t>(
-            static_cast<uint16_t>(FabCache_->ActiveRegionCount_) *
+            static_cast<uint16_t>(active_count) *
             SD::RegionSchemaCellCount()
         );
         cache.RegionAlignmentCellCount_ = SD::REGION_ALIGNMENT_CELLS;
         cache.FirstFreeIdx_ = UNSIGNED_ZERO;
 
-        size_t cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(CoreOfFabricCoordinator::FABRIC_UNIT_COUNT);
+        size_t cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(CoreOfFabricCoordinator::FABRIC_UNIT_COUNT);
         const size_t record_book_begin = cursor;
         const size_t record_book_end = record_book_begin + static_cast<size_t>(RecordBookConf::RECORD_BOOK_INTERNAL_SEGMENT_COUNT) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
 
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(record_book_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(record_book_end);
         const size_t horizontal_edge_begin = cursor;
         const size_t horizontal_edge_end = horizontal_edge_begin + static_cast<size_t>(cache.CountOfAPC_) * cache.EdgeTableRecordWidth_;
 
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(horizontal_edge_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(horizontal_edge_end);
         const size_t matrix_view_table_begin = cursor;
         const size_t matrix_view_table_end = matrix_view_table_begin + static_cast<size_t>(cache.CountOfAPC_ * cache.MatrixViewRowCellCount_);
         
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(matrix_view_table_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(matrix_view_table_end);
         const size_t vertical_edge_begin = cursor;
         const size_t vertical_edge_end = vertical_edge_begin + 
                 static_cast<size_t>(cache.CountOfAPC_) * cache.EdgeTableRecordWidth_;
 
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(vertical_edge_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(vertical_edge_end);
         const size_t apc_handle_table_begin = cursor;
         const size_t apc_handle_table_end = apc_handle_table_begin + static_cast<size_t>(cache.CountOfAPC_ * HandleOfAPCStatic::HANDLE_TABLE_WIDTH);
 
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(apc_handle_table_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(apc_handle_table_end);
         const size_t compiled_dag_begin = cursor;
         const size_t compiled_dag_end = compiled_dag_begin + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
 
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(compiled_dag_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(compiled_dag_end);
         const size_t device_planner_begain = cursor;
         const size_t device_planner_end = device_planner_begain + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::DEVICE_PLANNER_RECORD_LEN);
 
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(device_planner_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(device_planner_end);
         const size_t work_queue_begin = cursor;
         const size_t work_queue_end = work_queue_begin + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::WORK_RECORD_WIDTH_OF_FABRIC);
 
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(work_queue_end);
+        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(work_queue_end);
         cache.RecordBookBeginIndex_ = record_book_begin;
         cache.RecordBookEndIndex_ = record_book_end;
         cache.CompiledDAGTableBeginIdx_ = compiled_dag_begin;
-        cache.SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell_(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
+        cache.SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
         cache.SlabCellCount_ = cache.SegmentPoolBegin_ + static_cast<size_t>(cache.CountOfAPC_ * cache.PerAPCRuntimeCellCount_);
         cache.HorizontalEdgeBeginIdx_ = horizontal_edge_begin;
         cache.VerticalEdgeBeginIdx_ = vertical_edge_begin;
@@ -384,8 +384,16 @@ namespace BidirectionalInMemGraph
         uint64_t* old_ptr = SlabBasePtr_;
         const size_t old_count = FabCache_ ? FabCache_->SlabCellCount_ : UNSIGNED_ZERO;
         const CFC::FabricBackigOwnership old_ownership = BackingOwnership_;
+        if (
+            old_ptr &&
+            FabCache_ &&
+            FabricInitialized_.load(std::memory_order_acquire)
+        )
+        {
+            QuiesceFabric_();
+        }
         SlabBasePtr_ = nullptr;
-        FabCache_->SlabCellCount_ = UNSIGNED_ZERO;
+        FabCache_ = nullptr;
         BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
         FabricInitialized_.store(false, std::memory_order_release);
 
@@ -439,7 +447,8 @@ namespace BidirectionalInMemGraph
         if (
             !raw_cells || cell_count < CFC::FABRIC_UNIT_COUNT || 
             ownership == CFC::FabricBackigOwnership::NONE ||
-            (reinterpret_cast<uintptr_t>(raw_cells) % alignof(FabricCache) != UNSIGNED_ZERO)
+            (reinterpret_cast<uintptr_t>(raw_cells) % alignof(FabricCache) != UNSIGNED_ZERO)  ||
+            raw_cells == SlabBasePtr_
         )
         {
             return false;
