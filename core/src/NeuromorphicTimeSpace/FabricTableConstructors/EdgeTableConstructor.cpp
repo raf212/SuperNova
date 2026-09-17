@@ -14,14 +14,7 @@ namespace BidirectionalInMemGraph
 
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            row_slot >= FabCache_->CountOfAPC_ ||
-            !EdgeBuilder::IsValidConfigurableParentCapacity(
-                FabCache_->MaxDirectParentsPerAxis_
-            ) ||
-            FabCache_->EdgeTableRecordWidth_ !=
-                EdgeBuilder::EdgeTableRecordWidth(
-                    FabCache_->MaxDirectParentsPerAxis_
-                )
+            row_slot >= FabCache_->CountOfAPC_
         )
         {
             return range;
@@ -35,10 +28,7 @@ namespace BidirectionalInMemGraph
         range.BeginIndex = table_begin +
             static_cast<uint64_t>(row_slot) * FabCache_->EdgeTableRecordWidth_;
         range.EndIndex = range.BeginIndex + FabCache_->EdgeTableRecordWidth_;
-        range.IsValid =
-            range.BeginIndex >= table_begin &&
-            range.BeginIndex < range.EndIndex &&
-            range.EndIndex <= FabCache_->SlabCellCount_;
+        range.IsValid = true;
         return range;
     }
 
@@ -166,12 +156,9 @@ namespace BidirectionalInMemGraph
     {
         const EdgeTableRange range =
             ReadAnEdgeTableRange_(edge_table, child_slot);
-        std::span<EdgeBuilder::ParentRelation> stored =
-            ParentRelations_(edge_table, child_slot);
 
         if (
             !range.IsValid ||
-            stored.size() != FabCache_->MaxDirectParentsPerAxis_ ||
             !EdgeBuilder::IsValidRelationOrdinal(
                 relation_ordinal,
                 FabCache_->MaxDirectParentsPerAxis_
@@ -180,6 +167,12 @@ namespace BidirectionalInMemGraph
         {
             return SeqLockedOperation::NONE;
         }
+
+        auto* const stored = std::launder(
+            reinterpret_cast<EdgeBuilder::ParentRelation*>(
+                SlabBasePtr_ + range.BeginIndex + 1u
+            )
+        );
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -225,6 +218,7 @@ namespace BidirectionalInMemGraph
             {
                 return SeqLockedOperation::NONE;
             }
+
             return EdgeBuilder::IsEmpty(relation)
                 ? SeqLockedOperation::NONE
                 : SeqLockedOperation::FOUND;
@@ -232,7 +226,6 @@ namespace BidirectionalInMemGraph
 
         return SeqLockedOperation::RETRY;
     }
-
         
     EdgeTableConstructor::SeqLockedOperation
     EdgeTableConstructor::ReserveEdgeRow_(

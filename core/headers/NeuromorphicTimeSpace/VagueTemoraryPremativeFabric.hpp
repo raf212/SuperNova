@@ -29,6 +29,12 @@ protected:
         std::optional<uint32_t> expected_generation = std::nullopt
     ) noexcept;
 
+    bool BindExistingAPCSnapshot_(
+        uint32_t slot,
+        AdaptivePackedCellContainer& apc,
+        std::optional<uint32_t> expected_generation = std::nullopt
+    ) noexcept;
+
     std::optional<uint32_t> GetASlotForNewAPCLink() noexcept;        
 
     SeqLockedOperation ResolveChildLocator_(
@@ -36,7 +42,6 @@ protected:
         uint32_t parent_generation,
         FabricSegments edge_table,
         uint32_t locator,
-        APCUseScope& use,
         AdaptivePackedCellContainer& child
     ) noexcept;
 

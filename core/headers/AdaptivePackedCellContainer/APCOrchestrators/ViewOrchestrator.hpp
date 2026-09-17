@@ -124,9 +124,9 @@ namespace BidirectionalInMemGraph
         using SD = SchemaDefinition;
 
     private:
-        SD::SchemaProtocols Protocol_{SD::SchemaProtocols::PRIVATE_REGION};
-        std::span<DType> Elements_{};
-        APCUseScope Use_{};
+        SD::SchemaProtocols Protocol_;
+        std::span<DType> Elements_;
+        APCUseScope Use_;
     
     public:
         constexpr RegionView() noexcept = default;

@@ -149,13 +149,12 @@ namespace BidirectionalInMemGraph
 
             HandleOfAPCStatic::ControlValues desired = current;
             ++desired.ActiveAccess;
-            const uint64_t desired_raw = HandleOfAPCStatic::MakeControlCell(desired);
 
             if (control.compare_exchange_weak(
                 observed,
-                desired_raw,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire
+                HandleOfAPCStatic::MakeControlCell(desired),
+                std::memory_order_acquire,
+                std::memory_order_relaxed
             ))
             {
                 return APCUseScope(APCCache_.GenerationCellPtr_);
