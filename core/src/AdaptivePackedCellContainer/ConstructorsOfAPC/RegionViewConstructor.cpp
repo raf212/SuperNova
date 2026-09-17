@@ -11,7 +11,6 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         using SD = SchemaDefinition;
-        using ASG = APCStorageGeometry;
 
         std::span<SchemaDefinition::RegionSchemaRecord> region_row = APCCache_.FabricOwnerPtr_->MetrixViewRow_(
             static_cast<uint32_t>(APCCache_.APCSlotIdx_)
