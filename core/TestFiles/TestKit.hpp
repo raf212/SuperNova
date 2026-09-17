@@ -1,6 +1,16 @@
+
 #pragma once
 
-// APC/Fabric fixed-region-schema + dual-edge DAG test kit (C++20)
+// SuperNova APC/Fabric paper-quality systems test kit (C++20)
+//
+// The benchmark sections deliberately distinguish:
+//   1) a minimal one-parent vector forest lower bound,
+//   2) a feature-matched fixed-capacity vector DAG with one global mutation mutex,
+//   3) APC/Fabric with public generation/transaction/read contracts.
+//
+// Baselines are not claimed to provide APC/Fabric relocation, schema protocols,
+// generation-safe handles, retirement/ABA protection, or concurrent reader semantics.
+// Those properties are tested separately as SuperNova correctness properties.
 //
 // Put this file in core/TestFiles and compile a tiny runner:
 //
@@ -82,6 +92,38 @@ inline void Banner(const char* title)
         << "\n================================================================================\n"
         << title
         << "\n================================================================================\n";
+}
+
+inline void PrintBenchmarkEnvironment()
+{
+    std::cout
+        << "\nBENCHMARK CONTEXT\n"
+        << "  C++ language level      : " << __cplusplus << '\n'
+        << "  pointer width           : " << (sizeof(void*) * 8u) << " bits\n"
+        << "  hardware_concurrency    : " << std::thread::hardware_concurrency() << '\n'
+        << "  uint64 atomic lock-free : "
+        << (std::atomic<std::uint64_t>::is_always_lock_free ? "YES" : "NO") << '\n'
+#ifdef NDEBUG
+        << "  assertions              : disabled (NDEBUG)\n";
+#else
+        << "  assertions              : enabled\n";
+#endif
+
+#if defined(_MSC_VER)
+    std::cout << "  compiler                : MSVC " << _MSC_VER << '\n';
+#elif defined(__clang__)
+    std::cout << "  compiler                : Clang "
+        << __clang_major__ << '.' << __clang_minor__ << '.' << __clang_patchlevel__ << '\n';
+#elif defined(__GNUC__)
+    std::cout << "  compiler                : GCC "
+        << __GNUC__ << '.' << __GNUC_MINOR__ << '.' << __GNUC_PATCHLEVEL__ << '\n';
+#else
+    std::cout << "  compiler                : unknown\n";
+#endif
+
+    std::cout
+        << "  note                    : CPU model, clock policy, compiler flags, and OS\n"
+        << "                            should be recorded externally for publication.\n";
 }
 
 inline double Ratio(double numerator, double denominator) noexcept
@@ -483,6 +525,509 @@ private:
 
         child_axis = {};
         return true;
+
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Feature-matched fixed-capacity vector DAG baseline.
+//
+// This baseline supports the same two relation axes, the same parent<child DAG
+// rule, the same configurable direct-parent capacity, bidirectional traversal,
+// and atomic ReplaceParent under one global mutation mutex.
+//
+// It intentionally does NOT emulate APC/Fabric generations, schema protocols,
+// relocation, use scopes, sequence-validated public reads, or retirement.
+// Quiescent reads are raw and must not race with mutation.
+// -----------------------------------------------------------------------------
+
+template <
+    std::size_t NodeCount,
+    std::size_t PayloadWords,
+    std::uint8_t ParentCapacity
+>
+class VectorLockedDAG
+{
+    static_assert(NodeCount > 0u);
+    static_assert(ParentCapacity > 0u);
+
+    static constexpr std::uint32_t NIL = UINT32_MAX;
+    static constexpr std::size_t RELATION_COUNT =
+        NodeCount * static_cast<std::size_t>(ParentCapacity);
+
+    struct AxisState
+    {
+        std::array<std::uint32_t, ParentCapacity> ParentRelations{};
+        std::uint32_t FirstChildRelation = NIL;
+        std::uint32_t LastChildRelation = NIL;
+    };
+
+    struct Node
+    {
+        AxisState H{};
+        AxisState V{};
+        std::array<std::uint64_t, PayloadWords> Payload{};
+    };
+
+    struct Relation
+    {
+        std::uint32_t Parent = NIL;
+        std::uint32_t Child = NIL;
+        std::uint32_t Previous = NIL;
+        std::uint32_t Next = NIL;
+        bool Used = false;
+    };
+
+public:
+    bool Initialize() noexcept
+    {
+        Nodes_ = {};
+        HRelations_ = {};
+        VRelations_ = {};
+
+        for (Node& node : Nodes_)
+        {
+            node.H.ParentRelations.fill(NIL);
+            node.V.ParentRelations.fill(NIL);
+            node.H.FirstChildRelation = NIL;
+            node.H.LastChildRelation = NIL;
+            node.V.FirstChildRelation = NIL;
+            node.V.LastChildRelation = NIL;
+        }
+
+        for (Relation& relation : HRelations_) relation = Relation{};
+        for (Relation& relation : VRelations_) relation = Relation{};
+        return true;
+    }
+
+    bool AddParent(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t = DEFAULT_MAX_TRIES
+    ) noexcept
+    {
+        std::lock_guard<std::mutex> lock(GraphMutex_);
+        return AddUnlocked_(parent, child, axis);
+    }
+
+    bool RemoveParent(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t = DEFAULT_MAX_TRIES
+    ) noexcept
+    {
+        std::lock_guard<std::mutex> lock(GraphMutex_);
+        return RemoveUnlocked_(parent, child, axis);
+    }
+
+    bool ReplaceParent(
+        std::size_t old_parent,
+        std::size_t new_parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t = DEFAULT_MAX_TRIES
+    ) noexcept
+    {
+        std::lock_guard<std::mutex> lock(GraphMutex_);
+
+        if (
+            old_parent >= NodeCount ||
+            new_parent >= NodeCount ||
+            child >= NodeCount ||
+            old_parent == new_parent ||
+            new_parent >= child
+        )
+        {
+            return false;
+        }
+
+        const std::uint32_t locator =
+            FindParentRelationLocator_(child, old_parent, axis);
+
+        if (
+            locator == NIL ||
+            FindParentRelationLocator_(child, new_parent, axis) != NIL
+        )
+        {
+            return false;
+        }
+
+        Relation& relation = Relations_(axis)[locator];
+
+        UnlinkFromParent_(locator, axis);
+
+        relation.Parent = static_cast<std::uint32_t>(new_parent);
+        relation.Previous = Axis_(new_parent, axis).LastChildRelation;
+        relation.Next = NIL;
+
+        AxisState& new_parent_axis = Axis_(new_parent, axis);
+        if (new_parent_axis.LastChildRelation == NIL)
+        {
+            new_parent_axis.FirstChildRelation = locator;
+        }
+        else
+        {
+            Relations_(axis)[new_parent_axis.LastChildRelation].Next = locator;
+        }
+        new_parent_axis.LastChildRelation = locator;
+        return true;
+    }
+
+    ReadResult FindParent(
+        std::size_t child,
+        Axis axis,
+        std::uint8_t ordinal,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        if (child >= NodeCount || ordinal >= ParentCapacity)
+        {
+            return {};
+        }
+
+        const std::uint32_t locator =
+            static_cast<std::uint32_t>(
+                child * static_cast<std::size_t>(ParentCapacity) + ordinal
+            );
+
+        const Relation& relation = Relations_(axis)[locator];
+
+        return relation.Used
+            ? ReadResult{
+                relation.Parent,
+                locator,
+                ReadOperation::FOUND,
+                true
+            }
+            : ReadResult{};
+    }
+
+    ReadResult FindFirstChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        return parent < NodeCount
+            ? ChildResult_(Axis_(parent, axis).FirstChildRelation, axis)
+            : ReadResult{};
+    }
+
+    ReadResult FindLastChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        return parent < NodeCount
+            ? ChildResult_(Axis_(parent, axis).LastChildRelation, axis)
+            : ReadResult{};
+    }
+
+    ReadResult FindNextChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t locator,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        if (parent >= NodeCount || locator >= RELATION_COUNT)
+        {
+            return {};
+        }
+
+        const Relation& relation = Relations_(axis)[locator];
+        if (!relation.Used || relation.Parent != parent)
+        {
+            return {};
+        }
+
+        return ChildResult_(relation.Next, axis);
+    }
+
+    ReadResult FindPreviousChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t locator,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        if (parent >= NodeCount || locator >= RELATION_COUNT)
+        {
+            return {};
+        }
+
+        const Relation& relation = Relations_(axis)[locator];
+        if (!relation.Used || relation.Parent != parent)
+        {
+            return {};
+        }
+
+        return ChildResult_(relation.Previous, axis);
+    }
+
+    bool StorePayload(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t value,
+        bool atomic
+    ) noexcept
+    {
+        if (node >= NodeCount || word >= PayloadWords)
+        {
+            return false;
+        }
+
+        if (atomic)
+        {
+            std::atomic_ref<std::uint64_t>(Nodes_[node].Payload[word]).store(
+                value,
+                std::memory_order_release
+            );
+        }
+        else
+        {
+            Nodes_[node].Payload[word] = value;
+        }
+        return true;
+    }
+
+    bool LoadPayload(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t& value,
+        bool atomic
+    ) noexcept
+    {
+        if (node >= NodeCount || word >= PayloadWords)
+        {
+            return false;
+        }
+
+        value = atomic
+            ? std::atomic_ref<std::uint64_t>(Nodes_[node].Payload[word]).load(
+                std::memory_order_acquire
+            )
+            : Nodes_[node].Payload[word];
+
+        return true;
+    }
+
+    std::size_t ApproxStorageBytes() const noexcept
+    {
+        return
+            sizeof(Nodes_) +
+            sizeof(HRelations_) +
+            sizeof(VRelations_);
+    }
+
+private:
+    std::array<Node, NodeCount> Nodes_{};
+    std::array<Relation, RELATION_COUNT> HRelations_{};
+    std::array<Relation, RELATION_COUNT> VRelations_{};
+    std::mutex GraphMutex_{};
+
+    AxisState& Axis_(std::size_t node, Axis axis) noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? Nodes_[node].H
+            : Nodes_[node].V;
+    }
+
+    const AxisState& Axis_(std::size_t node, Axis axis) const noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? Nodes_[node].H
+            : Nodes_[node].V;
+    }
+
+    std::array<Relation, RELATION_COUNT>& Relations_(Axis axis) noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? HRelations_
+            : VRelations_;
+    }
+
+    const std::array<Relation, RELATION_COUNT>& Relations_(Axis axis) const noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? HRelations_
+            : VRelations_;
+    }
+
+    ReadResult ChildResult_(
+        std::uint32_t locator,
+        Axis axis
+    ) const noexcept
+    {
+        if (locator == NIL || locator >= RELATION_COUNT)
+        {
+            return {};
+        }
+
+        const Relation& relation = Relations_(axis)[locator];
+        return relation.Used
+            ? ReadResult{
+                relation.Child,
+                locator,
+                ReadOperation::FOUND,
+                true
+            }
+            : ReadResult{};
+    }
+
+    std::uint32_t FindParentRelationLocator_(
+        std::size_t child,
+        std::size_t parent,
+        Axis axis
+    ) const noexcept
+    {
+        if (child >= NodeCount || parent >= NodeCount)
+        {
+            return NIL;
+        }
+
+        for (std::uint8_t ordinal = 0u; ordinal < ParentCapacity; ++ordinal)
+        {
+            const std::uint32_t locator =
+                static_cast<std::uint32_t>(
+                    child * static_cast<std::size_t>(ParentCapacity) +
+                    ordinal
+                );
+
+            const Relation& relation = Relations_(axis)[locator];
+            if (
+                relation.Used &&
+                relation.Parent == parent &&
+                relation.Child == child
+            )
+            {
+                return locator;
+            }
+        }
+
+        return NIL;
+    }
+
+    void UnlinkFromParent_(
+        std::uint32_t locator,
+        Axis axis
+    ) noexcept
+    {
+        Relation& relation = Relations_(axis)[locator];
+        AxisState& parent_axis = Axis_(relation.Parent, axis);
+
+        if (relation.Previous == NIL)
+        {
+            parent_axis.FirstChildRelation = relation.Next;
+        }
+        else
+        {
+            Relations_(axis)[relation.Previous].Next = relation.Next;
+        }
+
+        if (relation.Next == NIL)
+        {
+            parent_axis.LastChildRelation = relation.Previous;
+        }
+        else
+        {
+            Relations_(axis)[relation.Next].Previous = relation.Previous;
+        }
+
+        relation.Previous = NIL;
+        relation.Next = NIL;
+    }
+
+    bool AddUnlocked_(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis
+    ) noexcept
+    {
+        if (
+            parent >= NodeCount ||
+            child >= NodeCount ||
+            parent >= child ||
+            FindParentRelationLocator_(child, parent, axis) != NIL
+        )
+        {
+            return false;
+        }
+
+        std::uint8_t ordinal = ParentCapacity;
+        for (std::uint8_t i = 0u; i < ParentCapacity; ++i)
+        {
+            const std::uint32_t locator =
+                static_cast<std::uint32_t>(
+                    child * static_cast<std::size_t>(ParentCapacity) + i
+                );
+            if (!Relations_(axis)[locator].Used)
+            {
+                ordinal = i;
+                break;
+            }
+        }
+
+        if (ordinal == ParentCapacity)
+        {
+            return false;
+        }
+
+        const std::uint32_t locator =
+            static_cast<std::uint32_t>(
+                child * static_cast<std::size_t>(ParentCapacity) + ordinal
+            );
+
+        Relation& relation = Relations_(axis)[locator];
+        AxisState& parent_axis = Axis_(parent, axis);
+
+        relation.Used = true;
+        relation.Parent = static_cast<std::uint32_t>(parent);
+        relation.Child = static_cast<std::uint32_t>(child);
+        relation.Previous = parent_axis.LastChildRelation;
+        relation.Next = NIL;
+
+        if (parent_axis.LastChildRelation == NIL)
+        {
+            parent_axis.FirstChildRelation = locator;
+        }
+        else
+        {
+            Relations_(axis)[parent_axis.LastChildRelation].Next = locator;
+        }
+        parent_axis.LastChildRelation = locator;
+
+        Axis_(child, axis).ParentRelations[ordinal] = locator;
+        return true;
+    }
+
+    bool RemoveUnlocked_(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis
+    ) noexcept
+    {
+        const std::uint32_t locator =
+            FindParentRelationLocator_(child, parent, axis);
+
+        if (locator == NIL)
+        {
+            return false;
+        }
+
+        UnlinkFromParent_(locator, axis);
+
+        const std::uint8_t ordinal =
+            static_cast<std::uint8_t>(
+                locator % static_cast<std::uint32_t>(ParentCapacity)
+            );
+
+        Axis_(child, axis).ParentRelations[ordinal] = NIL;
+        Relations_(axis)[locator] = Relation{};
+        return true;
     }
 };
 
@@ -507,6 +1052,14 @@ public:
 class ResolverTestFabric final : public APCFinilizer
 {
 public:
+    std::size_t SlabBytesForTest() const noexcept
+    {
+        return FabCache_
+            ? static_cast<std::size_t>(FabCache_->SlabCellCount_) *
+                sizeof(std::uint64_t)
+            : 0u;
+    }
+
     bool ResolveExistingForTest(
         std::uint32_t slot,
         AdaptivePackedCellContainer& apc,
@@ -525,7 +1078,7 @@ public:
     using SD = SchemaDefinition;
     static constexpr std::uint32_t SLOT_WORDS = MINIMUM_APC_CELL_COUNT;
     static constexpr std::uint32_t FABRIC_SLOT_COUNT =
-        static_cast<std::uint32_t>(NodeCount + 8u);
+        static_cast<std::uint32_t>(NodeCount);
     static constexpr std::uint8_t PARENT_CAPACITY = ParentCapacity;
 
     bool Initialize() noexcept
@@ -850,7 +1403,12 @@ public:
         return Nodes_[index];
     }
 
-    APCFinilizer Fabric_{};
+    std::size_t ApproxStorageBytes() const noexcept
+    {
+        return Fabric_.SlabBytesForTest();
+    }
+
+    ResolverTestFabric Fabric_{};
 
 private:
     std::array<TestAPC, NodeCount> Nodes_{};
@@ -1086,32 +1644,64 @@ constexpr std::uint32_t TRAVERSAL_ROUNDS = 4'000u;
 constexpr std::uint32_t PAYLOAD_ROUNDS = 100u;
 constexpr std::uint32_t GRAPH_PAYLOAD_ROUNDS = 1'000u;
 constexpr std::uint32_t MUTATION_ROUNDS = 512u;
-constexpr std::uint32_t MEASURED_RUNS = 5u;
+constexpr std::uint32_t MEASURED_RUNS = 9u;
+constexpr std::uint32_t CONSTRUCTION_RUNS = 7u;
 
-using VectorBackend = VectorLockedForest<NODE_COUNT, PAYLOAD_WORDS>;
-using APCBackend = APCFabricBackend<NODE_COUNT, PAYLOAD_WORDS, PARENT_CAPACITY>;
+using LowerBoundBackend =
+    VectorLockedForest<NODE_COUNT, PAYLOAD_WORDS>;
+
+using MatchedBackend =
+    VectorLockedDAG<
+        NODE_COUNT,
+        PAYLOAD_WORDS,
+        PARENT_CAPACITY
+    >;
+
+using APCBackend =
+    APCFabricBackend<
+        NODE_COUNT,
+        PAYLOAD_WORDS,
+        PARENT_CAPACITY
+    >;
 
 constexpr std::size_t Reverse6(std::size_t value) noexcept
 {
     std::size_t result = 0u;
     for (std::size_t bit = 0u; bit < 6u; ++bit)
     {
-        result = (result << 1u) | ((value >> bit) & 1u);
+        result =
+            (result << 1u) |
+            ((value >> bit) & 1u);
     }
     return result;
 }
 
-constexpr std::array<std::size_t, CHAIN_LENGTH> MakeVerticalOrder() noexcept
+constexpr std::array<
+    std::size_t,
+    CHAIN_LENGTH
+> MakeVerticalOrder() noexcept
 {
-    std::array<std::size_t, CHAIN_LENGTH> order{};
-    for (std::size_t i = 0u; i < CHAIN_LENGTH; ++i)
+    std::array<
+        std::size_t,
+        CHAIN_LENGTH
+    > order{};
+
+    for (
+        std::size_t i = 0u;
+        i < CHAIN_LENGTH;
+        ++i
+    )
     {
-        order[i] = CHAIN_BEGIN + Reverse6(i);
+        order[i] =
+            CHAIN_BEGIN +
+            Reverse6(i);
     }
+
     return order;
 }
 
-constexpr auto VERTICAL_ORDER = MakeVerticalOrder();
+constexpr auto VERTICAL_ORDER =
+    MakeVerticalOrder();
 
 template <typename Backend>
 bool Build(Backend& backend)
@@ -1121,40 +1711,87 @@ bool Build(Backend& backend)
         return false;
     }
 
-    for (std::size_t child = CHAIN_BEGIN + 1u; child <= CHAIN_END; ++child)
+    for (
+        std::size_t child =
+            CHAIN_BEGIN + 1u;
+        child <= CHAIN_END;
+        ++child
+    )
     {
-        if (!backend.AddParent(child - 1u, child, Axis::HORIZONTAL))
+        if (!backend.AddParent(
+            child - 1u,
+            child,
+            Axis::HORIZONTAL
+        ))
         {
             return false;
         }
     }
-    for (std::size_t child : VERTICAL_ORDER)
+
+    for (
+        std::size_t child :
+        VERTICAL_ORDER
+    )
     {
-        if (!backend.AddParent(MAIN_V_PARENT, child, Axis::VERTICAL))
+        if (!backend.AddParent(
+            MAIN_V_PARENT,
+            child,
+            Axis::VERTICAL
+        ))
         {
             return false;
         }
     }
-    if (!backend.AddParent(AUX_V_PARENT, AUX_ANCHOR, Axis::VERTICAL))
+
+    if (!backend.AddParent(
+        AUX_V_PARENT,
+        AUX_ANCHOR,
+        Axis::VERTICAL
+    ))
     {
         return false;
     }
 
-    for (std::size_t node = 0u; node < NODE_COUNT; ++node)
+    for (
+        std::size_t node = 0u;
+        node < NODE_COUNT;
+        ++node
+    )
     {
-        for (std::uint32_t word = 0u; word < PAYLOAD_WORDS; ++word)
+        for (
+            std::uint32_t word = 0u;
+            word < PAYLOAD_WORDS;
+            ++word
+        )
         {
             const std::uint64_t value =
-                (static_cast<std::uint64_t>(node + 1u) << 32u) | word;
+                (
+                    static_cast<std::uint64_t>(
+                        node + 1u
+                    ) << 32u
+                ) |
+                word;
+
             if (
-                !backend.StorePayload(node, word, value, false) ||
-                !backend.StorePayload(node, word, value, true)
+                !backend.StorePayload(
+                    node,
+                    word,
+                    value,
+                    false
+                ) ||
+                !backend.StorePayload(
+                    node,
+                    word,
+                    value,
+                    true
+                )
             )
             {
                 return false;
             }
         }
     }
+
     return true;
 }
 
@@ -1170,7 +1807,12 @@ struct Timing
     {
         return Operations == 0u
             ? 0.0
-            : static_cast<double>(ElapsedNs) / static_cast<double>(Operations);
+            : static_cast<double>(
+                ElapsedNs
+            ) /
+                static_cast<double>(
+                    Operations
+                );
     }
 };
 
@@ -1179,24 +1821,54 @@ Timing HorizontalForward(Backend& backend)
 {
     Timing timing{};
     const auto begin = Clock::now();
-    for (std::uint32_t round = 0u; round < TRAVERSAL_ROUNDS; ++round)
+
+    for (
+        std::uint32_t round = 0u;
+        round < TRAVERSAL_ROUNDS;
+        ++round
+    )
     {
-        for (std::size_t parent = CHAIN_BEGIN; parent < CHAIN_END; ++parent)
+        for (
+            std::size_t parent =
+                CHAIN_BEGIN;
+            parent < CHAIN_END;
+            ++parent
+        )
         {
-            const ReadResult read = backend.FindFirstChild(parent, Axis::HORIZONTAL);
+            const ReadResult read =
+                backend.FindFirstChild(
+                    parent,
+                    Axis::HORIZONTAL
+                );
+
             timing.Reads.Observe(read);
-            if (!read.IsFound() || read.Node != parent + 1u)
+
+            if (
+                !read.IsFound() ||
+                read.Node != parent + 1u
+            )
             {
                 return {};
             }
-            timing.Checksum += read.Node + 1u;
+
+            timing.Checksum +=
+                read.Node + 1u;
         }
     }
-    timing.ElapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - begin
-    ).count();
-    timing.Operations = static_cast<std::uint64_t>(TRAVERSAL_ROUNDS) *
+
+    timing.ElapsedNs =
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds
+        >(
+            Clock::now() - begin
+        ).count();
+
+    timing.Operations =
+        static_cast<std::uint64_t>(
+            TRAVERSAL_ROUNDS
+        ) *
         (CHAIN_LENGTH - 1u);
+
     timing.Ok = true;
     return timing;
 }
@@ -1206,44 +1878,98 @@ Timing HorizontalBackward(Backend& backend)
 {
     Timing timing{};
     const auto begin = Clock::now();
-    for (std::uint32_t round = 0u; round < TRAVERSAL_ROUNDS; ++round)
+
+    for (
+        std::uint32_t round = 0u;
+        round < TRAVERSAL_ROUNDS;
+        ++round
+    )
     {
-        for (std::size_t child = CHAIN_END; child > CHAIN_BEGIN; --child)
+        for (
+            std::size_t child = CHAIN_END;
+            child > CHAIN_BEGIN;
+            --child
+        )
         {
-            const ReadResult read = backend.FindParent(child, Axis::HORIZONTAL, 0u);
+            const ReadResult read =
+                backend.FindParent(
+                    child,
+                    Axis::HORIZONTAL,
+                    0u
+                );
+
             timing.Reads.Observe(read);
-            if (!read.IsFound() || read.Node != child - 1u)
+
+            if (
+                !read.IsFound() ||
+                read.Node != child - 1u
+            )
             {
                 return {};
             }
-            timing.Checksum += read.Node + 1u;
+
+            timing.Checksum +=
+                read.Node + 1u;
         }
     }
-    timing.ElapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - begin
-    ).count();
-    timing.Operations = static_cast<std::uint64_t>(TRAVERSAL_ROUNDS) *
+
+    timing.ElapsedNs =
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds
+        >(
+            Clock::now() - begin
+        ).count();
+
+    timing.Operations =
+        static_cast<std::uint64_t>(
+            TRAVERSAL_ROUNDS
+        ) *
         (CHAIN_LENGTH - 1u);
+
     timing.Ok = true;
     return timing;
 }
 
 template <typename Backend>
-Timing VerticalForward(Backend& backend, bool with_payload)
+Timing VerticalForward(
+    Backend& backend,
+    bool with_payload
+)
 {
     Timing timing{};
-    const std::uint32_t rounds = with_payload
-        ? GRAPH_PAYLOAD_ROUNDS
-        : TRAVERSAL_ROUNDS;
+
+    const std::uint32_t rounds =
+        with_payload
+            ? GRAPH_PAYLOAD_ROUNDS
+            : TRAVERSAL_ROUNDS;
+
     const auto begin = Clock::now();
 
-    for (std::uint32_t round = 0u; round < rounds; ++round)
+    for (
+        std::uint32_t round = 0u;
+        round < rounds;
+        ++round
+    )
     {
-        ReadResult read = backend.FindFirstChild(MAIN_V_PARENT, Axis::VERTICAL);
+        ReadResult read =
+            backend.FindFirstChild(
+                MAIN_V_PARENT,
+                Axis::VERTICAL
+            );
+
         timing.Reads.Observe(read);
-        for (std::size_t i = 0u; i < CHAIN_LENGTH; ++i)
+
+        for (
+            std::size_t i = 0u;
+            i < CHAIN_LENGTH;
+            ++i
+        )
         {
-            if (!read.IsFound() || read.Node != VERTICAL_ORDER[i])
+            if (
+                !read.IsFound() ||
+                read.Node !=
+                    VERTICAL_ORDER[i]
+            )
             {
                 return {};
             }
@@ -1251,131 +1977,262 @@ Timing VerticalForward(Backend& backend, bool with_payload)
             if (with_payload)
             {
                 std::uint64_t value = 0u;
+
                 if (!backend.LoadPayload(
                     read.Node,
-                    static_cast<std::uint32_t>(i % PAYLOAD_WORDS),
+                    static_cast<std::uint32_t>(
+                        i % PAYLOAD_WORDS
+                    ),
                     value,
                     false
                 ))
                 {
                     return {};
                 }
+
                 timing.Checksum += value;
             }
             else
             {
-                timing.Checksum += read.Node + 1u;
+                timing.Checksum +=
+                    read.Node + 1u;
             }
 
-            const std::uint32_t cursor = read.Locator;
-            read = backend.FindNextChild(MAIN_V_PARENT, Axis::VERTICAL, cursor);
+            const std::uint32_t cursor =
+                read.Locator;
+
+            read =
+                backend.FindNextChild(
+                    MAIN_V_PARENT,
+                    Axis::VERTICAL,
+                    cursor
+                );
+
             timing.Reads.Observe(read);
         }
+
         if (!read.IsNone())
         {
             return {};
         }
     }
 
-    timing.ElapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - begin
-    ).count();
-    timing.Operations = static_cast<std::uint64_t>(rounds) * CHAIN_LENGTH;
+    timing.ElapsedNs =
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds
+        >(
+            Clock::now() - begin
+        ).count();
+
+    timing.Operations =
+        static_cast<std::uint64_t>(
+            rounds
+        ) *
+        CHAIN_LENGTH;
+
     timing.Ok = true;
     return timing;
 }
 
 template <typename Backend>
-Timing VerticalBackward(Backend& backend)
+Timing VerticalBackward(
+    Backend& backend
+)
 {
     Timing timing{};
     const auto begin = Clock::now();
-    for (std::uint32_t round = 0u; round < TRAVERSAL_ROUNDS; ++round)
+
+    for (
+        std::uint32_t round = 0u;
+        round < TRAVERSAL_ROUNDS;
+        ++round
+    )
     {
-        ReadResult read = backend.FindLastChild(MAIN_V_PARENT, Axis::VERTICAL);
+        ReadResult read =
+            backend.FindLastChild(
+                MAIN_V_PARENT,
+                Axis::VERTICAL
+            );
+
         timing.Reads.Observe(read);
-        for (std::size_t i = CHAIN_LENGTH; i-- > 0u;)
+
+        for (
+            std::size_t i = CHAIN_LENGTH;
+            i-- > 0u;
+        )
         {
-            if (!read.IsFound() || read.Node != VERTICAL_ORDER[i])
+            if (
+                !read.IsFound() ||
+                read.Node !=
+                    VERTICAL_ORDER[i]
+            )
             {
                 return {};
             }
-            timing.Checksum += read.Node + 1u;
-            const std::uint32_t cursor = read.Locator;
-            read = backend.FindPreviousChild(MAIN_V_PARENT, Axis::VERTICAL, cursor);
+
+            timing.Checksum +=
+                read.Node + 1u;
+
+            const std::uint32_t cursor =
+                read.Locator;
+
+            read =
+                backend.FindPreviousChild(
+                    MAIN_V_PARENT,
+                    Axis::VERTICAL,
+                    cursor
+                );
+
             timing.Reads.Observe(read);
         }
+
         if (!read.IsNone())
         {
             return {};
         }
     }
-    timing.ElapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - begin
-    ).count();
-    timing.Operations = static_cast<std::uint64_t>(TRAVERSAL_ROUNDS) * CHAIN_LENGTH;
+
+    timing.ElapsedNs =
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds
+        >(
+            Clock::now() - begin
+        ).count();
+
+    timing.Operations =
+        static_cast<std::uint64_t>(
+            TRAVERSAL_ROUNDS
+        ) *
+        CHAIN_LENGTH;
+
     timing.Ok = true;
     return timing;
 }
 
 template <typename Backend>
-Timing PayloadRead(Backend& backend, bool atomic)
+Timing PayloadRead(
+    Backend& backend,
+    bool atomic
+)
 {
     Timing timing{};
     const auto begin = Clock::now();
-    for (std::uint32_t round = 0u; round < PAYLOAD_ROUNDS; ++round)
+
+    for (
+        std::uint32_t round = 0u;
+        round < PAYLOAD_ROUNDS;
+        ++round
+    )
     {
-        for (std::size_t node = CHAIN_BEGIN; node <= CHAIN_END; ++node)
+        for (
+            std::size_t node = CHAIN_BEGIN;
+            node <= CHAIN_END;
+            ++node
+        )
         {
-            for (std::uint32_t word = 0u; word < PAYLOAD_WORDS; ++word)
+            for (
+                std::uint32_t word = 0u;
+                word < PAYLOAD_WORDS;
+                ++word
+            )
             {
                 std::uint64_t value = 0u;
-                if (!backend.LoadPayload(node, word, value, atomic))
+
+                if (!backend.LoadPayload(
+                    node,
+                    word,
+                    value,
+                    atomic
+                ))
                 {
                     return {};
                 }
+
                 timing.Checksum += value;
             }
         }
     }
-    timing.ElapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - begin
-    ).count();
-    timing.Operations = static_cast<std::uint64_t>(PAYLOAD_ROUNDS) *
-        CHAIN_LENGTH * PAYLOAD_WORDS;
+
+    timing.ElapsedNs =
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds
+        >(
+            Clock::now() - begin
+        ).count();
+
+    timing.Operations =
+        static_cast<std::uint64_t>(
+            PAYLOAD_ROUNDS
+        ) *
+        CHAIN_LENGTH *
+        PAYLOAD_WORDS;
+
     timing.Ok = true;
     return timing;
 }
 
 template <typename Backend>
-Timing ParentReplacement(Backend& backend, Axis axis)
+Timing ParentReplacement(
+    Backend& backend,
+    Axis axis
+)
 {
-    const std::size_t child = CHAIN_END;
-    const std::size_t parent_a = axis == Axis::HORIZONTAL
-        ? CHAIN_END - 1u
-        : MAIN_V_PARENT;
-    const std::size_t parent_b = axis == Axis::HORIZONTAL
-        ? CHAIN_END - 2u
-        : AUX_V_PARENT;
+    const std::size_t child =
+        CHAIN_END;
+
+    const std::size_t parent_a =
+        axis == Axis::HORIZONTAL
+            ? CHAIN_END - 1u
+            : MAIN_V_PARENT;
+
+    const std::size_t parent_b =
+        axis == Axis::HORIZONTAL
+            ? CHAIN_END - 2u
+            : AUX_V_PARENT;
 
     Timing timing{};
     std::size_t current = parent_a;
+
     const auto begin = Clock::now();
-    for (std::uint32_t i = 0u; i < MUTATION_ROUNDS; ++i)
+
+    for (
+        std::uint32_t i = 0u;
+        i < MUTATION_ROUNDS;
+        ++i
+    )
     {
-        const std::size_t next = current == parent_a ? parent_b : parent_a;
-        if (!backend.ReplaceParent(current, next, child, axis))
+        const std::size_t next =
+            current == parent_a
+                ? parent_b
+                : parent_a;
+
+        if (!backend.ReplaceParent(
+            current,
+            next,
+            child,
+            axis
+        ))
         {
             return {};
         }
+
         current = next;
         ++timing.Operations;
     }
-    timing.ElapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - begin
-    ).count();
-    timing.Checksum = timing.Operations;
-    timing.Ok = current == parent_a;
+
+    timing.ElapsedNs =
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds
+        >(
+            Clock::now() - begin
+        ).count();
+
+    timing.Checksum =
+        timing.Operations;
+
+    timing.Ok =
+        current == parent_a;
+
     return timing;
 }
 
@@ -1393,143 +2250,506 @@ enum class Metric : std::uint8_t
     COUNT
 };
 
-constexpr std::size_t METRIC_COUNT = static_cast<std::size_t>(Metric::COUNT);
+constexpr std::size_t METRIC_COUNT =
+    static_cast<std::size_t>(
+        Metric::COUNT
+    );
 
-constexpr const char* MetricName(Metric metric) noexcept
+constexpr const char* MetricName(
+    Metric metric
+) noexcept
 {
     switch (metric)
     {
-    case Metric::H_FORWARD: return "H forward sequential";
-    case Metric::H_BACKWARD: return "H backward sequential";
-    case Metric::V_FORWARD: return "V forward scrambled";
-    case Metric::V_BACKWARD: return "V backward scrambled";
-    case Metric::PAYLOAD_DIRECT: return "payload direct read";
-    case Metric::PAYLOAD_ATOMIC: return "payload atomic read";
-    case Metric::GRAPH_PAYLOAD: return "scrambled graph+payload";
-    case Metric::REPLACE_H_PARENT: return "atomic H parent replace";
-    case Metric::REPLACE_V_PARENT: return "atomic V parent replace";
-    default: return "unknown";
+    case Metric::H_FORWARD:
+        return "H forward sequential";
+    case Metric::H_BACKWARD:
+        return "H parent read";
+    case Metric::V_FORWARD:
+        return "V child cursor scrambled";
+    case Metric::V_BACKWARD:
+        return "V reverse cursor scrambled";
+    case Metric::PAYLOAD_DIRECT:
+        return "payload direct read";
+    case Metric::PAYLOAD_ATOMIC:
+        return "payload atomic read";
+    case Metric::GRAPH_PAYLOAD:
+        return "graph+payload read";
+    case Metric::REPLACE_H_PARENT:
+        return "H parent replace";
+    case Metric::REPLACE_V_PARENT:
+        return "V parent replace";
+    default:
+        return "unknown";
     }
 }
 
 template <typename Backend>
-Timing RunMetric(Backend& backend, Metric metric)
+Timing RunMetric(
+    Backend& backend,
+    Metric metric
+)
 {
     switch (metric)
     {
-    case Metric::H_FORWARD: return HorizontalForward(backend);
-    case Metric::H_BACKWARD: return HorizontalBackward(backend);
-    case Metric::V_FORWARD: return VerticalForward(backend, false);
-    case Metric::V_BACKWARD: return VerticalBackward(backend);
-    case Metric::PAYLOAD_DIRECT: return PayloadRead(backend, false);
-    case Metric::PAYLOAD_ATOMIC: return PayloadRead(backend, true);
-    case Metric::GRAPH_PAYLOAD: return VerticalForward(backend, true);
-    case Metric::REPLACE_H_PARENT: return ParentReplacement(backend, Axis::HORIZONTAL);
-    case Metric::REPLACE_V_PARENT: return ParentReplacement(backend, Axis::VERTICAL);
-    default: return {};
+    case Metric::H_FORWARD:
+        return HorizontalForward(backend);
+    case Metric::H_BACKWARD:
+        return HorizontalBackward(backend);
+    case Metric::V_FORWARD:
+        return VerticalForward(
+            backend,
+            false
+        );
+    case Metric::V_BACKWARD:
+        return VerticalBackward(backend);
+    case Metric::PAYLOAD_DIRECT:
+        return PayloadRead(
+            backend,
+            false
+        );
+    case Metric::PAYLOAD_ATOMIC:
+        return PayloadRead(
+            backend,
+            true
+        );
+    case Metric::GRAPH_PAYLOAD:
+        return VerticalForward(
+            backend,
+            true
+        );
+    case Metric::REPLACE_H_PARENT:
+        return ParentReplacement(
+            backend,
+            Axis::HORIZONTAL
+        );
+    case Metric::REPLACE_V_PARENT:
+        return ParentReplacement(
+            backend,
+            Axis::VERTICAL
+        );
+    default:
+        return {};
     }
+}
+
+template <typename Backend>
+std::optional<double>
+ConstructionMedianUs()
+{
+    std::array<
+        double,
+        CONSTRUCTION_RUNS
+    > samples{};
+
+    for (
+        std::uint32_t run = 0u;
+        run < CONSTRUCTION_RUNS;
+        ++run
+    )
+    {
+        const auto begin =
+            Clock::now();
+
+        Backend backend{};
+
+        if (!Build(backend))
+        {
+            return std::nullopt;
+        }
+
+        const auto elapsed =
+            std::chrono::duration_cast<
+                std::chrono::nanoseconds
+            >(
+                Clock::now() - begin
+            ).count();
+
+        samples[run] =
+            static_cast<double>(
+                elapsed
+            ) /
+            1000.0;
+    }
+
+    return Median(samples);
 }
 
 inline Result Run()
 {
-    Banner("TEST 1 - DAG TRAVERSAL / PAYLOAD / ATOMIC-PARENT-REPLACE BASELINE");
+    Banner(
+        "TEST 1 - QUIESCENT COST / STORAGE FOOTPRINT / BASELINE FAIRNESS"
+    );
 
-    const auto vector_build_begin = Clock::now();
-    VectorBackend vector_backend{};
-    if (!Build(vector_backend)) return Result::FAIL;
-    const auto vector_build_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - vector_build_begin
-    ).count();
+    std::cout
+        << "Workload: identical 67-node H/V graph, 32 payload words/node, "
+        << "K=4 structural capacity.\n"
+        << "Baseline A is a one-parent-per-axis lower bound.\n"
+        << "Baseline B supports the same K-parent H/V DAG rule under one global mutation mutex.\n"
+        << "APC/Fabric additionally provides generations, schema protocols, relocation metadata,\n"
+        << "and sequence-validated public read/mutation contracts.\n\n";
 
-    const auto apc_build_begin = Clock::now();
-    APCBackend apc_backend{};
-    if (!Build(apc_backend)) return Result::FAIL;
-    const auto apc_build_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - apc_build_begin
-    ).count();
+    const std::optional<double>
+        lower_build_us =
+            ConstructionMedianUs<
+                LowerBoundBackend
+            >();
 
-    const GraphProof initial_proof =
-        ProveQuiescentCombinedDAG<NODE_COUNT, PARENT_CAPACITY>(apc_backend);
-    if (!initial_proof.Passed())
+    const std::optional<double>
+        matched_build_us =
+            ConstructionMedianUs<
+                MatchedBackend
+            >();
+
+    const std::optional<double>
+        apc_build_us =
+            ConstructionMedianUs<
+                APCBackend
+            >();
+
+    if (
+        !lower_build_us.has_value() ||
+        !matched_build_us.has_value() ||
+        !apc_build_us.has_value()
+    )
     {
         return Result::FAIL;
     }
 
-    std::array<std::array<double, MEASURED_RUNS>, METRIC_COUNT> vector_samples{};
-    std::array<std::array<double, MEASURED_RUNS>, METRIC_COUNT> apc_samples{};
-    ReadCounts vector_reads{};
-    ReadCounts apc_reads{};
+    LowerBoundBackend lower{};
+    MatchedBackend matched{};
+    APCBackend apc{};
 
-    for (std::uint32_t run = 0u; run < MEASURED_RUNS; ++run)
+    if (
+        !Build(lower) ||
+        !Build(matched) ||
+        !Build(apc)
+    )
     {
-        for (std::size_t index = 0u; index < METRIC_COUNT; ++index)
+        return Result::FAIL;
+    }
+
+    const GraphProof lower_proof =
+        ProveQuiescentCombinedDAG<
+            NODE_COUNT,
+            PARENT_CAPACITY
+        >(lower);
+
+    const GraphProof matched_proof =
+        ProveQuiescentCombinedDAG<
+            NODE_COUNT,
+            PARENT_CAPACITY
+        >(matched);
+
+    const GraphProof apc_initial_proof =
+        ProveQuiescentCombinedDAG<
+            NODE_COUNT,
+            PARENT_CAPACITY
+        >(apc);
+
+    if (
+        !lower_proof.Passed() ||
+        !matched_proof.Passed() ||
+        !apc_initial_proof.Passed()
+    )
+    {
+        return Result::FAIL;
+    }
+
+    // Untimed warm-up.
+    for (
+        std::size_t index = 0u;
+        index < METRIC_COUNT;
+        ++index
+    )
+    {
+        const Metric metric =
+            static_cast<Metric>(index);
+
+        const Timing a =
+            RunMetric(lower, metric);
+
+        const Timing b =
+            RunMetric(matched, metric);
+
+        const Timing c =
+            RunMetric(apc, metric);
+
+        if (
+            !a.Ok ||
+            !b.Ok ||
+            !c.Ok ||
+            a.Checksum != b.Checksum ||
+            b.Checksum != c.Checksum
+        )
         {
-            const Metric metric = static_cast<Metric>(index);
-            Timing vector_timing{};
-            Timing apc_timing{};
-
-            if ((run & 1u) == 0u)
-            {
-                vector_timing = RunMetric(vector_backend, metric);
-                apc_timing = RunMetric(apc_backend, metric);
-            }
-            else
-            {
-                apc_timing = RunMetric(apc_backend, metric);
-                vector_timing = RunMetric(vector_backend, metric);
-            }
-
-            if (
-                !vector_timing.Ok ||
-                !apc_timing.Ok ||
-                vector_timing.Checksum != apc_timing.Checksum
-            )
-            {
-                std::cout << "  failed metric: " << MetricName(metric) << '\n';
-                return Result::FAIL;
-            }
-
-            vector_samples[index][run] = vector_timing.NsPerOperation();
-            apc_samples[index][run] = apc_timing.NsPerOperation();
-            vector_reads.Add(vector_timing.Reads);
-            apc_reads.Add(apc_timing.Reads);
+            return Result::FAIL;
         }
     }
 
-    const GraphProof final_proof =
-        ProveQuiescentCombinedDAG<NODE_COUNT, PARENT_CAPACITY>(apc_backend);
+    std::array<
+        std::array<
+            double,
+            MEASURED_RUNS
+        >,
+        METRIC_COUNT
+    > lower_samples{};
 
-    std::cout
-        << "Correctness: explicit parent reads, cursor child traversal, and H-union-V proof: "
-        << (final_proof.Passed() ? "PASS" : "FAIL") << "\n\n"
-        << "CONSTRUCTION\n"
-        << "  vector+locked forest: " << vector_build_ns / 1000 << " us\n"
-        << "  APC+Fabric DAG       : " << apc_build_ns / 1000 << " us\n\n"
-        << "MEDIAN COST PER OPERATION\n";
+    std::array<
+        std::array<
+            double,
+            MEASURED_RUNS
+        >,
+        METRIC_COUNT
+    > matched_samples{};
 
-    for (std::size_t index = 0u; index < METRIC_COUNT; ++index)
+    std::array<
+        std::array<
+            double,
+            MEASURED_RUNS
+        >,
+        METRIC_COUNT
+    > apc_samples{};
+
+    ReadCounts lower_reads{};
+    ReadCounts matched_reads{};
+    ReadCounts apc_reads{};
+
+    for (
+        std::uint32_t run = 0u;
+        run < MEASURED_RUNS;
+        ++run
+    )
     {
-        const double vector_ns = Median(vector_samples[index]);
-        const double apc_ns = Median(apc_samples[index]);
-        std::cout
-            << std::left << std::setw(29) << MetricName(static_cast<Metric>(index))
-            << " vector-base=" << std::right << std::setw(10)
-            << std::fixed << std::setprecision(2) << vector_ns << " ns/op"
-            << "  APC=" << std::setw(10) << apc_ns << " ns/op"
-            << "  ratio=" << std::setw(8) << Ratio(apc_ns, vector_ns) << "x\n";
+        for (
+            std::size_t index = 0u;
+            index < METRIC_COUNT;
+            ++index
+        )
+        {
+            const Metric metric =
+                static_cast<Metric>(index);
+
+            Timing lower_timing{};
+            Timing matched_timing{};
+            Timing apc_timing{};
+
+            // Rotate measurement order to reduce systematic first/last bias.
+            switch (run % 3u)
+            {
+            case 0u:
+                lower_timing =
+                    RunMetric(lower, metric);
+                matched_timing =
+                    RunMetric(matched, metric);
+                apc_timing =
+                    RunMetric(apc, metric);
+                break;
+
+            case 1u:
+                matched_timing =
+                    RunMetric(matched, metric);
+                apc_timing =
+                    RunMetric(apc, metric);
+                lower_timing =
+                    RunMetric(lower, metric);
+                break;
+
+            default:
+                apc_timing =
+                    RunMetric(apc, metric);
+                lower_timing =
+                    RunMetric(lower, metric);
+                matched_timing =
+                    RunMetric(matched, metric);
+                break;
+            }
+
+            if (
+                !lower_timing.Ok ||
+                !matched_timing.Ok ||
+                !apc_timing.Ok ||
+                lower_timing.Checksum !=
+                    matched_timing.Checksum ||
+                matched_timing.Checksum !=
+                    apc_timing.Checksum
+            )
+            {
+                std::cout
+                    << "  failed metric: "
+                    << MetricName(metric)
+                    << '\n';
+
+                return Result::FAIL;
+            }
+
+            lower_samples[index][run] =
+                lower_timing.NsPerOperation();
+
+            matched_samples[index][run] =
+                matched_timing.NsPerOperation();
+
+            apc_samples[index][run] =
+                apc_timing.NsPerOperation();
+
+            lower_reads.Add(
+                lower_timing.Reads
+            );
+
+            matched_reads.Add(
+                matched_timing.Reads
+            );
+
+            apc_reads.Add(
+                apc_timing.Reads
+            );
+        }
     }
 
-    std::cout << "\nPUBLIC READ OUTCOMES\n";
-    PrintReadCounts("vector locked forest", vector_reads);
-    PrintReadCounts("APC/Fabric DAG", apc_reads);
+    const GraphProof apc_final_proof =
+        ProveQuiescentCombinedDAG<
+            NODE_COUNT,
+            PARENT_CAPACITY
+        >(apc);
 
-    const bool ok = final_proof.Passed() &&
-        vector_reads.BadContract == 0u &&
+    const GraphProof matched_final_proof =
+        ProveQuiescentCombinedDAG<
+            NODE_COUNT,
+            PARENT_CAPACITY
+        >(matched);
+
+    std::cout
+        << "Correctness before/after timing: "
+        << (
+            apc_final_proof.Passed() &&
+            matched_final_proof.Passed()
+                ? "PASS"
+                : "FAIL"
+        )
+        << "\n\n"
+        << "MEDIAN CONSTRUCTION ("
+        << CONSTRUCTION_RUNS
+        << " fresh builds)\n"
+        << "  vector forest lower bound : "
+        << std::fixed
+        << std::setprecision(2)
+        << lower_build_us.value()
+        << " us\n"
+        << "  vector K-parent DAG/mutex  : "
+        << matched_build_us.value()
+        << " us\n"
+        << "  APC/Fabric                 : "
+        << apc_build_us.value()
+        << " us\n\n"
+        << "ALLOCATED STORAGE FOR TEST BACKING\n"
+        << "  vector forest lower bound : "
+        << lower.ApproxStorageBytes()
+        << " bytes\n"
+        << "  vector K-parent DAG/mutex  : "
+        << matched.ApproxStorageBytes()
+        << " bytes\n"
+        << "  APC/Fabric slab            : "
+        << apc.ApproxStorageBytes()
+        << " bytes\n"
+        << "  note: these are representation/backing bytes, not a heap-profiler total.\n\n"
+        << "MEDIAN COST PER OPERATION ("
+        << MEASURED_RUNS
+        << " measured runs after warm-up)\n";
+
+    std::cout
+        << std::left
+        << std::setw(28) << "metric"
+        << std::right
+        << std::setw(13) << "forest-LB"
+        << std::setw(13) << "vector-DAG"
+        << std::setw(13) << "APC"
+        << std::setw(13) << "APC/DAG"
+        << '\n';
+
+    for (
+        std::size_t index = 0u;
+        index < METRIC_COUNT;
+        ++index
+    )
+    {
+        const double lower_ns =
+            Median(
+                lower_samples[index]
+            );
+
+        const double matched_ns =
+            Median(
+                matched_samples[index]
+            );
+
+        const double apc_ns =
+            Median(
+                apc_samples[index]
+            );
+
+        std::cout
+            << std::left
+            << std::setw(28)
+            << MetricName(
+                static_cast<Metric>(
+                    index
+                )
+            )
+            << std::right
+            << std::setw(10)
+            << std::fixed
+            << std::setprecision(2)
+            << lower_ns
+            << " ns"
+            << std::setw(10)
+            << matched_ns
+            << " ns"
+            << std::setw(10)
+            << apc_ns
+            << " ns"
+            << std::setw(10)
+            << Ratio(
+                apc_ns,
+                matched_ns
+            )
+            << "x\n";
+    }
+
+    std::cout
+        << "\nPUBLIC READ OUTCOMES\n";
+
+    PrintReadCounts(
+        "vector forest lower bound",
+        lower_reads
+    );
+
+    PrintReadCounts(
+        "vector K-parent DAG",
+        matched_reads
+    );
+
+    PrintReadCounts(
+        "APC/Fabric DAG",
+        apc_reads
+    );
+
+    const bool ok =
+        lower_proof.Passed() &&
+        matched_final_proof.Passed() &&
+        apc_final_proof.Passed() &&
+        lower_reads.BadContract == 0u &&
+        matched_reads.BadContract == 0u &&
         apc_reads.BadContract == 0u &&
         apc_reads.Retry == 0u;
 
-    std::cout << "\nTEST 1 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n';
-    return ok ? Result::PASS : Result::FAIL;
+    std::cout
+        << "\nTEST 1 OVERALL: "
+        << (ok ? "PASS" : "FAIL")
+        << '\n';
+
+    return ok
+        ? Result::PASS
+        : Result::FAIL;
 }
 } // namespace Test01_Baseline
 
@@ -1543,22 +2763,59 @@ constexpr std::size_t NODE_COUNT = 40u;
 constexpr std::uint8_t K = 4u;
 constexpr std::size_t FIRST_CHILD = 8u;
 constexpr std::uint32_t OPS_PER_THREAD = 2'000u;
+constexpr std::uint32_t MEASURED_RUNS = 5u;
+
+using MatchedBackend =
+    VectorLockedDAG<
+        NODE_COUNT,
+        1u,
+        K
+    >;
+
+using APCBackend =
+    APCFabricBackend<
+        NODE_COUNT,
+        1u,
+        K
+    >;
 
 template <typename Backend>
-bool Build(Backend& backend, std::size_t workers)
+bool Build(
+    Backend& backend,
+    std::size_t workers
+)
 {
-    if (!backend.Initialize()) return false;
-    for (std::size_t i = 0u; i < workers; ++i)
+    if (!backend.Initialize())
     {
-        const std::size_t child = FIRST_CHILD + i;
+        return false;
+    }
+
+    for (
+        std::size_t i = 0u;
+        i < workers;
+        ++i
+    )
+    {
+        const std::size_t child =
+            FIRST_CHILD + i;
+
         if (
-            !backend.AddParent(0u, child, Axis::HORIZONTAL) ||
-            !backend.AddParent(2u, child, Axis::VERTICAL)
+            !backend.AddParent(
+                0u,
+                child,
+                Axis::HORIZONTAL
+            ) ||
+            !backend.AddParent(
+                2u,
+                child,
+                Axis::VERTICAL
+            )
         )
         {
             return false;
         }
     }
+
     return true;
 }
 
@@ -1571,107 +2828,378 @@ struct SweepResult
 };
 
 template <typename Backend>
-SweepResult RunWorkers(Backend& backend, std::size_t workers)
+SweepResult RunWorkers(
+    Backend& backend,
+    std::size_t workers
+)
 {
-    std::barrier start(static_cast<std::ptrdiff_t>(workers + 1u));
+    std::barrier start(
+        static_cast<std::ptrdiff_t>(
+            workers + 1u
+        )
+    );
+
     std::atomic<bool> failed{false};
-    std::atomic<std::uint64_t> success{0u};
-    std::atomic<std::uint64_t> retries{0u};
-    std::vector<std::thread> threads;
+
+    std::atomic<std::uint64_t>
+        success{0u};
+
+    std::atomic<std::uint64_t>
+        retries{0u};
+
+    std::vector<std::thread>
+        threads;
+
     threads.reserve(workers);
 
-    for (std::size_t worker = 0u; worker < workers; ++worker)
+    for (
+        std::size_t worker = 0u;
+        worker < workers;
+        ++worker
+    )
     {
-        threads.emplace_back([&, worker]() noexcept
-        {
-            const std::size_t child = FIRST_CHILD + worker;
-            std::size_t h_current = 0u;
-            std::size_t v_current = 2u;
-            std::uint64_t local_retries = 0u;
-            std::uint64_t local_success = 0u;
-            start.arrive_and_wait();
-
-            for (std::uint32_t i = 0u; i < OPS_PER_THREAD; ++i)
+        threads.emplace_back(
+            [&, worker]() noexcept
             {
-                const std::size_t h_next = h_current == 0u ? 1u : 0u;
-                const std::size_t v_next = v_current == 2u ? 3u : 2u;
-                if (
-                    !RetryReplace(
-                        backend, h_current, h_next, child,
-                        Axis::HORIZONTAL, local_retries
-                    ) ||
-                    !RetryReplace(
-                        backend, v_current, v_next, child,
-                        Axis::VERTICAL, local_retries
-                    )
+                const std::size_t child =
+                    FIRST_CHILD +
+                    worker;
+
+                std::size_t h_current = 0u;
+                std::size_t v_current = 2u;
+
+                std::uint64_t local_retries = 0u;
+                std::uint64_t local_success = 0u;
+
+                start.arrive_and_wait();
+
+                for (
+                    std::uint32_t i = 0u;
+                    i < OPS_PER_THREAD;
+                    ++i
                 )
                 {
-                    failed.store(true, std::memory_order_release);
-                    break;
-                }
-                h_current = h_next;
-                v_current = v_next;
-                local_success += 2u;
-            }
+                    const std::size_t h_next =
+                        h_current == 0u
+                            ? 1u
+                            : 0u;
 
-            success.fetch_add(local_success, std::memory_order_relaxed);
-            retries.fetch_add(local_retries, std::memory_order_relaxed);
-        });
+                    const std::size_t v_next =
+                        v_current == 2u
+                            ? 3u
+                            : 2u;
+
+                    if (
+                        !RetryReplace(
+                            backend,
+                            h_current,
+                            h_next,
+                            child,
+                            Axis::HORIZONTAL,
+                            local_retries
+                        ) ||
+                        !RetryReplace(
+                            backend,
+                            v_current,
+                            v_next,
+                            child,
+                            Axis::VERTICAL,
+                            local_retries
+                        )
+                    )
+                    {
+                        failed.store(
+                            true,
+                            std::memory_order_release
+                        );
+
+                        break;
+                    }
+
+                    h_current = h_next;
+                    v_current = v_next;
+                    local_success += 2u;
+                }
+
+                success.fetch_add(
+                    local_success,
+                    std::memory_order_relaxed
+                );
+
+                retries.fetch_add(
+                    local_retries,
+                    std::memory_order_relaxed
+                );
+            }
+        );
     }
 
-    const auto begin = Clock::now();
-    start.arrive_and_wait();
-    for (std::thread& thread : threads) thread.join();
-    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        Clock::now() - begin
-    ).count();
+    const auto begin =
+        Clock::now();
 
-    const std::uint64_t completed = success.load(std::memory_order_acquire);
+    start.arrive_and_wait();
+
+    for (
+        std::thread& thread :
+        threads
+    )
+    {
+        thread.join();
+    }
+
+    const auto elapsed =
+        std::chrono::duration_cast<
+            std::chrono::nanoseconds
+        >(
+            Clock::now() - begin
+        ).count();
+
+    const std::uint64_t completed =
+        success.load(
+            std::memory_order_acquire
+        );
+
     return {
-        !failed.load(std::memory_order_acquire) &&
-            completed == workers * OPS_PER_THREAD * 2u,
-        completed == 0u ? 0.0 : static_cast<double>(elapsed) / completed,
+        !failed.load(
+            std::memory_order_acquire
+        ) &&
+            completed ==
+                workers *
+                OPS_PER_THREAD *
+                2u,
+
+        completed == 0u
+            ? 0.0
+            : static_cast<double>(
+                elapsed
+            ) /
+                completed,
+
         completed,
-        retries.load(std::memory_order_acquire)
+
+        retries.load(
+            std::memory_order_acquire
+        )
     };
 }
 
 inline Result Run()
 {
-    Banner("TEST 2 - GLOBAL-MUTEX VECTOR FOREST vs APC/FABRIC DAG CONTENTION");
-    constexpr std::array<std::size_t, 4u> WORKERS{1u, 2u, 4u, 8u};
+    Banner(
+        "TEST 2 - SAME-K MUTABLE-DAG CONTENTION: GLOBAL MUTEX vs APC/FABRIC"
+    );
+
+    constexpr std::array<
+        std::size_t,
+        4u
+    > WORKERS{
+        1u,
+        2u,
+        4u,
+        8u
+    };
+
     bool all_ok = true;
 
     std::cout
-        << "Each worker owns one child; all workers contend on the same two H and two V parents.\n"
-        << "APC retries one-attempt transactions at workload level; vector serializes each move.\n\n";
+        << "Both backends use K=4 and parent<child. Each worker owns one child;\n"
+        << "all workers replace parents drawn from the same two H and two V parents.\n"
+        << "The vector DAG serializes each ReplaceParent with one global mutex.\n"
+        << "APC/Fabric performs bounded one-attempt transactions and retries at workload level.\n"
+        << "Timing excludes thread creation because workers wait on a start barrier.\n\n";
 
-    for (std::size_t workers : WORKERS)
+    for (
+        std::size_t workers :
+        WORKERS
+    )
     {
-        VectorLockedForest<NODE_COUNT, 1u> vector_backend{};
-        APCFabricBackend<NODE_COUNT, 1u, K> apc_backend{};
-        if (!Build(vector_backend, workers) || !Build(apc_backend, workers))
+        std::array<
+            double,
+            MEASURED_RUNS
+        > vector_ns{};
+
+        std::array<
+            double,
+            MEASURED_RUNS
+        > apc_ns{};
+
+        std::array<
+            double,
+            MEASURED_RUNS
+        > apc_retry_per_success{};
+
+        bool row_ok = true;
+
+        for (
+            std::uint32_t run = 0u;
+            run < MEASURED_RUNS;
+            ++run
+        )
         {
-            return Result::FAIL;
+            MatchedBackend vector_backend{};
+            APCBackend apc_backend{};
+
+            if (
+                !Build(
+                    vector_backend,
+                    workers
+                ) ||
+                !Build(
+                    apc_backend,
+                    workers
+                )
+            )
+            {
+                return Result::FAIL;
+            }
+
+            SweepResult vector_result{};
+            SweepResult apc_result{};
+
+            if ((run & 1u) == 0u)
+            {
+                vector_result =
+                    RunWorkers(
+                        vector_backend,
+                        workers
+                    );
+
+                apc_result =
+                    RunWorkers(
+                        apc_backend,
+                        workers
+                    );
+            }
+            else
+            {
+                apc_result =
+                    RunWorkers(
+                        apc_backend,
+                        workers
+                    );
+
+                vector_result =
+                    RunWorkers(
+                        vector_backend,
+                        workers
+                    );
+            }
+
+            const GraphProof vector_proof =
+                ProveQuiescentCombinedDAG<
+                    NODE_COUNT,
+                    K
+                >(vector_backend);
+
+            const GraphProof apc_proof =
+                ProveQuiescentCombinedDAG<
+                    NODE_COUNT,
+                    K
+                >(apc_backend);
+
+            row_ok =
+                row_ok &&
+                vector_result.Ok &&
+                apc_result.Ok &&
+                vector_proof.Passed() &&
+                apc_proof.Passed();
+
+            vector_ns[run] =
+                vector_result.NsPerSuccess;
+
+            apc_ns[run] =
+                apc_result.NsPerSuccess;
+
+            apc_retry_per_success[run] =
+                apc_result.Success == 0u
+                    ? 0.0
+                    : static_cast<double>(
+                        apc_result.Retries
+                    ) /
+                        static_cast<double>(
+                            apc_result.Success
+                        );
         }
 
-        const SweepResult vector_result = RunWorkers(vector_backend, workers);
-        const SweepResult apc_result = RunWorkers(apc_backend, workers);
-        const GraphProof proof = ProveQuiescentCombinedDAG<NODE_COUNT, K>(apc_backend);
-        const bool row_ok = vector_result.Ok && apc_result.Ok && proof.Passed();
-        all_ok = all_ok && row_ok;
+        const double vector_median =
+            Median(vector_ns);
+
+        const double apc_median =
+            Median(apc_ns);
+
+        const double retry_rate =
+            Median(
+                apc_retry_per_success
+            );
+
+        const double vector_mops =
+            vector_median > 0.0
+                ? 1000.0 /
+                    vector_median
+                : 0.0;
+
+        const double apc_mops =
+            apc_median > 0.0
+                ? 1000.0 /
+                    apc_median
+                : 0.0;
+
+        all_ok =
+            all_ok &&
+            row_ok;
 
         std::cout
-            << "  threads=" << std::setw(2) << workers
-            << " vector=" << std::setw(10) << std::fixed << std::setprecision(2)
-            << vector_result.NsPerSuccess << " ns/op"
-            << " APC=" << std::setw(10) << apc_result.NsPerSuccess << " ns/op"
-            << " APC-retries=" << std::setw(10) << apc_result.Retries
-            << " integrity=" << (row_ok ? "PASS" : "FAIL") << '\n';
+            << "  threads="
+            << std::setw(2)
+            << workers
+            << "  vector-DAG="
+            << std::setw(9)
+            << std::fixed
+            << std::setprecision(2)
+            << vector_median
+            << " ns/op ("
+            << std::setw(6)
+            << vector_mops
+            << " Mops/s)"
+            << "  APC="
+            << std::setw(9)
+            << apc_median
+            << " ns/op ("
+            << std::setw(6)
+            << apc_mops
+            << " Mops/s)"
+            << "  APC/vector="
+            << std::setw(6)
+            << Ratio(
+                apc_median,
+                vector_median
+            )
+            << "x"
+            << "  retries/success="
+            << std::setw(8)
+            << std::setprecision(4)
+            << retry_rate
+            << "  integrity="
+            << (
+                row_ok
+                    ? "PASS"
+                    : "FAIL"
+            )
+            << '\n';
     }
 
-    std::cout << "\nTEST 2 OVERALL: " << (all_ok ? "PASS" : "FAIL") << '\n';
-    return all_ok ? Result::PASS : Result::FAIL;
+    std::cout
+        << "\nTEST 2 OVERALL: "
+        << (
+            all_ok
+                ? "PASS"
+                : "FAIL"
+        )
+        << '\n';
+
+    return all_ok
+        ? Result::PASS
+        : Result::FAIL;
 }
 } // namespace Test02_Contention
 
@@ -3696,6 +5224,65 @@ inline Result Run()
             )
         );
 
+    RelocationFabric wrong_count_target{};
+    const bool wrong_count_rejected =
+        save_ok &&
+        cell_count > 1u &&
+        !wrong_count_target.AttachFabric(
+            snapshot.data(),
+            cell_count - 1u,
+            CoreOfFabricCoordinator::
+                FabricBackigOwnership::
+                    BORROWED
+        ) &&
+        !wrong_count_target.IsFabricActive();
+
+    std::vector<std::uint64_t>
+        bad_version_image = snapshot;
+
+    bool bad_version_rejected = false;
+
+    if (
+        save_ok &&
+        bad_version_image.size() *
+            sizeof(std::uint64_t) >=
+            sizeof(
+                CoreOfFabricCoordinator::
+                    FabricCache
+            )
+    )
+    {
+        auto* const cache =
+            reinterpret_cast<
+                CoreOfFabricCoordinator::
+                    FabricCache*
+            >(
+                bad_version_image.data()
+            );
+
+        cache->FormateVersion_ =
+            static_cast<std::uint32_t>(
+                CoreOfFabricCoordinator::
+                    FORMAT_VERSION
+            ) +
+            1u;
+
+        RelocationFabric
+            bad_version_target{};
+
+        bad_version_rejected =
+            !bad_version_target.AttachFabric(
+                bad_version_image.data(),
+                static_cast<std::uint64_t>(
+                    bad_version_image.size()
+                ),
+                CoreOfFabricCoordinator::
+                    FabricBackigOwnership::
+                        BORROWED
+            ) &&
+            !bad_version_target.IsFabricActive();
+    }
+
     const bool source_resumed =
         save_ok &&
         source.IsFabricActive() &&
@@ -3889,7 +5476,9 @@ inline Result Run()
         second_resolve &&
         second_payload &&
         second_topology &&
-        address_independent;
+        address_independent &&
+        wrong_count_rejected &&
+        bad_version_rejected;
 
     std::cout
         << "  SaveFabric succeeds and source resumes       "
@@ -3929,6 +5518,12 @@ inline Result Run()
         << "  address-independent slab image               "
         << (address_independent ? "PASS" : "FAIL")
         << '\n'
+        << "  wrong supplied cell count rejected           "
+        << (wrong_count_rejected ? "PASS" : "FAIL")
+        << '\n'
+        << "  incompatible format version rejected         "
+        << (bad_version_rejected ? "PASS" : "FAIL")
+        << '\n'
         << "  source address                               "
         << static_cast<const void*>(
             source_address
@@ -3958,9 +5553,11 @@ inline Result Run()
 
 inline int RunAll()
 {
+    PrintBenchmarkEnvironment();
+
     const std::array<std::pair<const char*, Result>, 8u> results{{
-        {"Test 1 - baseline and benchmark", Test01_Baseline::Run()},
-        {"Test 2 - contention sweep", Test02_Contention::Run()},
+        {"Test 1 - fair quiescent benchmark", Test01_Baseline::Run()},
+        {"Test 2 - same-K contention benchmark", Test02_Contention::Run()},
         {"Test 3 - reader/writer atomicity", Test03_ReaderWriter::Run()},
         {"Test 4 - public mutation API", Test04_PublicMutationAPI::Run()},
         {"Test 5 - combined DAG proof", Test05_CombinedAcyclicity::Run()},
@@ -3969,7 +5566,7 @@ inline int RunAll()
         {"Test 8 - full-slab relocation", Test08_FabricRelocation::Run()}
     }};
 
-    Banner("APC DUAL-EDGE DAG TEST SUITE SUMMARY");
+    Banner("SUPERNOVA APC/FABRIC SYSTEMS TEST SUITE SUMMARY");
     std::uint32_t failures = 0u;
     for (const auto& [name, result] : results)
     {

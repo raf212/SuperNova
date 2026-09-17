@@ -1414,11 +1414,8 @@ namespace BidirectionalInMemGraph
 
             default:
                 return false;
-            }
-
-            return true;
-            
+            }            
         }
-        
+        return true;
     }
 }
