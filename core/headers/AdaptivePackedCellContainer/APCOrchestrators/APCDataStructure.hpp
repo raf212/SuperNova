@@ -207,8 +207,7 @@ namespace BidirectionalInMemGraph
         {
             carrier.IsValid = 
                 carrier.Lowest28bit <= UINT28_MAX &&
-                carrier.Mid28Bit <= UINT28_MAX &&
-                carrier.High8Bit <= UINT8_MAX;
+                carrier.Mid28Bit <= UINT28_MAX;
             return carrier.IsValid;
         }
 

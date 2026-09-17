@@ -1,5 +1,3 @@
-
-
 #pragma once
 
 // SuperNova APC/Fabric paper-quality systems test kit (C++20)
@@ -83,6 +81,60 @@ enum class Result : std::uint8_t
     PASS,
     FAIL
 };
+
+namespace ConcurrencyConfig
+{
+constexpr std::size_t BENCHMARK_PAYLOAD_WORDS = 1u;
+constexpr std::uint8_t PARENT_CAPACITY = 4u;
+constexpr std::uint8_t HOTSPOT_READER_PARENT_CAPACITY = 2u;
+constexpr std::size_t DISTRIBUTED_PARENT_COUNT = 100u;
+constexpr std::size_t MAX_MUTATOR_THREADS = 10u;
+constexpr std::size_t MAX_READER_THREADS = 16u;
+constexpr std::size_t READER_WRITER_COUNT = 2u;
+constexpr std::size_t SECOND_WRITER_CHILD_OFFSET = 1u;
+constexpr std::size_t DISTRIBUTED_V_PARENT_OFFSET =
+    DISTRIBUTED_PARENT_COUNT / READER_WRITER_COUNT;
+constexpr std::size_t HOTSPOT_MUTATION_NODE_COUNT = 40u;
+constexpr std::size_t HOTSPOT_MUTATION_PARENT_COUNT = 4u;
+constexpr std::size_t HOTSPOT_MUTATION_FIRST_CHILD = 8u;
+constexpr std::size_t HOTSPOT_MUTATION_MAX_WRITERS = 8u;
+constexpr std::size_t HOTSPOT_MUTATION_SWEEP_COUNT = 4u;
+constexpr std::size_t HOTSPOT_READER_NODE_COUNT = 5u;
+constexpr std::size_t HOTSPOT_READER_PARENT_COUNT = 4u;
+constexpr std::size_t HOTSPOT_READER_CHILD = 4u;
+constexpr std::size_t HOTSPOT_H_FIRST_PARENT = 0u;
+constexpr std::size_t HOTSPOT_H_SECOND_PARENT = 1u;
+constexpr std::size_t HOTSPOT_V_FIRST_PARENT = 2u;
+constexpr std::size_t HOTSPOT_V_SECOND_PARENT = 3u;
+constexpr std::uint32_t MUTATIONS_PER_WRITER = 2'000u;
+constexpr std::uint32_t STABLE_READS_PER_READER = 20'000u;
+constexpr std::uint32_t WRITER_WARMUP_MUTATIONS = 256u;
+constexpr std::size_t MEASURED_RUNS = 5u;
+constexpr std::uint32_t TRANSACTION_ATTEMPT_LIMIT = 100'000u;
+constexpr std::uint64_t OPERATIONS_PER_MUTATION_STEP = 2u;
+constexpr std::ptrdiff_t MAIN_THREAD_PARTICIPANTS = 1;
+constexpr double MILLION_OPERATIONS_PER_SECOND_FROM_NS = 1000.0;
+constexpr std::uint64_t RANDOM_SEED = 0x9E3779B97F4A7C15ull;
+constexpr std::uint64_t RANDOM_STREAM_STEP = 0xD1B54A32D192ED03ull;
+constexpr std::uint64_t READER_WRITER_STREAM_OFFSET = 17u;
+constexpr std::uint32_t RANDOM_LEFT_SHIFT_A = 13u;
+constexpr std::uint32_t RANDOM_RIGHT_SHIFT = 7u;
+constexpr std::uint32_t RANDOM_LEFT_SHIFT_B = 17u;
+
+constexpr std::array<std::size_t, MAX_MUTATOR_THREADS> MUTATOR_THREADS{
+    1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u, 9u, 10u
+};
+
+constexpr std::array<std::size_t, HOTSPOT_MUTATION_SWEEP_COUNT>
+    HOTSPOT_MUTATOR_THREADS{
+    1u, 2u, 4u, 8u
+};
+
+constexpr std::array<std::size_t, MAX_READER_THREADS> READER_THREADS{
+    1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u,
+    9u, 10u, 11u, 12u, 13u, 14u, 15u, 16u
+};
+} // namespace ConcurrencyConfig
 
 constexpr const char* ResultName(Result result) noexcept
 {
@@ -609,7 +661,9 @@ private:
 //
 // It intentionally does NOT emulate APC/Fabric generations, schema protocols,
 // relocation, use scopes, sequence-validated public reads, or retirement.
-// Quiescent reads are raw and must not race with mutation.
+// Quiescent Find* reads remain raw for Test 1. Test 3 additionally uses
+// StableFindParent(), which takes the same global graph mutex as mutation so
+// the baseline has a legal/stable concurrent-read contract for that comparison.
 // -----------------------------------------------------------------------------
 
 template <
@@ -773,6 +827,17 @@ public:
                 true
             }
             : ReadResult{};
+    }
+
+    ReadResult StableFindParent(
+        std::size_t child,
+        Axis axis,
+        std::uint8_t ordinal,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        std::lock_guard<std::mutex> lock(GraphMutex_);
+        return FindParent(child, axis, ordinal, 1u);
     }
 
     ReadResult FindFirstChild(
@@ -1317,6 +1382,15 @@ public:
             max_tries
         );
         return Convert_(found, operation);
+    }
+
+    ReadResult StableFindParent(
+        std::size_t child,
+        Axis axis,
+        std::uint8_t ordinal,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        return FindParent(child, axis, ordinal, max_tries);
     }
 
     ReadResult FindFirstChild(
@@ -1928,7 +2002,8 @@ bool RetryReplace(
     std::size_t child,
     Axis axis,
     std::uint64_t& retry_count,
-    std::uint32_t attempt_limit = 100'000u) noexcept
+    std::uint32_t attempt_limit =
+        ConcurrencyConfig::TRANSACTION_ATTEMPT_LIMIT) noexcept
 {
     for (std::uint32_t attempt = 0u; attempt < attempt_limit; ++attempt)
     {
@@ -3082,59 +3157,170 @@ inline Result Run()
 } // namespace Test01_Baseline
 
 // -----------------------------------------------------------------------------
-// Test 2: shared-parent contention sweep against the global-mutex forest.
+// Shared concurrency benchmark core.
+//
+// Tests 2A, 2B, 3A and 3B use this one core for both the global-mutex baseline
+// and APC/Fabric. Scenarios supply only topology and deterministic schedules.
+// Thread creation, barriers, retry accounting, timing, medians and proof logic
+// therefore remain identical across the compared backends.
 // -----------------------------------------------------------------------------
 
-namespace Test02_Contention
+namespace ConcurrentGraphTestCore
 {
-constexpr std::size_t NODE_COUNT = 40u;
-constexpr std::uint8_t K = 4u;
-constexpr std::size_t FIRST_CHILD = 8u;
-constexpr std::uint32_t OPS_PER_THREAD = 2'000u;
-constexpr std::uint32_t MEASURED_RUNS = 5u;
-
-using MatchedBackend =
-    VectorLockedDAG<
-        NODE_COUNT,
-        1u,
-        K
-    >;
-
-using APCBackend =
-    APCFabricBackend<
-        NODE_COUNT,
-        1u,
-        K
-    >;
-
-template <typename Backend>
-bool Build(
-    Backend& backend,
-    std::size_t workers
-)
+struct MutationStep
 {
-    if (!backend.Initialize())
+    std::uint16_t HParent = 0u;
+    std::uint16_t VParent = 0u;
+};
+
+struct WriterSpec
+{
+    Axis RelationAxis = Axis::HORIZONTAL;
+    std::size_t Child = 0u;
+    std::size_t InitialParent = 0u;
+};
+
+template <std::size_t WriterCount, std::uint32_t StepCount>
+using MutationSchedule =
+    std::array<std::array<MutationStep, StepCount>, WriterCount>;
+
+template <std::size_t WriterCount, std::uint32_t StepCount>
+using ParentSchedule =
+    std::array<std::array<std::uint16_t, StepCount>, WriterCount>;
+
+inline std::uint64_t NextRandom(std::uint64_t& state) noexcept
+{
+    state ^= state << ConcurrencyConfig::RANDOM_LEFT_SHIFT_A;
+    state ^= state >> ConcurrencyConfig::RANDOM_RIGHT_SHIFT;
+    state ^= state << ConcurrencyConfig::RANDOM_LEFT_SHIFT_B;
+    return state;
+}
+
+inline std::size_t DifferentRandomParent(
+    std::uint64_t& state,
+    std::size_t parent_count,
+    std::size_t current
+) noexcept
+{
+    std::size_t next =
+        static_cast<std::size_t>(NextRandom(state) % parent_count);
+
+    if (next == current)
+    {
+        next = (next + 1u) % parent_count;
+    }
+    return next;
+}
+
+template <typename Scenario>
+void BuildDistributedMutationSchedule(
+    typename Scenario::Schedule& schedule
+) noexcept
+{
+    for (std::size_t writer = 0u; writer < Scenario::MAX_WRITERS; ++writer)
+    {
+        std::uint64_t state =
+            ConcurrencyConfig::RANDOM_SEED ^
+            (
+                static_cast<std::uint64_t>(writer + 1u) *
+                ConcurrencyConfig::RANDOM_STREAM_STEP
+            );
+
+        std::size_t h_current = Scenario::InitialHParent(writer);
+        std::size_t v_current = Scenario::InitialVParent(writer);
+
+        for (
+            std::uint32_t step = 0u;
+            step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+            ++step
+        )
+        {
+            const std::size_t h_next =
+                DifferentRandomParent(state, Scenario::PARENT_COUNT, h_current);
+            const std::size_t v_next =
+                DifferentRandomParent(state, Scenario::PARENT_COUNT, v_current);
+
+            schedule[writer][step] = MutationStep{
+                static_cast<std::uint16_t>(h_next),
+                static_cast<std::uint16_t>(v_next)
+            };
+
+            h_current = h_next;
+            v_current = v_next;
+        }
+    }
+}
+
+template <typename Scenario>
+void BuildDistributedParentSchedule(
+    typename Scenario::Schedule& schedule
+) noexcept
+{
+    for (
+        std::size_t writer = 0u;
+        writer < ConcurrencyConfig::READER_WRITER_COUNT;
+        ++writer
+    )
+    {
+        std::uint64_t state =
+            ConcurrencyConfig::RANDOM_SEED ^
+            (
+                static_cast<std::uint64_t>(
+                    writer + ConcurrencyConfig::READER_WRITER_STREAM_OFFSET
+                ) *
+                ConcurrencyConfig::RANDOM_STREAM_STEP
+            );
+
+        std::size_t current = Scenario::WRITERS[writer].InitialParent;
+
+        for (
+            std::uint32_t step = 0u;
+            step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+            ++step
+        )
+        {
+            const std::size_t next =
+                DifferentRandomParent(state, Scenario::PARENT_COUNT, current);
+
+            schedule[writer][step] =
+                static_cast<std::uint16_t>(next);
+            current = next;
+        }
+    }
+}
+
+struct MutationSweepResult
+{
+    bool Ok = false;
+    double NsPerSuccess = 0.0;
+    std::uint64_t Success = 0u;
+    std::uint64_t Retries = 0u;
+};
+
+template <typename Scenario, typename Backend>
+bool BuildMutationBackend(Backend& backend, std::size_t writer_count)
+{
+    if (
+        writer_count == 0u ||
+        writer_count > Scenario::MAX_WRITERS ||
+        !backend.Initialize()
+    )
     {
         return false;
     }
 
-    for (
-        std::size_t i = 0u;
-        i < workers;
-        ++i
-    )
+    for (std::size_t writer = 0u; writer < writer_count; ++writer)
     {
-        const std::size_t child =
-            FIRST_CHILD + i;
+        const std::size_t child = Scenario::FIRST_CHILD + writer;
 
         if (
             !backend.AddParent(
-                0u,
+                Scenario::InitialHParent(writer),
                 child,
                 Axis::HORIZONTAL
             ) ||
             !backend.AddParent(
-                2u,
+                Scenario::InitialVParent(writer),
                 child,
                 Axis::VERTICAL
             )
@@ -3143,85 +3329,53 @@ bool Build(
             return false;
         }
     }
-
     return true;
 }
 
-struct SweepResult
-{
-    bool Ok = false;
-    double NsPerSuccess = 0.0;
-    std::uint64_t Success = 0u;
-    std::uint64_t Retries = 0u;
-};
-
-template <typename Backend>
-SweepResult RunWorkers(
+template <typename Scenario, typename Backend>
+MutationSweepResult RunMutationWorkers(
     Backend& backend,
-    std::size_t workers
+    const typename Scenario::Schedule& schedule,
+    std::size_t writer_count
 )
 {
     std::barrier start(
-        static_cast<std::ptrdiff_t>(
-            workers + 1u
-        )
+        static_cast<std::ptrdiff_t>(writer_count + 1u)
     );
 
     std::atomic<bool> failed{false};
+    std::atomic<std::uint64_t> success{0u};
+    std::atomic<std::uint64_t> retries{0u};
 
-    std::atomic<std::uint64_t>
-        success{0u};
+    std::vector<std::thread> writers;
+    writers.reserve(writer_count);
 
-    std::atomic<std::uint64_t>
-        retries{0u};
-
-    std::vector<std::thread>
-        threads;
-
-    threads.reserve(workers);
-
-    for (
-        std::size_t worker = 0u;
-        worker < workers;
-        ++worker
-    )
+    for (std::size_t writer = 0u; writer < writer_count; ++writer)
     {
-        threads.emplace_back(
-            [&, worker]() noexcept
+        writers.emplace_back(
+            [&, writer]() noexcept
             {
-                const std::size_t child =
-                    FIRST_CHILD +
-                    worker;
-
-                std::size_t h_current = 0u;
-                std::size_t v_current = 2u;
-
-                std::uint64_t local_retries = 0u;
+                const std::size_t child = Scenario::FIRST_CHILD + writer;
+                std::size_t h_current = Scenario::InitialHParent(writer);
+                std::size_t v_current = Scenario::InitialVParent(writer);
                 std::uint64_t local_success = 0u;
+                std::uint64_t local_retries = 0u;
 
                 start.arrive_and_wait();
 
                 for (
-                    std::uint32_t i = 0u;
-                    i < OPS_PER_THREAD;
-                    ++i
+                    std::uint32_t step = 0u;
+                    step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+                    ++step
                 )
                 {
-                    const std::size_t h_next =
-                        h_current == 0u
-                            ? 1u
-                            : 0u;
-
-                    const std::size_t v_next =
-                        v_current == 2u
-                            ? 3u
-                            : 2u;
+                    const MutationStep mutation = schedule[writer][step];
 
                     if (
                         !RetryReplace(
                             backend,
                             h_current,
-                            h_next,
+                            mutation.HParent,
                             child,
                             Axis::HORIZONTAL,
                             local_retries
@@ -3229,138 +3383,98 @@ SweepResult RunWorkers(
                         !RetryReplace(
                             backend,
                             v_current,
-                            v_next,
+                            mutation.VParent,
                             child,
                             Axis::VERTICAL,
                             local_retries
                         )
                     )
                     {
-                        failed.store(
-                            true,
-                            std::memory_order_release
-                        );
-
+                        failed.store(true, std::memory_order_release);
                         break;
                     }
 
-                    h_current = h_next;
-                    v_current = v_next;
-                    local_success += 2u;
+                    h_current = mutation.HParent;
+                    v_current = mutation.VParent;
+                    local_success +=
+                        ConcurrencyConfig::OPERATIONS_PER_MUTATION_STEP;
                 }
 
-                success.fetch_add(
-                    local_success,
-                    std::memory_order_relaxed
-                );
-
-                retries.fetch_add(
-                    local_retries,
-                    std::memory_order_relaxed
-                );
+                success.fetch_add(local_success, std::memory_order_relaxed);
+                retries.fetch_add(local_retries, std::memory_order_relaxed);
             }
         );
     }
 
-    const auto begin =
-        Clock::now();
-
+    const auto begin = Clock::now();
     start.arrive_and_wait();
 
-    for (
-        std::thread& thread :
-        threads
-    )
+    for (std::thread& writer : writers)
     {
-        thread.join();
+        writer.join();
     }
 
     const auto elapsed =
-        std::chrono::duration_cast<
-            std::chrono::nanoseconds
-        >(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
             Clock::now() - begin
         ).count();
 
     const std::uint64_t completed =
-        success.load(
-            std::memory_order_acquire
-        );
+        success.load(std::memory_order_acquire);
+    const std::uint64_t expected =
+        writer_count *
+        ConcurrencyConfig::MUTATIONS_PER_WRITER *
+        ConcurrencyConfig::OPERATIONS_PER_MUTATION_STEP;
 
     return {
-        !failed.load(
-            std::memory_order_acquire
-        ) &&
-            completed ==
-                workers *
-                OPS_PER_THREAD *
-                2u,
-
+        !failed.load(std::memory_order_acquire) && completed == expected,
         completed == 0u
             ? 0.0
-            : static_cast<double>(
-                elapsed
-            ) /
-                completed,
-
+            : static_cast<double>(elapsed) / static_cast<double>(completed),
         completed,
-
-        retries.load(
-            std::memory_order_acquire
-        )
+        retries.load(std::memory_order_acquire)
     };
 }
 
-inline Result Run()
+template <typename Scenario, std::size_t Count>
+bool RunMutationComparison(
+    const char* title,
+    const char* description,
+    const std::array<std::size_t, Count>& writer_counts
+)
 {
-    Banner(
-        "TEST 2 - SAME-K MUTABLE-DAG CONTENTION: GLOBAL MUTEX vs APC/FABRIC"
-    );
+    using MatchedBackend =
+        VectorLockedDAG<
+            Scenario::NODE_COUNT,
+            ConcurrencyConfig::BENCHMARK_PAYLOAD_WORDS,
+            Scenario::PARENT_CAPACITY
+        >;
 
-    constexpr std::array<
-        std::size_t,
-        4u
-    > WORKERS{
-        1u,
-        2u,
-        4u,
-        8u
-    };
+    using APCBackend =
+        APCFabricBackend<
+            Scenario::NODE_COUNT,
+            ConcurrencyConfig::BENCHMARK_PAYLOAD_WORDS,
+            Scenario::PARENT_CAPACITY
+        >;
+
+    Banner(title);
+    std::cout << description << "\n\n";
+
+    typename Scenario::Schedule schedule{};
+    Scenario::BuildSchedule(schedule);
 
     bool all_ok = true;
 
-    std::cout
-        << "Both backends use K=4 and parent<child. Each worker owns one child;\n"
-        << "all workers replace parents drawn from the same two H and two V parents.\n"
-        << "The vector DAG serializes each ReplaceParent with one global mutex.\n"
-        << "APC/Fabric performs bounded one-attempt transactions and retries at workload level.\n"
-        << "Timing excludes thread creation because workers wait on a start barrier.\n\n";
-
-    for (
-        std::size_t workers :
-        WORKERS
-    )
+    for (const std::size_t writer_count : writer_counts)
     {
-        std::array<
-            double,
-            MEASURED_RUNS
-        > vector_ns{};
-
-        std::array<
-            double,
-            MEASURED_RUNS
-        > apc_ns{};
-
-        std::array<
-            double,
-            MEASURED_RUNS
-        > apc_retry_per_success{};
-
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_ns{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_ns{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_retry_rate{};
         bool row_ok = true;
 
         for (
-            std::uint32_t run = 0u;
-            run < MEASURED_RUNS;
+            std::size_t run = 0u;
+            run < ConcurrencyConfig::MEASURED_RUNS;
             ++run
         )
         {
@@ -3368,61 +3482,57 @@ inline Result Run()
             APCBackend apc_backend{};
 
             if (
-                !Build(
-                    vector_backend,
-                    workers
-                ) ||
-                !Build(
-                    apc_backend,
-                    workers
-                )
+                !BuildMutationBackend<Scenario>(vector_backend, writer_count) ||
+                !BuildMutationBackend<Scenario>(apc_backend, writer_count)
             )
             {
-                return Result::FAIL;
+                return false;
             }
 
-            SweepResult vector_result{};
-            SweepResult apc_result{};
+            MutationSweepResult vector_result{};
+            MutationSweepResult apc_result{};
 
             if ((run & 1u) == 0u)
             {
                 vector_result =
-                    RunWorkers(
+                    RunMutationWorkers<Scenario>(
                         vector_backend,
-                        workers
+                        schedule,
+                        writer_count
                     );
-
                 apc_result =
-                    RunWorkers(
+                    RunMutationWorkers<Scenario>(
                         apc_backend,
-                        workers
+                        schedule,
+                        writer_count
                     );
             }
             else
             {
                 apc_result =
-                    RunWorkers(
+                    RunMutationWorkers<Scenario>(
                         apc_backend,
-                        workers
+                        schedule,
+                        writer_count
                     );
-
                 vector_result =
-                    RunWorkers(
+                    RunMutationWorkers<Scenario>(
                         vector_backend,
-                        workers
+                        schedule,
+                        writer_count
                     );
             }
 
             const GraphProof vector_proof =
                 ProveQuiescentCombinedDAG<
-                    NODE_COUNT,
-                    K
+                    Scenario::NODE_COUNT,
+                    Scenario::PARENT_CAPACITY
                 >(vector_backend);
 
             const GraphProof apc_proof =
                 ProveQuiescentCombinedDAG<
-                    NODE_COUNT,
-                    K
+                    Scenario::NODE_COUNT,
+                    Scenario::PARENT_CAPACITY
                 >(apc_backend);
 
             row_ok =
@@ -3432,219 +3542,831 @@ inline Result Run()
                 vector_proof.Passed() &&
                 apc_proof.Passed();
 
-            vector_ns[run] =
-                vector_result.NsPerSuccess;
-
-            apc_ns[run] =
-                apc_result.NsPerSuccess;
-
-            apc_retry_per_success[run] =
+            vector_ns[run] = vector_result.NsPerSuccess;
+            apc_ns[run] = apc_result.NsPerSuccess;
+            apc_retry_rate[run] =
                 apc_result.Success == 0u
                     ? 0.0
-                    : static_cast<double>(
-                        apc_result.Retries
-                    ) /
-                        static_cast<double>(
-                            apc_result.Success
-                        );
+                    : static_cast<double>(apc_result.Retries) /
+                        static_cast<double>(apc_result.Success);
         }
 
-        const double vector_median =
-            Median(vector_ns);
-
-        const double apc_median =
-            Median(apc_ns);
-
-        const double retry_rate =
-            Median(
-                apc_retry_per_success
-            );
-
+        const double vector_median = Median(vector_ns);
+        const double apc_median = Median(apc_ns);
+        const double retry_rate = Median(apc_retry_rate);
         const double vector_mops =
             vector_median > 0.0
-                ? 1000.0 /
+                ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
                     vector_median
                 : 0.0;
-
         const double apc_mops =
             apc_median > 0.0
-                ? 1000.0 /
+                ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
                     apc_median
                 : 0.0;
 
-        all_ok =
-            all_ok &&
-            row_ok;
+        all_ok = all_ok && row_ok;
 
         std::cout
-            << "  threads="
-            << std::setw(2)
-            << workers
-            << "  vector-DAG="
-            << std::setw(9)
-            << std::fixed
-            << std::setprecision(2)
-            << vector_median
-            << " ns/op ("
-            << std::setw(6)
-            << vector_mops
-            << " Mops/s)"
-            << "  APC="
-            << std::setw(9)
-            << apc_median
-            << " ns/op ("
-            << std::setw(6)
-            << apc_mops
-            << " Mops/s)"
-            << "  APC/vector="
-            << std::setw(6)
-            << Ratio(
-                apc_median,
-                vector_median
-            )
-            << "x"
-            << "  retries/success="
-            << std::setw(8)
-            << std::setprecision(4)
-            << retry_rate
-            << "  integrity="
-            << (
-                row_ok
-                    ? "PASS"
-                    : "FAIL"
-            )
+            << "  threads=" << std::setw(2) << writer_count
+            << "  vector-DAG=" << std::setw(9)
+            << std::fixed << std::setprecision(2) << vector_median
+            << " ns/op (" << std::setw(6) << vector_mops << " Mops/s)"
+            << "  APC=" << std::setw(9) << apc_median
+            << " ns/op (" << std::setw(6) << apc_mops << " Mops/s)"
+            << "  APC/vector=" << std::setw(6)
+            << Ratio(apc_median, vector_median) << "x"
+            << "  retries/success=" << std::setw(8)
+            << std::setprecision(4) << retry_rate
+            << "  integrity=" << (row_ok ? "PASS" : "FAIL")
             << '\n';
     }
 
-    std::cout
-        << "\nTEST 2 OVERALL: "
-        << (
-            all_ok
-                ? "PASS"
-                : "FAIL"
+    return all_ok;
+}
+
+struct ReaderSweepResult
+{
+    bool Ok = false;
+    double NsPerStableRead = 0.0;
+    std::uint64_t StableReads = 0u;
+    std::uint64_t ReaderRetries = 0u;
+    std::uint64_t WriterSuccess = 0u;
+    std::uint64_t WriterRetries = 0u;
+};
+
+template <typename Scenario, typename Backend>
+bool BuildReaderWriterBackend(Backend& backend)
+{
+    if (!backend.Initialize())
+    {
+        return false;
+    }
+
+    for (
+        std::size_t writer = 0u;
+        writer < ConcurrencyConfig::READER_WRITER_COUNT;
+        ++writer
+    )
+    {
+        const WriterSpec& spec = Scenario::WRITERS[writer];
+        if (!backend.AddParent(spec.InitialParent, spec.Child, spec.RelationAxis))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename Scenario, typename Backend>
+bool StableReadOne(
+    Backend& backend,
+    std::size_t writer,
+    std::uint64_t& retry_count
+) noexcept
+{
+    const WriterSpec& spec = Scenario::WRITERS[writer];
+
+    for (
+        std::uint32_t attempt = 0u;
+        attempt < ConcurrencyConfig::TRANSACTION_ATTEMPT_LIMIT;
+        ++attempt
+    )
+    {
+        const ReadResult read =
+            backend.StableFindParent(
+                spec.Child,
+                spec.RelationAxis,
+                0u,
+                1u
+            );
+
+        if (!read.ContractValid())
+        {
+            return false;
+        }
+        if (read.IsRetry())
+        {
+            ++retry_count;
+            PerturbSchedule(attempt);
+            continue;
+        }
+
+        return
+            read.IsFound() &&
+            Scenario::IsExpectedParent(writer, read.Node);
+    }
+    return false;
+}
+
+template <typename Scenario, typename Backend>
+ReaderSweepResult RunReadersWithWriters(
+    Backend& backend,
+    const typename Scenario::Schedule& schedule,
+    std::size_t reader_count
+)
+{
+    std::barrier writer_start(
+        static_cast<std::ptrdiff_t>(
+            ConcurrencyConfig::READER_WRITER_COUNT
+        ) + ConcurrencyConfig::MAIN_THREAD_PARTICIPANTS
+    );
+    std::barrier reader_start(
+        static_cast<std::ptrdiff_t>(reader_count) +
+            ConcurrencyConfig::MAIN_THREAD_PARTICIPANTS
+    );
+
+    std::atomic<bool> failed{false};
+    std::atomic<bool> stop_writers{false};
+    std::atomic<bool> measure_writers{false};
+    std::atomic<std::size_t> warmed_writers{0u};
+    std::atomic<std::uint64_t> stable_reads{0u};
+    std::atomic<std::uint64_t> reader_retries{0u};
+    std::atomic<std::uint64_t> writer_success{0u};
+    std::atomic<std::uint64_t> writer_retries{0u};
+
+    auto writer_body =
+        [&](std::size_t writer) noexcept
+        {
+            const WriterSpec spec = Scenario::WRITERS[writer];
+            std::size_t current = spec.InitialParent;
+            std::uint32_t schedule_index = 0u;
+            std::uint64_t local_retries = 0u;
+            std::uint64_t measured_success = 0u;
+            std::uint64_t measured_retries = 0u;
+
+            const auto mutate_once = [&]() noexcept
+            {
+                const std::size_t next = schedule[writer][schedule_index];
+                schedule_index =
+                    (schedule_index + 1u) %
+                    ConcurrencyConfig::MUTATIONS_PER_WRITER;
+
+                const std::uint64_t before = local_retries;
+                if (
+                    !RetryReplace(
+                        backend,
+                        current,
+                        next,
+                        spec.Child,
+                        spec.RelationAxis,
+                        local_retries
+                    )
+                )
+                {
+                    return false;
+                }
+
+                current = next;
+                if (measure_writers.load(std::memory_order_relaxed))
+                {
+                    ++measured_success;
+                    measured_retries += local_retries - before;
+                }
+                return true;
+            };
+
+            writer_start.arrive_and_wait();
+
+            for (
+                std::uint32_t warmup = 0u;
+                warmup < ConcurrencyConfig::WRITER_WARMUP_MUTATIONS;
+                ++warmup
+            )
+            {
+                if (!mutate_once())
+                {
+                    failed.store(true, std::memory_order_release);
+                    return;
+                }
+            }
+
+            warmed_writers.fetch_add(1u, std::memory_order_release);
+
+            while (!stop_writers.load(std::memory_order_acquire))
+            {
+                if (!mutate_once())
+                {
+                    failed.store(true, std::memory_order_release);
+                    break;
+                }
+            }
+
+            writer_success.fetch_add(
+                measured_success,
+                std::memory_order_relaxed
+            );
+            writer_retries.fetch_add(
+                measured_retries,
+                std::memory_order_relaxed
+            );
+        };
+
+    std::vector<std::thread> writers;
+    writers.reserve(ConcurrencyConfig::READER_WRITER_COUNT);
+
+    for (
+        std::size_t writer = 0u;
+        writer < ConcurrencyConfig::READER_WRITER_COUNT;
+        ++writer
+    )
+    {
+        writers.emplace_back(writer_body, writer);
+    }
+
+    std::vector<std::thread> readers;
+    readers.reserve(reader_count);
+
+    for (std::size_t reader = 0u; reader < reader_count; ++reader)
+    {
+        readers.emplace_back(
+            [&, reader]() noexcept
+            {
+                std::uint64_t local_reads = 0u;
+                std::uint64_t local_retries = 0u;
+
+                reader_start.arrive_and_wait();
+
+                for (
+                    std::uint32_t read = 0u;
+                    read < ConcurrencyConfig::STABLE_READS_PER_READER;
+                    ++read
+                )
+                {
+                    const std::size_t writer =
+                        (reader + read) %
+                        ConcurrencyConfig::READER_WRITER_COUNT;
+
+                    if (
+                        !StableReadOne<Scenario>(
+                            backend,
+                            writer,
+                            local_retries
+                        )
+                    )
+                    {
+                        failed.store(true, std::memory_order_release);
+                        break;
+                    }
+                    ++local_reads;
+                }
+
+                stable_reads.fetch_add(local_reads, std::memory_order_relaxed);
+                reader_retries.fetch_add(
+                    local_retries,
+                    std::memory_order_relaxed
+                );
+            }
+        );
+    }
+
+    writer_start.arrive_and_wait();
+
+    while (
+        warmed_writers.load(std::memory_order_acquire) <
+            ConcurrencyConfig::READER_WRITER_COUNT &&
+        !failed.load(std::memory_order_acquire)
+    )
+    {
+        std::this_thread::yield();
+    }
+
+    if (failed.load(std::memory_order_acquire))
+    {
+        stop_writers.store(true, std::memory_order_release);
+        reader_start.arrive_and_wait();
+
+        for (std::thread& reader : readers)
+        {
+            reader.join();
+        }
+        for (std::thread& writer : writers)
+        {
+            writer.join();
+        }
+        return {};
+    }
+
+    measure_writers.store(true, std::memory_order_release);
+    const auto begin = Clock::now();
+    reader_start.arrive_and_wait();
+
+    for (std::thread& reader : readers)
+    {
+        reader.join();
+    }
+
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Clock::now() - begin
+        ).count();
+
+    measure_writers.store(false, std::memory_order_release);
+    stop_writers.store(true, std::memory_order_release);
+
+    for (std::thread& writer : writers)
+    {
+        writer.join();
+    }
+
+    const std::uint64_t completed =
+        stable_reads.load(std::memory_order_acquire);
+    const std::uint64_t expected =
+        reader_count *
+        ConcurrencyConfig::STABLE_READS_PER_READER;
+
+    const GraphProof proof =
+        ProveQuiescentCombinedDAG<
+            Scenario::NODE_COUNT,
+            Scenario::PARENT_CAPACITY
+        >(backend);
+
+    return {
+        !failed.load(std::memory_order_acquire) &&
+            completed == expected &&
+            proof.Passed(),
+        completed == 0u
+            ? 0.0
+            : static_cast<double>(elapsed) / static_cast<double>(completed),
+        completed,
+        reader_retries.load(std::memory_order_acquire),
+        writer_success.load(std::memory_order_acquire),
+        writer_retries.load(std::memory_order_acquire)
+    };
+}
+
+template <typename Scenario>
+bool RunReaderComparison(const char* title, const char* description)
+{
+    using MatchedBackend =
+        VectorLockedDAG<
+            Scenario::NODE_COUNT,
+            ConcurrencyConfig::BENCHMARK_PAYLOAD_WORDS,
+            Scenario::PARENT_CAPACITY
+        >;
+
+    using APCBackend =
+        APCFabricBackend<
+            Scenario::NODE_COUNT,
+            ConcurrencyConfig::BENCHMARK_PAYLOAD_WORDS,
+            Scenario::PARENT_CAPACITY
+        >;
+
+    Banner(title);
+    std::cout << description << "\n\n";
+
+    typename Scenario::Schedule schedule{};
+    Scenario::BuildSchedule(schedule);
+    bool all_ok = true;
+
+    for (
+        const std::size_t reader_count :
+        ConcurrencyConfig::READER_THREADS
+    )
+    {
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_ns{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_ns{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_retry_rate{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_writer_mops{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_writer_mops{};
+        bool row_ok = true;
+
+        for (
+            std::size_t run = 0u;
+            run < ConcurrencyConfig::MEASURED_RUNS;
+            ++run
         )
+        {
+            MatchedBackend vector_backend{};
+            APCBackend apc_backend{};
+
+            if (
+                !BuildReaderWriterBackend<Scenario>(vector_backend) ||
+                !BuildReaderWriterBackend<Scenario>(apc_backend)
+            )
+            {
+                return false;
+            }
+
+            ReaderSweepResult vector_result{};
+            ReaderSweepResult apc_result{};
+
+            if ((run & 1u) == 0u)
+            {
+                vector_result =
+                    RunReadersWithWriters<Scenario>(
+                        vector_backend,
+                        schedule,
+                        reader_count
+                    );
+                apc_result =
+                    RunReadersWithWriters<Scenario>(
+                        apc_backend,
+                        schedule,
+                        reader_count
+                    );
+            }
+            else
+            {
+                apc_result =
+                    RunReadersWithWriters<Scenario>(
+                        apc_backend,
+                        schedule,
+                        reader_count
+                    );
+                vector_result =
+                    RunReadersWithWriters<Scenario>(
+                        vector_backend,
+                        schedule,
+                        reader_count
+                    );
+            }
+
+            row_ok =
+                row_ok &&
+                vector_result.Ok &&
+                apc_result.Ok;
+
+            vector_ns[run] = vector_result.NsPerStableRead;
+            apc_ns[run] = apc_result.NsPerStableRead;
+            apc_retry_rate[run] =
+                apc_result.StableReads == 0u
+                    ? 0.0
+                    : static_cast<double>(apc_result.ReaderRetries) /
+                        static_cast<double>(apc_result.StableReads);
+
+            const double vector_elapsed_ns =
+                vector_result.NsPerStableRead *
+                static_cast<double>(vector_result.StableReads);
+            const double apc_elapsed_ns =
+                apc_result.NsPerStableRead *
+                static_cast<double>(apc_result.StableReads);
+
+            vector_writer_mops[run] =
+                vector_elapsed_ns > 0.0
+                    ? (
+                        static_cast<double>(vector_result.WriterSuccess) *
+                        ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS
+                    ) / vector_elapsed_ns
+                    : 0.0;
+
+            apc_writer_mops[run] =
+                apc_elapsed_ns > 0.0
+                    ? (
+                        static_cast<double>(apc_result.WriterSuccess) *
+                        ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS
+                    ) / apc_elapsed_ns
+                    : 0.0;
+        }
+
+        const double vector_median = Median(vector_ns);
+        const double apc_median = Median(apc_ns);
+        const double retry_rate = Median(apc_retry_rate);
+        const double vector_read_mops =
+            vector_median > 0.0
+                ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
+                    vector_median
+                : 0.0;
+        const double apc_read_mops =
+            apc_median > 0.0
+                ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
+                    apc_median
+                : 0.0;
+        const double vector_write_mops = Median(vector_writer_mops);
+        const double apc_write_mops = Median(apc_writer_mops);
+
+        all_ok = all_ok && row_ok;
+
+        std::cout
+            << "  readers=" << std::setw(2) << reader_count
+            << "  mutex-read=" << std::setw(9)
+            << std::fixed << std::setprecision(2) << vector_median
+            << " ns (" << std::setw(6) << vector_read_mops << " M/s)"
+            << "  APC-read=" << std::setw(9) << apc_median
+            << " ns (" << std::setw(6) << apc_read_mops << " M/s)"
+            << "  APC/mutex=" << std::setw(6)
+            << Ratio(apc_median, vector_median) << "x"
+            << "  APC retry/read=" << std::setw(8)
+            << std::setprecision(4) << retry_rate
+            << "  writers M/s mutex/APC=" << std::setprecision(2)
+            << vector_write_mops << "/" << apc_write_mops
+            << "  integrity=" << (row_ok ? "PASS" : "FAIL")
+            << '\n';
+    }
+
+    return all_ok;
+}
+} // namespace ConcurrentGraphTestCore
+
+// -----------------------------------------------------------------------------
+// Test 2: concentrated and distributed structural mutation.
+// -----------------------------------------------------------------------------
+
+namespace Test02_Contention
+{
+struct HotspotScenario
+{
+    static constexpr std::size_t NODE_COUNT =
+        ConcurrencyConfig::HOTSPOT_MUTATION_NODE_COUNT;
+    static constexpr std::size_t PARENT_COUNT =
+        ConcurrencyConfig::HOTSPOT_MUTATION_PARENT_COUNT;
+    static constexpr std::size_t FIRST_CHILD =
+        ConcurrencyConfig::HOTSPOT_MUTATION_FIRST_CHILD;
+    static constexpr std::size_t MAX_WRITERS =
+        ConcurrencyConfig::HOTSPOT_MUTATION_MAX_WRITERS;
+    static constexpr std::uint8_t PARENT_CAPACITY =
+        ConcurrencyConfig::PARENT_CAPACITY;
+
+    using Schedule =
+        ConcurrentGraphTestCore::MutationSchedule<
+            MAX_WRITERS,
+            ConcurrencyConfig::MUTATIONS_PER_WRITER
+        >;
+
+    static constexpr std::size_t InitialHParent(std::size_t) noexcept
+    {
+        return ConcurrencyConfig::HOTSPOT_H_FIRST_PARENT;
+    }
+
+    static constexpr std::size_t InitialVParent(std::size_t) noexcept
+    {
+        return ConcurrencyConfig::HOTSPOT_V_FIRST_PARENT;
+    }
+
+    static void BuildSchedule(Schedule& schedule) noexcept
+    {
+        for (std::size_t writer = 0u; writer < MAX_WRITERS; ++writer)
+        {
+            std::size_t h_current = InitialHParent(writer);
+            std::size_t v_current = InitialVParent(writer);
+
+            for (
+                std::uint32_t step = 0u;
+                step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+                ++step
+            )
+            {
+                const std::size_t h_next =
+                    h_current == ConcurrencyConfig::HOTSPOT_H_FIRST_PARENT
+                        ? ConcurrencyConfig::HOTSPOT_H_SECOND_PARENT
+                        : ConcurrencyConfig::HOTSPOT_H_FIRST_PARENT;
+
+                const std::size_t v_next =
+                    v_current == ConcurrencyConfig::HOTSPOT_V_FIRST_PARENT
+                        ? ConcurrencyConfig::HOTSPOT_V_SECOND_PARENT
+                        : ConcurrencyConfig::HOTSPOT_V_FIRST_PARENT;
+                schedule[writer][step] = {
+                    static_cast<std::uint16_t>(h_next),
+                    static_cast<std::uint16_t>(v_next)
+                };
+                h_current = h_next;
+                v_current = v_next;
+            }
+        }
+    }
+};
+
+struct DistributedScenario
+{
+    static constexpr std::size_t PARENT_COUNT =
+        ConcurrencyConfig::DISTRIBUTED_PARENT_COUNT;
+    static constexpr std::size_t MAX_WRITERS =
+        ConcurrencyConfig::MAX_MUTATOR_THREADS;
+    static constexpr std::size_t FIRST_CHILD = PARENT_COUNT;
+    static constexpr std::size_t NODE_COUNT =
+        PARENT_COUNT + MAX_WRITERS;
+    static constexpr std::uint8_t PARENT_CAPACITY =
+        ConcurrencyConfig::PARENT_CAPACITY;
+
+    using Schedule =
+        ConcurrentGraphTestCore::MutationSchedule<
+            MAX_WRITERS,
+            ConcurrencyConfig::MUTATIONS_PER_WRITER
+        >;
+
+    static constexpr std::size_t InitialHParent(std::size_t writer) noexcept
+    {
+        return writer % PARENT_COUNT;
+    }
+
+    static constexpr std::size_t InitialVParent(std::size_t writer) noexcept
+    {
+        return
+            (writer + ConcurrencyConfig::DISTRIBUTED_V_PARENT_OFFSET) %
+            PARENT_COUNT;
+    }
+
+    static void BuildSchedule(Schedule& schedule) noexcept
+    {
+        ConcurrentGraphTestCore::BuildDistributedMutationSchedule<
+            DistributedScenario
+        >(schedule);
+    }
+};
+
+inline Result Run()
+{
+    const bool hotspot_ok =
+        ConcurrentGraphTestCore::RunMutationComparison<HotspotScenario>(
+            "TEST 2A - SAME-K HOTSPOT CONTENTION: GLOBAL MUTEX vs APC/FABRIC",
+            "Both backends use K=4 and parent<child. Each writer owns one child;\n"
+            "all writers replace parents drawn from the same two H and two V parents.\n"
+            "The vector DAG serializes ReplaceParent with one global mutex; APC/Fabric\n"
+            "uses one-attempt transactions with workload-level retry.",
+            ConcurrencyConfig::HOTSPOT_MUTATOR_THREADS
+        );
+
+    std::cout
+        << "\nTEST 2A OVERALL: " << (hotspot_ok ? "PASS" : "FAIL")
         << '\n';
 
-    return all_ok
-        ? Result::PASS
-        : Result::FAIL;
+    const bool distributed_ok =
+        ConcurrentGraphTestCore::RunMutationComparison<DistributedScenario>(
+            "TEST 2B - DISTRIBUTED RANDOM MUTATION: 100 PARENTS, 1-10 WRITERS",
+            "Both backends execute the same pre-generated schedule over 100 legal\n"
+            "parents and 10 writer-owned children. Random generation is outside timing.\n"
+            "Every row from 1 through 10 writers is printed; all parents satisfy\n"
+            "parent<child and integrity is proven after every measured run.",
+            ConcurrencyConfig::MUTATOR_THREADS
+        );
+
+    std::cout
+        << "\nTEST 2B OVERALL: " << (distributed_ok ? "PASS" : "FAIL")
+        << '\n';
+
+    const bool ok = hotspot_ok && distributed_ok;
+    std::cout
+        << "\nTEST 2 OVERALL: " << (ok ? "PASS" : "FAIL")
+        << '\n';
+
+    return ok ? Result::PASS : Result::FAIL;
 }
 } // namespace Test02_Contention
 
 // -----------------------------------------------------------------------------
-// Test 3: public parent reader versus atomic ReplaceParent writer.
+// Test 3: stable readers with two active writers.
 // -----------------------------------------------------------------------------
 
 namespace Test03_ReaderWriter
 {
+struct HotspotScenario
+{
+    static constexpr std::size_t NODE_COUNT =
+        ConcurrencyConfig::HOTSPOT_READER_NODE_COUNT;
+    static constexpr std::size_t PARENT_COUNT =
+        ConcurrencyConfig::HOTSPOT_READER_PARENT_COUNT;
+    static constexpr std::uint8_t PARENT_CAPACITY =
+        ConcurrencyConfig::HOTSPOT_READER_PARENT_CAPACITY;
+    static constexpr std::size_t CHILD =
+        ConcurrencyConfig::HOTSPOT_READER_CHILD;
+
+    inline static constexpr std::array<
+        ConcurrentGraphTestCore::WriterSpec,
+        ConcurrencyConfig::READER_WRITER_COUNT
+    > WRITERS{{
+        {
+            Axis::HORIZONTAL,
+            CHILD,
+            ConcurrencyConfig::HOTSPOT_H_FIRST_PARENT
+        },
+        {
+            Axis::VERTICAL,
+            CHILD,
+            ConcurrencyConfig::HOTSPOT_V_FIRST_PARENT
+        }
+    }};
+
+    using Schedule =
+        ConcurrentGraphTestCore::ParentSchedule<
+            ConcurrencyConfig::READER_WRITER_COUNT,
+            ConcurrencyConfig::MUTATIONS_PER_WRITER
+        >;
+
+    static void BuildSchedule(Schedule& schedule) noexcept
+    {
+        for (
+            std::size_t writer = 0u;
+            writer < ConcurrencyConfig::READER_WRITER_COUNT;
+            ++writer
+        )
+        {
+            std::size_t current = WRITERS[writer].InitialParent;
+            const std::size_t first =
+                writer == 0u
+                    ? ConcurrencyConfig::HOTSPOT_H_FIRST_PARENT
+                    : ConcurrencyConfig::HOTSPOT_V_FIRST_PARENT;
+
+            const std::size_t second =
+                writer == 0u
+                    ? ConcurrencyConfig::HOTSPOT_H_SECOND_PARENT
+                    : ConcurrencyConfig::HOTSPOT_V_SECOND_PARENT;
+
+            for (
+                std::uint32_t step = 0u;
+                step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+                ++step
+            )
+            {
+                current = current == first ? second : first;
+                schedule[writer][step] =
+                    static_cast<std::uint16_t>(current);
+            }
+        }
+    }
+
+    static constexpr bool IsExpectedParent(
+        std::size_t writer,
+        std::size_t parent
+    ) noexcept
+    {
+        return writer == 0u
+            ? parent == ConcurrencyConfig::HOTSPOT_H_FIRST_PARENT ||
+                parent == ConcurrencyConfig::HOTSPOT_H_SECOND_PARENT
+            : parent == ConcurrencyConfig::HOTSPOT_V_FIRST_PARENT ||
+                parent == ConcurrencyConfig::HOTSPOT_V_SECOND_PARENT;
+    }
+};
+
+struct DistributedScenario
+{
+    static constexpr std::size_t PARENT_COUNT =
+        ConcurrencyConfig::DISTRIBUTED_PARENT_COUNT;
+    static constexpr std::size_t FIRST_CHILD = PARENT_COUNT;
+    static constexpr std::size_t NODE_COUNT =
+        PARENT_COUNT + ConcurrencyConfig::READER_WRITER_COUNT;
+    static constexpr std::uint8_t PARENT_CAPACITY =
+        ConcurrencyConfig::PARENT_CAPACITY;
+
+    inline static constexpr std::array<
+        ConcurrentGraphTestCore::WriterSpec,
+        ConcurrencyConfig::READER_WRITER_COUNT
+    > WRITERS{{
+        {Axis::HORIZONTAL, FIRST_CHILD, 0u},
+        {
+            Axis::VERTICAL,
+            FIRST_CHILD + ConcurrencyConfig::SECOND_WRITER_CHILD_OFFSET,
+            ConcurrencyConfig::DISTRIBUTED_V_PARENT_OFFSET
+        }
+    }};
+
+    using Schedule =
+        ConcurrentGraphTestCore::ParentSchedule<
+            ConcurrencyConfig::READER_WRITER_COUNT,
+            ConcurrencyConfig::MUTATIONS_PER_WRITER
+        >;
+
+    static void BuildSchedule(Schedule& schedule) noexcept
+    {
+        ConcurrentGraphTestCore::BuildDistributedParentSchedule<
+            DistributedScenario
+        >(schedule);
+    }
+
+    static constexpr bool IsExpectedParent(
+        std::size_t,
+        std::size_t parent
+    ) noexcept
+    {
+        return parent < PARENT_COUNT;
+    }
+};
+
 inline Result Run()
 {
-    Banner("TEST 3 - PUBLIC PARENT READERS vs ATOMIC CROSS-PARENT WRITER");
-
-    constexpr std::size_t N = 4u;
-    constexpr std::uint8_t K = 2u;
-    constexpr std::size_t CHILD = 3u;
-    constexpr std::uint32_t WRITES = 50'000u;
-    constexpr std::uint32_t READS = 80'000u;
-    constexpr std::size_t READER_COUNT = 4u;
-
-    APCFabricBackend<N, 1u, K> backend{};
-    if (!backend.Initialize() || !backend.AddParent(0u, CHILD, Axis::HORIZONTAL))
-    {
-        return Result::FAIL;
-    }
-
-    std::barrier start(static_cast<std::ptrdiff_t>(READER_COUNT + 2u));
-    std::atomic<bool> failed{false};
-    std::atomic<std::uint64_t> found_a{0u};
-    std::atomic<std::uint64_t> found_b{0u};
-    std::atomic<std::uint64_t> retry{0u};
-    std::atomic<std::uint64_t> none{0u};
-    std::atomic<std::uint64_t> writer_retries{0u};
-
-    std::thread writer([&]() noexcept
-    {
-        std::size_t current = 0u;
-        std::uint64_t local_retries = 0u;
-        start.arrive_and_wait();
-        for (std::uint32_t i = 0u; i < WRITES; ++i)
-        {
-            const std::size_t next = current == 0u ? 1u : 0u;
-            if (!RetryReplace(
-                backend, current, next, CHILD,
-                Axis::HORIZONTAL, local_retries
-            ))
-            {
-                failed.store(true, std::memory_order_release);
-                break;
-            }
-            current = next;
-        }
-        writer_retries.store(local_retries, std::memory_order_release);
-    });
-
-    std::vector<std::thread> readers;
-    readers.reserve(READER_COUNT);
-    for (std::size_t reader_index = 0u; reader_index < READER_COUNT; ++reader_index)
-    {
-        readers.emplace_back([&, reader_index]() noexcept
-        {
-            std::uint64_t local_a = 0u;
-            std::uint64_t local_b = 0u;
-            std::uint64_t local_retry = 0u;
-            std::uint64_t local_none = 0u;
-            start.arrive_and_wait();
-            for (std::uint32_t i = 0u; i < READS; ++i)
-            {
-                const ReadResult read = backend.FindParent(
-                    CHILD,
-                    Axis::HORIZONTAL,
-                    0u,
-                    1u
-                );
-                if (!read.ContractValid())
-                {
-                    failed.store(true, std::memory_order_release);
-                    break;
-                }
-                if (read.IsRetry()) ++local_retry;
-                else if (read.IsNone()) ++local_none;
-                else if (read.Node == 0u) ++local_a;
-                else if (read.Node == 1u) ++local_b;
-                else
-                {
-                    failed.store(true, std::memory_order_release);
-                    break;
-                }
-                PerturbSchedule(i + reader_index);
-            }
-            found_a.fetch_add(local_a, std::memory_order_relaxed);
-            found_b.fetch_add(local_b, std::memory_order_relaxed);
-            retry.fetch_add(local_retry, std::memory_order_relaxed);
-            none.fetch_add(local_none, std::memory_order_relaxed);
-        });
-    }
-
-    start.arrive_and_wait();
-    writer.join();
-    for (std::thread& reader : readers) reader.join();
-
-    const GraphProof proof = ProveQuiescentCombinedDAG<N, K>(backend);
-    const bool ok = !failed.load(std::memory_order_acquire) &&
-        none.load(std::memory_order_acquire) == 0u &&
-        proof.Passed();
+    const bool hotspot_ok =
+        ConcurrentGraphTestCore::RunReaderComparison<HotspotScenario>(
+            "TEST 3A - TWO-PARENT HOTSPOT READS WITH TWO ACTIVE WRITERS",
+            "The original concentrated test is preserved: one H writer toggles 0<->1\n"
+            "and one V writer toggles 2<->3 on the same child. Stable-reader rows\n"
+            "are printed for every reader count from 1 through 16."
+        );
 
     std::cout
-        << "  parent A observations : " << found_a.load() << '\n'
-        << "  parent B observations : " << found_b.load() << '\n'
-        << "  reader RETRY          : " << retry.load() << '\n'
-        << "  reader NONE (illegal) : " << none.load() << '\n'
-        << "  writer retries        : " << writer_retries.load() << '\n'
-        << "\nTEST 3 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n';
+        << "\nTEST 3A OVERALL: " << (hotspot_ok ? "PASS" : "FAIL")
+        << '\n';
+
+    const bool distributed_ok =
+        ConcurrentGraphTestCore::RunReaderComparison<DistributedScenario>(
+            "TEST 3B - DISTRIBUTED STABLE READS: 100 PARENTS, TWO WRITERS",
+            "Two writers own separate child relations and mutate across the same 100\n"
+            "legal parents using identical pre-generated schedules for both backends.\n"
+            "Readers alternate between those live H and V relations; every reader\n"
+            "count from 1 through 16 is printed and RETRY is never counted as a read."
+        );
+
+    std::cout
+        << "\nTEST 3B OVERALL: " << (distributed_ok ? "PASS" : "FAIL")
+        << '\n';
+
+    const bool ok = hotspot_ok && distributed_ok;
+    std::cout
+        << "\nTEST 3 OVERALL: " << (ok ? "PASS" : "FAIL")
+        << '\n';
 
     return ok ? Result::PASS : Result::FAIL;
 }
 } // namespace Test03_ReaderWriter
+
 
 // -----------------------------------------------------------------------------
 // Test 4: API symmetry, multi-parent isolation, duplicate/full-row rejection.
@@ -5885,8 +6607,8 @@ inline int RunAll()
 
     const std::array<std::pair<const char*, Result>, 8u> results{{
         {"Test 1 - adapter-free quiescent benchmark", Test01_Baseline::Run()},
-        {"Test 2 - same-K contention benchmark", Test02_Contention::Run()},
-        {"Test 3 - reader/writer atomicity", Test03_ReaderWriter::Run()},
+        {"Test 2 - hotspot + distributed mutation", Test02_Contention::Run()},
+        {"Test 3 - hotspot + distributed readers", Test03_ReaderWriter::Run()},
         {"Test 4 - public mutation API", Test04_PublicMutationAPI::Run()},
         {"Test 5 - combined DAG proof", Test05_CombinedAcyclicity::Run()},
         {"Test 6 - region schema and views", Test06_RegionSchemaAndViews::Run()},

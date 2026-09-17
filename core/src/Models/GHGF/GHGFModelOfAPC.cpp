@@ -1,4 +1,3 @@
-#pragma once
 #include "Models/GHGF/GHGFModelOfAPC.hpp"
 #include <span>
 

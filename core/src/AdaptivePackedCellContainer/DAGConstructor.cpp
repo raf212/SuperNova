@@ -1,4 +1,3 @@
-#pragma once
 #include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
 #include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
 #include "NeuromorphicTimeSpace/SlabToFabricConverterAndCordinator.h"
@@ -328,9 +327,9 @@ namespace BidirectionalInMemGraph
         EdgeBuilder::EdgeStatus final_status
     ) noexcept
     {
-        for (uint8_t i = transaction.RelationCount; i > UNSIGNED_ZERO; i--)
+        for (uint8_t i = transaction.RelationCount; i > UNSIGNED_ZERO; --i)
         {
-            const DAGRelationDelta& delta = transaction.Relations[i - 1];
+            const DAGRelationDelta& delta = transaction.Relations[i - 1u];
 
             StoreReservedParentRelation_(
                 transaction.EdgeTable,
@@ -339,19 +338,25 @@ namespace BidirectionalInMemGraph
                 delta.Work
             );
 
-            CompiledDAGRelation_(
-                transaction.EdgeTable,
-                delta.ChildSlot,
-                delta.Ordinal,
-                delta.Work
-            );
+            const bool before_empty = EdgeBuilder::IsEmpty(delta.Before);
+            const bool after_empty = EdgeBuilder::IsEmpty(delta.Work);
+
+            if (before_empty != after_empty)
+            {
+                CompiledDAGRelation_(
+                    transaction.EdgeTable,
+                    delta.ChildSlot,
+                    delta.Ordinal,
+                    delta.Work
+                );
+            }
         }
-        
+
         SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
-    
-        auto Publish___ = [&](bool publish_anchor) noexcept -> void
+
+        auto publish = [&](bool publish_anchor) noexcept
         {
-            for (uint8_t i = 0; i < transaction.RowCount; i++)
+            for (uint8_t i = 0u; i < transaction.RowCount; ++i)
             {
                 DAGRowParticipant& row = transaction.Rows[i];
 
@@ -372,8 +377,8 @@ namespace BidirectionalInMemGraph
             }
         };
 
-        Publish___(false);
-        Publish___(true);
+        publish(false);
+        publish(true);
     }
 
     void DAGMutationConf::AbortRowTransaction_(
