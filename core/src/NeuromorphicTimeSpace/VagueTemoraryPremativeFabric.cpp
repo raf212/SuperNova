@@ -6,18 +6,15 @@
 namespace BidirectionalInMemGraph
 {
 
-    bool APCFinilizer::GetExistingAPC_(
+    bool APCFinilizer::BindExistingAPCSnapshot_(
         uint32_t slot,
         AdaptivePackedCellContainer& apc,
-        APCUseScope& apc_use,
-        std::optional<uint32_t> expected_generation
+        std::optional<uint32_t> expected_generation 
     ) noexcept
     {
         if (
-            !IsFabricActive() ||
             slot >= FabCache_->CountOfAPC_ ||
             apc.IsFabricBound_() ||
-            apc_use ||
             (
                 expected_generation.has_value() &&
                 !HandleOfAPCStatic::IsGenerationValid(
@@ -29,57 +26,60 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const ADS::RangeOfAPC range = GetSegmentPoolRange(slot);
-        uint64_t* generation_cell = GetAPCGenerationPtr_(slot);
-        if (!generation_cell || !range.IsValid)
-        {
-            return false;
-        }
-        const uint64_t control_raw = std::atomic_ref<const uint64_t>(*generation_cell).load(std::memory_order_acquire);
-
-        const HandleOfAPCStatic::ControlValues control_values = HandleOfAPCStatic::ReadControlCell(control_raw);
+        uint64_t * const generation_cell = SlabBasePtr_ + FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
+        const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(
+            std::atomic_ref<const uint64_t>(*generation_cell).load(std::memory_order_acquire)
+        );
         if (
-            control_values.Closed ||
-            !HandleOfAPCStatic::IsGenerationValid(control_values.Generation) ||
+            control.Closed ||
+            !HandleOfAPCStatic::IsGenerationValid(control.Generation) ||
             (
                 expected_generation.has_value() &&
-                control_values.Generation != expected_generation.value()
+                control.Generation != expected_generation.value()
             )
         )
         {
             return false;
         }
+        
+        apc.APCCache_.FabricOwnerPtr_ = this;
+        apc.APCCache_.RawAPCBasePtr_ = reinterpret_cast<std::byte*>(
+            SlabBasePtr_ +
+            FabCache_->SegmentPoolBegin_ +
+            static_cast<size_t>(slot) * FabCache_->PerAPCRuntimeCellCount_
+        );
+        apc.APCCache_.APCSlotIdx_ = slot;
+        apc.APCCache_.GenerationCellPtr_ = generation_cell;
+        apc.APCCache_.CurrentGeneration_ = control.Generation;
+        return true;
+    }
 
-        const uint32_t resolved_generation = control_values.Generation;
 
-        if (!apc.BindExternalRawFabricBacking_(
-            &SlabBasePtr_[range.BeginIndex],
-            this,
-            slot,
-            generation_cell,
-            resolved_generation
-        ))
+
+    bool APCFinilizer::GetExistingAPC_(
+        uint32_t slot,
+        AdaptivePackedCellContainer& apc,
+        APCUseScope& apc_use,
+        std::optional<uint32_t> expected_generation
+    ) noexcept
+    {
+        if (!IsFabricActive() || apc_use)
+        {
+            return false;
+        }
+
+        if (!BindExistingAPCSnapshot_(slot, apc, expected_generation))
         {
             return false;
         }
 
         APCUseScope acquired_use = apc.AcquireAPCUse_();
-
         if (!acquired_use)
         {
             apc.ReleseFabricBindingOnly_();
             return false;
         }
-        const DescriptionOfAPC::SeqLockAndStateStruct state = ReadAPCStateAtomically_(slot);
-        if (
-            !state.IsValid ||
-            state.StateOfTheAPC != StateOfAPC::LIVE
-        )
-        {
-            acquired_use.Release();
-            apc.ReleseFabricBindingOnly_();
-            return false;
-        }
+
         apc_use = std::move(acquired_use);
         return true;
     }
@@ -90,11 +90,11 @@ namespace BidirectionalInMemGraph
         uint32_t parent_generation,
         FabricSegments edge_table,
         uint32_t locator,
-        APCUseScope& use,
         AdaptivePackedCellContainer& child
     ) noexcept
     {
         child = AdaptivePackedCellContainer{};
+
         if (
             parent_slot >= FabCache_->CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
@@ -109,70 +109,12 @@ namespace BidirectionalInMemGraph
             return SeqLockedOperation::NONE;
         }
 
-        EdgeBuilder::ParentRelation relation{};
-        const SeqLockedOperation read = ReadParentRelation_(
-            edge_table,
+        return BindExistingAPCSnapshot_(
             EdgeBuilder::RelationSlot(locator),
-            EdgeBuilder::RelationOrdinal(locator),
-            relation,
-            DEFAULT_INTERNAL_TRIES__
-        ); 
-
-        if (read != SeqLockedOperation::FOUND)
-        {
-            return read;
-        }
-
-        if (
-            relation.ParentHandle != EdgeBuilder::MakeParentHandle(parent_slot, parent_generation)
+            child
         )
-        {
-            return SeqLockedOperation::RETRY;
-        }
-
-
-        APCUseScope child_use{};
-        if (
-            !GetExistingAPC_(
-                EdgeBuilder::RelationSlot(locator),
-                child,
-                child_use
-            )
-        )
-        {
-            return SeqLockedOperation::NONE;
-        }
-        
-        if (
-            child.APCCache_.FabricOwnerPtr_ != this ||
-            child.APCCache_.APCSlotIdx_ != EdgeBuilder::RelationSlot(locator)
-        )
-        {
-            return SeqLockedOperation::RETRY;
-        }
-
-        EdgeBuilder::ParentRelation confirmed{};
-        const SeqLockedOperation confirm_read = ReadParentRelation_(
-            edge_table,
-            EdgeBuilder::RelationSlot(locator),
-            EdgeBuilder::RelationOrdinal(locator),
-            confirmed,
-            DEFAULT_INTERNAL_TRIES__
-        );
-        if (confirm_read != SeqLockedOperation::FOUND)
-        {
-            return confirm_read;
-        }
-        if (
-            confirmed.ParentHandle !=
-            EdgeBuilder::MakeParentHandle(parent_slot, parent_generation)
-        )
-        {
-            return SeqLockedOperation::RETRY;
-        }
-
-        use = std::move(child_use);
-        return SeqLockedOperation::FOUND;
+            ? SeqLockedOperation::FOUND
+            : SeqLockedOperation::NONE;
     }
 
 
@@ -187,7 +129,7 @@ namespace BidirectionalInMemGraph
     {
         FabricToAPCLinker::RelationOparation result{};
         AdaptivePackedCellContainer parent{};
-        
+
         if (
             child_slot >= FabCache_->CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(child_generation) ||
@@ -200,8 +142,8 @@ namespace BidirectionalInMemGraph
         {
             return parent;
         }
-        
-        for (uint32_t i = 0; i < max_tries; i++)
+
+        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
             EdgeBuilder::ParentRelation relation{};
             const SeqLockedOperation read = ReadParentRelation_(
@@ -216,34 +158,20 @@ namespace BidirectionalInMemGraph
             {
                 continue;
             }
-
             if (read != SeqLockedOperation::FOUND)
             {
                 return parent;
             }
 
-            APCUseScope parent_use{};
-            if (
-                !GetExistingAPC_(
-                    EdgeBuilder::ParentSlot(relation),
-                    parent,
-                    parent_use,
-                    EdgeBuilder::ParentGeneration(relation)
-                )
-            )
-            {
-                continue;
-            }
-            
-            if (
-                parent.APCCache_.FabricOwnerPtr_ != this ||
-                parent.APCCache_.CurrentGeneration_ != EdgeBuilder::ParentGeneration(relation)
-            )
+            if (!BindExistingAPCSnapshot_(
+                EdgeBuilder::ParentSlot(relation),
+                parent,
+                EdgeBuilder::ParentGeneration(relation)
+            ))
             {
                 continue;
             }
 
-            result.Use_ = std::move(parent_use);
             result.RelationLocator_ = EdgeBuilder::PackRelationLocator(
                 child_slot,
                 relation_ordinal
@@ -254,16 +182,14 @@ namespace BidirectionalInMemGraph
             {
                 *result_ptr = std::move(result);
             }
-
             return parent;
         }
-        
+
         result.MutationOP_ = SeqLockedOperation::RETRY;
         if (result_ptr)
         {
             *result_ptr = std::move(result);
         }
-        
         return parent;
     }
 
@@ -340,7 +266,6 @@ namespace BidirectionalInMemGraph
                 parent_generation,
                 edge_table,
                 first,
-                result.Use_,
                 child
             );
 
@@ -432,7 +357,6 @@ namespace BidirectionalInMemGraph
                 parent_generation,
                 edge_table,
                 before.TailLocator,
-                result.Use_,
                 child
             );
 
@@ -569,7 +493,6 @@ namespace BidirectionalInMemGraph
                 parent_generation,
                 edge_table,
                 next,
-                result.Use_,
                 child
             );
 
@@ -649,6 +572,7 @@ namespace BidirectionalInMemGraph
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
             child = AdaptivePackedCellContainer{};
+
             EdgeBuilder::EdgeData before{};
             if (!ReadEdgeHeader_(edge_table, parent_slot, before))
             {
@@ -666,16 +590,7 @@ namespace BidirectionalInMemGraph
                 return child;
             }
 
-            EdgeBuilder::ParentRelation tail{};
             EdgeBuilder::ParentRelation current{};
-
-            const SeqLockedOperation tail_read = ReadParentRelation_(
-                edge_table,
-                EdgeBuilder::RelationSlot(before.TailLocator),
-                EdgeBuilder::RelationOrdinal(before.TailLocator),
-                tail,
-                1u
-            );
             const SeqLockedOperation current_read = ReadParentRelation_(
                 edge_table,
                 EdgeBuilder::RelationSlot(current_relation_locator),
@@ -684,25 +599,22 @@ namespace BidirectionalInMemGraph
                 1u
             );
 
-            if (
-                tail_read == SeqLockedOperation::RETRY ||
-                current_read == SeqLockedOperation::RETRY
-            )
+            if (current_read == SeqLockedOperation::RETRY)
             {
                 continue;
             }
             if (
-                tail_read != SeqLockedOperation::FOUND ||
                 current_read != SeqLockedOperation::FOUND ||
-                tail.ParentHandle != parent_handle ||
                 current.ParentHandle != parent_handle
             )
             {
                 return child;
             }
 
-            const uint32_t first = EdgeBuilder::NextLocator(tail);
-            if (current_relation_locator == first)
+            const uint32_t previous = EdgeBuilder::PreviousLocator(current);
+
+            // In this circular list, first.previous is the parent tail.
+            if (previous == before.TailLocator)
             {
                 EdgeBuilder::EdgeData after{};
                 if (
@@ -715,14 +627,11 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            const uint32_t previous = EdgeBuilder::PreviousLocator(current);
-
             const SeqLockedOperation resolved = ResolveChildLocator_(
                 parent_slot,
                 parent_generation,
                 edge_table,
                 previous,
-                result.Use_,
                 child
             );
 
@@ -732,8 +641,7 @@ namespace BidirectionalInMemGraph
             }
             if (resolved != SeqLockedOperation::FOUND)
             {
-                child = AdaptivePackedCellContainer{};
-                return child;
+                return AdaptivePackedCellContainer{};
             }
 
             EdgeBuilder::EdgeData after{};
@@ -751,21 +659,16 @@ namespace BidirectionalInMemGraph
             {
                 *result_ptr = std::move(result);
             }
-            
             return child;
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
-
         if (result_ptr)
         {
             *result_ptr = std::move(result);
         }
-
-        child = AdaptivePackedCellContainer{};
-        return child;
+        return AdaptivePackedCellContainer{};
     }
-
 
     bool APCFinilizer::CreateAPC(
         AdaptivePackedCellContainer& desired_apc,

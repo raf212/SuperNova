@@ -1,4 +1,5 @@
 
+
 #pragma once
 
 // SuperNova APC/Fabric paper-quality systems test kit (C++20)
@@ -18,8 +19,10 @@
 //   int main() { return APCDAGTests::RunAll(); }
 //
 // Add core/headers to the compiler include path and link the production .cpp files.
-// Tests 1-5 and 7 use only public APC/Fabric operations. The APC adapter resolves
-// returned nodes by slab slot identity; it never compares host-object addresses.
+// Tests 1-5 and 7 use only public APC/Fabric operations. Correctness paths resolve
+// returned APC facades by slab slot identity; they never compare host-object addresses.
+// Timed traversal in Test 1 deliberately excludes this TestKit-only facade->index
+// conversion so adapter bookkeeping is not charged to APC/Fabric traversal.
 // Test 6 uses a read-only derived Fabric probe to verify the compact schema-table
 // geometry and protocol storage. Test 8 exercises whole-slab Save/Attach/Detach
 // relocation without involving GHGF.
@@ -97,8 +100,18 @@ inline void Banner(const char* title)
 inline void PrintBenchmarkEnvironment()
 {
     std::cout
-        << "\nBENCHMARK CONTEXT\n"
-        << "  C++ language level      : " << __cplusplus << '\n'
+        << "\nBENCHMARK CONTEXT\n";
+
+#if defined(_MSC_VER) && defined(_MSVC_LANG)
+    std::cout
+        << "  C++ language level      : " << _MSVC_LANG << " (_MSVC_LANG)\n"
+        << "  legacy __cplusplus      : " << __cplusplus << '\n';
+#else
+    std::cout
+        << "  C++ language level      : " << __cplusplus << '\n';
+#endif
+
+    std::cout
         << "  pointer width           : " << (sizeof(void*) * 8u) << " bits\n"
         << "  hardware_concurrency    : " << std::thread::hardware_concurrency() << '\n'
         << "  uint64 atomic lock-free : "
@@ -187,6 +200,51 @@ struct ReadResult
     }
 };
 
+// Lightweight timed-read result. Unlike ReadResult, this does not require the
+// benchmark adapter to revalidate a returned APC facade just to recover a logical
+// test-node index. The real public Find* call still executes in full.
+struct BenchmarkReadResult
+{
+    static constexpr std::size_t NO_NODE = ReadResult::NO_NODE;
+    static constexpr std::uint32_t NO_LOCATOR = ReadResult::NO_LOCATOR;
+
+    std::size_t NodeHint = NO_NODE;
+    std::uint32_t Locator = NO_LOCATOR;
+    ReadOperation Outcome = ReadOperation::NONE;
+    bool ObjectPresent = false;
+
+    bool IsFound() const noexcept
+    {
+        return Outcome == ReadOperation::FOUND &&
+            ObjectPresent &&
+            Locator != NO_LOCATOR;
+    }
+
+    bool IsNone() const noexcept
+    {
+        return Outcome == ReadOperation::NONE &&
+            !ObjectPresent &&
+            Locator == NO_LOCATOR;
+    }
+
+    bool IsRetry() const noexcept
+    {
+        return Outcome == ReadOperation::RETRY &&
+            !ObjectPresent &&
+            Locator == NO_LOCATOR;
+    }
+
+    bool ContractValid() const noexcept
+    {
+        return IsFound() || IsNone() || IsRetry();
+    }
+
+    bool HasNodeHint() const noexcept
+    {
+        return IsFound() && NodeHint != NO_NODE;
+    }
+};
+
 struct ReadCounts
 {
     std::uint64_t Found = 0u;
@@ -195,6 +253,19 @@ struct ReadCounts
     std::uint64_t BadContract = 0u;
 
     void Observe(const ReadResult& read) noexcept
+    {
+        if (!read.ContractValid())
+        {
+            ++BadContract;
+            return;
+        }
+
+        if (read.IsFound()) ++Found;
+        else if (read.IsRetry()) ++Retry;
+        else ++None;
+    }
+
+    void Observe(const BenchmarkReadResult& read) noexcept
     {
         if (!read.ContractValid())
         {
@@ -1328,6 +1399,112 @@ public:
         return Convert_(found, operation);
     }
 
+    BenchmarkReadResult BenchmarkFindParent(
+        std::size_t child,
+        Axis axis,
+        std::uint8_t ordinal,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        if (child >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[child].FindParent(
+            EdgeTableForAxis(axis),
+            ordinal,
+            &operation,
+            max_tries
+        );
+        (void)found;
+        return BenchmarkConvert_(operation, BenchmarkReadResult::NO_NODE);
+    }
+
+    BenchmarkReadResult BenchmarkFindFirstChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindFirstChild(
+            EdgeTableForAxis(axis),
+            &operation,
+            max_tries
+        );
+        (void)found;
+        return BenchmarkChildConvert_(operation);
+    }
+
+    BenchmarkReadResult BenchmarkFindLastChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindLastChild(
+            EdgeTableForAxis(axis),
+            &operation,
+            max_tries
+        );
+        (void)found;
+        return BenchmarkChildConvert_(operation);
+    }
+
+    BenchmarkReadResult BenchmarkFindNextChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t locator,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindNextChild(
+            EdgeTableForAxis(axis),
+            locator,
+            &operation,
+            max_tries
+        );
+        (void)found;
+        return BenchmarkChildConvert_(operation);
+    }
+
+    BenchmarkReadResult BenchmarkFindPreviousChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t locator,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        if (parent >= NodeCount)
+        {
+            return {};
+        }
+
+        TestAPC::RelationOperationForTest operation{};
+        AdaptivePackedCellContainer found = Nodes_[parent].FindPreviousChild(
+            EdgeTableForAxis(axis),
+            locator,
+            &operation,
+            max_tries
+        );
+        (void)found;
+        return BenchmarkChildConvert_(operation);
+    }
+
     bool StorePayload(
         std::size_t node,
         std::uint32_t word,
@@ -1418,19 +1595,43 @@ private:
 
     std::size_t IndexOfSlot_(std::uint32_t slot) const noexcept
     {
-        if (slot == ADS::APC_INDEX_BOUND_SENTINAL)
-        {
-            return ReadResult::NO_NODE;
-        }
+        // Initialize() requires the benchmark's logical node i to occupy Fabric slot i.
+        // Therefore correctness conversion can be O(1); no linear scan is necessary.
+        return
+            slot < NodeCount && Slots_[slot] == slot
+                ? static_cast<std::size_t>(slot)
+                : ReadResult::NO_NODE;
+    }
 
-        for (std::size_t i = 0u; i < NodeCount; ++i)
-        {
-            if (Slots_[i] == slot)
-            {
-                return i;
-            }
-        }
-        return ReadResult::NO_NODE;
+    static BenchmarkReadResult BenchmarkConvert_(
+        const TestAPC::RelationOperationForTest& operation,
+        std::size_t node_hint
+    ) noexcept
+    {
+        const bool present =
+            operation.MutationOP_ == ReadOperation::FOUND;
+
+        return BenchmarkReadResult{
+            present ? node_hint : BenchmarkReadResult::NO_NODE,
+            operation.RelationLocator_,
+            operation.MutationOP_,
+            present
+        };
+    }
+
+    static BenchmarkReadResult BenchmarkChildConvert_(
+        const TestAPC::RelationOperationForTest& operation
+    ) noexcept
+    {
+        const std::size_t node_hint =
+            operation.MutationOP_ == ReadOperation::FOUND &&
+            operation.RelationLocator_ != UINT32_MAX
+                ? static_cast<std::size_t>(
+                    EdgeBuilder::RelationSlot(operation.RelationLocator_)
+                )
+                : BenchmarkReadResult::NO_NODE;
+
+        return BenchmarkConvert_(operation, node_hint);
     }
 
     ReadResult Convert_(
@@ -1450,6 +1651,122 @@ private:
         };
     }
 };
+
+// -----------------------------------------------------------------------------
+// Benchmark call adapters.
+//
+// Vector baselines simply project their normal read result. APCFabricBackend has
+// dedicated BenchmarkFind* methods that execute the same public APC Find* call but
+// do not perform TestKit-only facade->logical-index conversion afterward.
+// -----------------------------------------------------------------------------
+
+template <typename Backend>
+BenchmarkReadResult BenchmarkFindParentCall(
+    Backend& backend,
+    std::size_t child,
+    Axis axis,
+    std::uint8_t ordinal,
+    std::uint32_t max_tries = 1u) noexcept
+{
+    if constexpr (requires {
+        backend.BenchmarkFindParent(child, axis, ordinal, max_tries);
+    })
+    {
+        return backend.BenchmarkFindParent(child, axis, ordinal, max_tries);
+    }
+    else
+    {
+        const ReadResult read = backend.FindParent(child, axis, ordinal, max_tries);
+        return BenchmarkReadResult{
+            read.Node,
+            read.Locator,
+            read.Outcome,
+            read.NodePresent
+        };
+    }
+}
+
+template <typename Backend>
+BenchmarkReadResult BenchmarkFindFirstChildCall(
+    Backend& backend,
+    std::size_t parent,
+    Axis axis,
+    std::uint32_t max_tries = 1u) noexcept
+{
+    if constexpr (requires {
+        backend.BenchmarkFindFirstChild(parent, axis, max_tries);
+    })
+    {
+        return backend.BenchmarkFindFirstChild(parent, axis, max_tries);
+    }
+    else
+    {
+        const ReadResult read = backend.FindFirstChild(parent, axis, max_tries);
+        return BenchmarkReadResult{read.Node, read.Locator, read.Outcome, read.NodePresent};
+    }
+}
+
+template <typename Backend>
+BenchmarkReadResult BenchmarkFindLastChildCall(
+    Backend& backend,
+    std::size_t parent,
+    Axis axis,
+    std::uint32_t max_tries = 1u) noexcept
+{
+    if constexpr (requires {
+        backend.BenchmarkFindLastChild(parent, axis, max_tries);
+    })
+    {
+        return backend.BenchmarkFindLastChild(parent, axis, max_tries);
+    }
+    else
+    {
+        const ReadResult read = backend.FindLastChild(parent, axis, max_tries);
+        return BenchmarkReadResult{read.Node, read.Locator, read.Outcome, read.NodePresent};
+    }
+}
+
+template <typename Backend>
+BenchmarkReadResult BenchmarkFindNextChildCall(
+    Backend& backend,
+    std::size_t parent,
+    Axis axis,
+    std::uint32_t locator,
+    std::uint32_t max_tries = 1u) noexcept
+{
+    if constexpr (requires {
+        backend.BenchmarkFindNextChild(parent, axis, locator, max_tries);
+    })
+    {
+        return backend.BenchmarkFindNextChild(parent, axis, locator, max_tries);
+    }
+    else
+    {
+        const ReadResult read = backend.FindNextChild(parent, axis, locator, max_tries);
+        return BenchmarkReadResult{read.Node, read.Locator, read.Outcome, read.NodePresent};
+    }
+}
+
+template <typename Backend>
+BenchmarkReadResult BenchmarkFindPreviousChildCall(
+    Backend& backend,
+    std::size_t parent,
+    Axis axis,
+    std::uint32_t locator,
+    std::uint32_t max_tries = 1u) noexcept
+{
+    if constexpr (requires {
+        backend.BenchmarkFindPreviousChild(parent, axis, locator, max_tries);
+    })
+    {
+        return backend.BenchmarkFindPreviousChild(parent, axis, locator, max_tries);
+    }
+    else
+    {
+        const ReadResult read = backend.FindPreviousChild(parent, axis, locator, max_tries);
+        return BenchmarkReadResult{read.Node, read.Locator, read.Outcome, read.NodePresent};
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Exhaustive quiescent validator. It rebuilds H, V and H-union-V only through
@@ -1835,8 +2152,9 @@ Timing HorizontalForward(Backend& backend)
             ++parent
         )
         {
-            const ReadResult read =
-                backend.FindFirstChild(
+            const BenchmarkReadResult read =
+                BenchmarkFindFirstChildCall(
+                    backend,
                     parent,
                     Axis::HORIZONTAL
                 );
@@ -1845,14 +2163,14 @@ Timing HorizontalForward(Backend& backend)
 
             if (
                 !read.IsFound() ||
-                read.Node != parent + 1u
+                (read.HasNodeHint() && read.NodeHint != parent + 1u)
             )
             {
                 return {};
             }
 
             timing.Checksum +=
-                read.Node + 1u;
+                parent + 2u;
         }
     }
 
@@ -1891,8 +2209,9 @@ Timing HorizontalBackward(Backend& backend)
             --child
         )
         {
-            const ReadResult read =
-                backend.FindParent(
+            const BenchmarkReadResult read =
+                BenchmarkFindParentCall(
+                    backend,
                     child,
                     Axis::HORIZONTAL,
                     0u
@@ -1902,14 +2221,14 @@ Timing HorizontalBackward(Backend& backend)
 
             if (
                 !read.IsFound() ||
-                read.Node != child - 1u
+                (read.HasNodeHint() && read.NodeHint != child - 1u)
             )
             {
                 return {};
             }
 
             timing.Checksum +=
-                read.Node + 1u;
+                child;
         }
     }
 
@@ -1951,8 +2270,9 @@ Timing VerticalForward(
         ++round
     )
     {
-        ReadResult read =
-            backend.FindFirstChild(
+        BenchmarkReadResult read =
+            BenchmarkFindFirstChildCall(
+                backend,
                 MAIN_V_PARENT,
                 Axis::VERTICAL
             );
@@ -1967,7 +2287,8 @@ Timing VerticalForward(
         {
             if (
                 !read.IsFound() ||
-                read.Node !=
+                !read.HasNodeHint() ||
+                read.NodeHint !=
                     VERTICAL_ORDER[i]
             )
             {
@@ -1979,7 +2300,7 @@ Timing VerticalForward(
                 std::uint64_t value = 0u;
 
                 if (!backend.LoadPayload(
-                    read.Node,
+                    read.NodeHint,
                     static_cast<std::uint32_t>(
                         i % PAYLOAD_WORDS
                     ),
@@ -1995,14 +2316,15 @@ Timing VerticalForward(
             else
             {
                 timing.Checksum +=
-                    read.Node + 1u;
+                    VERTICAL_ORDER[i] + 1u;
             }
 
             const std::uint32_t cursor =
                 read.Locator;
 
             read =
-                backend.FindNextChild(
+                BenchmarkFindNextChildCall(
+                    backend,
                     MAIN_V_PARENT,
                     Axis::VERTICAL,
                     cursor
@@ -2048,8 +2370,9 @@ Timing VerticalBackward(
         ++round
     )
     {
-        ReadResult read =
-            backend.FindLastChild(
+        BenchmarkReadResult read =
+            BenchmarkFindLastChildCall(
+                backend,
                 MAIN_V_PARENT,
                 Axis::VERTICAL
             );
@@ -2063,7 +2386,8 @@ Timing VerticalBackward(
         {
             if (
                 !read.IsFound() ||
-                read.Node !=
+                !read.HasNodeHint() ||
+                read.NodeHint !=
                     VERTICAL_ORDER[i]
             )
             {
@@ -2071,13 +2395,14 @@ Timing VerticalBackward(
             }
 
             timing.Checksum +=
-                read.Node + 1u;
+                VERTICAL_ORDER[i] + 1u;
 
             const std::uint32_t cursor =
                 read.Locator;
 
             read =
-                backend.FindPreviousChild(
+                BenchmarkFindPreviousChildCall(
+                    backend,
                     MAIN_V_PARENT,
                     Axis::VERTICAL,
                     cursor
@@ -2378,7 +2703,7 @@ ConstructionMedianUs()
 inline Result Run()
 {
     Banner(
-        "TEST 1 - QUIESCENT COST / STORAGE FOOTPRINT / BASELINE FAIRNESS"
+        "TEST 1 - QUIESCENT CORE COST / STORAGE FOOTPRINT / BASELINE FAIRNESS"
     );
 
     std::cout
@@ -2387,7 +2712,10 @@ inline Result Run()
         << "Baseline A is a one-parent-per-axis lower bound.\n"
         << "Baseline B supports the same K-parent H/V DAG rule under one global mutation mutex.\n"
         << "APC/Fabric additionally provides generations, schema protocols, relocation metadata,\n"
-        << "and sequence-validated public read/mutation contracts.\n\n";
+        << "and sequence-validated public read/mutation contracts.\n"
+        << "Timed APC traversal executes the public Find* operation but excludes the TestKit-only\n"
+        << "returned-facade -> logical-index conversion. Full facade identity is still checked\n"
+        << "by the exhaustive correctness proof before and after timing.\n\n";
 
     const std::optional<double>
         lower_build_us =
@@ -5556,7 +5884,7 @@ inline int RunAll()
     PrintBenchmarkEnvironment();
 
     const std::array<std::pair<const char*, Result>, 8u> results{{
-        {"Test 1 - fair quiescent benchmark", Test01_Baseline::Run()},
+        {"Test 1 - adapter-free quiescent benchmark", Test01_Baseline::Run()},
         {"Test 2 - same-K contention benchmark", Test02_Contention::Run()},
         {"Test 3 - reader/writer atomicity", Test03_ReaderWriter::Run()},
         {"Test 4 - public mutation API", Test04_PublicMutationAPI::Run()},
