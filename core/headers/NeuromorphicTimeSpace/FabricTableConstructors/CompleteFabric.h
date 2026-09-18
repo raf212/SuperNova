@@ -59,10 +59,15 @@ namespace BidirectionalInMemGraph
         using EdgeTableRange = ADS::RangeOfAPC;
 
     protected:
-
         EdgeTableRange ReadAnEdgeTableRange_(
             FabricSegments edge_table,
             uint32_t row_slot
+        ) noexcept;
+
+        size_t EdgeControlCellIndex_(
+            FabricSegments edge_table,
+            uint32_t row_slot,
+            EdgeBuilder::EdgeDomain domain
         ) noexcept;
 
         std::span<EdgeBuilder::ParentRelation> ParentRelations_(
@@ -77,17 +82,33 @@ namespace BidirectionalInMemGraph
 
         bool InitializeEdgeTable_(FabricSegments edge_table) noexcept;
 
+        bool ReadEdgeControl_(
+            FabricSegments edge_table,
+            uint32_t row_slot,
+            EdgeBuilder::EdgeDomain domain,
+            EdgeBuilder::EdgeData& edge
+        ) noexcept;
+
         bool ReadEdgeHeader_(
             FabricSegments edge_table,
             uint32_t row_slot,
             EdgeBuilder::EdgeData& edge
         ) noexcept;
 
-        SeqLockedOperation ReadParentRelation_(
+        SeqLockedOperation ReadParentHandle_(
             FabricSegments edge_table,
             uint32_t child_slot,
             uint8_t relation_ordinal,
-            EdgeBuilder::ParentRelation& relation,
+            uint64_t& parent_handle,
+            uint32_t max_tries = DEFAULT_MAX_TRIES
+        ) noexcept;
+
+        SeqLockedOperation ReserveEdgeDomain_(
+            FabricSegments edge_table,
+            uint32_t row_slot,
+            EdgeBuilder::EdgeDomain domain,
+            EdgeBuilder::EdgeStatus required_status,
+            EdgeBuilder::EdgeData& before,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
@@ -99,11 +120,27 @@ namespace BidirectionalInMemGraph
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
-        void StoreReservedParentRelation_(
+        void StoreReservedParentHandle_(
             FabricSegments edge_table,
             uint32_t child_slot,
             uint8_t relation_ordinal,
-            const EdgeBuilder::ParentRelation& relation
+            uint64_t parent_handle
+        ) noexcept;
+
+        void StoreReservedSiblingLocators_(
+            FabricSegments edge_table,
+            uint32_t child_slot,
+            uint8_t relation_ordinal,
+            uint64_t sibling_locators
+        ) noexcept;
+
+        void PublishReservedEdgeDomain_(
+            FabricSegments edge_table,
+            uint32_t row_slot,
+            EdgeBuilder::EdgeDomain domain,
+            const EdgeBuilder::EdgeData& before,
+            uint32_t desired_tail,
+            EdgeBuilder::EdgeStatus desired_status
         ) noexcept;
 
         void PublishReservedEdgeRow_(
@@ -114,8 +151,6 @@ namespace BidirectionalInMemGraph
             EdgeBuilder::EdgeStatus desired_status
         ) noexcept;
     };
-
-
     class CompiledDAGTableConstructor : public EdgeTableConstructor
     {
     protected:

@@ -123,12 +123,11 @@ namespace BidirectionalInMemGraph
         FabricSegments edge_table,
         uint8_t relation_ordinal,
         FabricToAPCLinker::RelationOparation* result_ptr,
-        uint32_t max_tries 
+        uint32_t max_tries
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
         AdaptivePackedCellContainer parent{};
-
         if (
             child_slot >= FabCache_->CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(child_generation) ||
@@ -144,29 +143,37 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
-            EdgeBuilder::ParentRelation relation{};
-            const SeqLockedOperation read = ReadParentRelation_(
+            if (!IsOpenAPCGeneration_(child_slot, child_generation))
+            {
+                return {};
+            }
+
+            uint64_t parent_handle = FABRIC_CELL_SENTINAL;
+            const SeqLockedOperation read = ReadParentHandle_(
                 edge_table,
                 child_slot,
                 relation_ordinal,
-                relation,
-                DEFAULT_INTERNAL_TRIES__
+                parent_handle,
+                1u
             );
-
             if (read == SeqLockedOperation::RETRY)
             {
                 continue;
             }
             if (read != SeqLockedOperation::FOUND)
             {
-                return parent;
+                return {};
             }
 
-            if (!BindExistingAPCSnapshot_(
-                EdgeBuilder::ParentSlot(relation),
-                parent,
-                EdgeBuilder::ParentGeneration(relation)
-            ))
+            parent = {};
+            if (
+                !BindExistingAPCSnapshot_(
+                    TwinU32ToU64::ExtractLow32Of64(parent_handle),
+                    parent,
+                    TwinU32ToU64::ExtractHigh32Of64(parent_handle)
+                ) ||
+                !IsOpenAPCGeneration_(child_slot, child_generation)
+            )
             {
                 continue;
             }
@@ -176,7 +183,6 @@ namespace BidirectionalInMemGraph
                 relation_ordinal
             );
             result.MutationOP_ = SeqLockedOperation::FOUND;
-
             if (result_ptr)
             {
                 *result_ptr = std::move(result);
@@ -189,9 +195,8 @@ namespace BidirectionalInMemGraph
         {
             *result_ptr = std::move(result);
         }
-        return parent;
+        return {};
     }
-
 
     AdaptivePackedCellContainer APCFinilizer::FindFirstChild_(
         uint32_t parent_slot,
@@ -202,86 +207,84 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
-        AdaptivePackedCellContainer child{};
-
-
-        if (
-            parent_slot >= FabCache_->CountOfAPC_ ||
-            !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
-            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
-        )
-        {
-            return child;
-        }
+        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
+            parent_slot,
+            parent_generation
+        );
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
-            child = AdaptivePackedCellContainer{};
+            if (!IsOpenAPCGeneration_(parent_slot, parent_generation))
+            {
+                return {};
+            }
             EdgeBuilder::EdgeData before{};
             if (!ReadEdgeHeader_(edge_table, parent_slot, before))
             {
-                return child;
+                return {};
             }
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
                 continue;
             }
-            if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
-            {
-                return child;
-            }
-            if (before.TailLocator == EdgeBuilder::RELATION_NULL)
-            {
-                return child;
-            }
-
-            EdgeBuilder::ParentRelation tail_relation{};
-            const SeqLockedOperation tail_read = ReadParentRelation_(
-                edge_table,
-                EdgeBuilder::RelationSlot(before.TailLocator),
-                EdgeBuilder::RelationOrdinal(before.TailLocator),
-                tail_relation,
-                1u
-            );
-
-            if (tail_read == SeqLockedOperation::RETRY)
-            {
-                continue;
-            }
             if (
-                tail_read != SeqLockedOperation::FOUND ||
-                tail_relation.ParentHandle != EdgeBuilder::MakeParentHandle(
-                    parent_slot,
-                    parent_generation
-                )
+                before.Status != EdgeBuilder::EdgeStatus::LIVE ||
+                before.TailLocator == EdgeBuilder::RELATION_NULL
             )
             {
-                return child;
+                return {};
             }
 
-            const uint32_t first = EdgeBuilder::NextLocator(tail_relation);
-            const SeqLockedOperation resolved = ResolveChildLocator_(
-                parent_slot,
-                parent_generation,
+            const uint32_t tail = before.TailLocator;
+            uint64_t tail_parent = FABRIC_CELL_SENTINAL;
+            const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
-                first,
-                child
+                EdgeBuilder::RelationSlot(tail),
+                EdgeBuilder::RelationOrdinal(tail),
+                tail_parent,
+                1u
             );
-
-            if (resolved == SeqLockedOperation::RETRY)
+            if (owner_read == SeqLockedOperation::RETRY)
             {
                 continue;
             }
-            if (resolved != SeqLockedOperation::FOUND)
+            if (owner_read != SeqLockedOperation::FOUND ||
+                tail_parent != expected_parent)
             {
-                child = AdaptivePackedCellContainer{};
-                return child;
+                return {};
+            }
+
+            const std::span<EdgeBuilder::ParentRelation> tail_row =
+                ParentRelations_(edge_table, EdgeBuilder::RelationSlot(tail));
+            const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
+                tail_row[EdgeBuilder::RelationOrdinal(tail)].SiblingLocators
+            ).load(std::memory_order_relaxed);
+            const uint32_t first = TwinU32ToU64::ExtractHigh32Of64(sibling_raw);
+
+            AdaptivePackedCellContainer child{};
+            if (
+                !EdgeBuilder::IsValidRelationLocator(
+                    first,
+                    static_cast<uint32_t>(FabCache_->CountOfAPC_),
+                    FabCache_->MaxDirectParentsPerAxis_
+                ) ||
+                ResolveChildLocator_(
+                    parent_slot,
+                    parent_generation,
+                    edge_table,
+                    first,
+                    child
+                ) != SeqLockedOperation::FOUND
+            )
+            {
+                return {};
             }
 
             EdgeBuilder::EdgeData after{};
             if (
                 !ReadEdgeHeader_(edge_table, parent_slot, after) ||
-                !ConstructDAGOnEachAxis::SameHeader_(before, after)
+                !SameHeader_(before, after) ||
+                !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
             {
                 continue;
@@ -293,18 +296,15 @@ namespace BidirectionalInMemGraph
             {
                 *result_ptr = std::move(result);
             }
-            
             return child;
         }
-        result.MutationOP_ = SeqLockedOperation::RETRY;
 
+        result.MutationOP_ = SeqLockedOperation::RETRY;
         if (result_ptr)
         {
             *result_ptr = std::move(result);
         }
-
-        child = AdaptivePackedCellContainer{};
-        return child;
+        return {};
     }
 
     AdaptivePackedCellContainer APCFinilizer::FindLastChild_(
@@ -316,68 +316,75 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
-        AdaptivePackedCellContainer child{};
-        if (
-            parent_slot >= FabCache_->CountOfAPC_ ||
-            !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
-            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
-        )
+        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
+            parent_slot,
+            parent_generation
+        );
+
+        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
-            return child;
-        }
-        
-        for (uint32_t i = 0; i < max_tries; i++)
-        {
-            child = AdaptivePackedCellContainer{};
-            EdgeBuilder::EdgeData before{};
-            if (
-                !ReadEdgeHeader_(edge_table, parent_slot, before)
-            )
+            if (!IsOpenAPCGeneration_(parent_slot, parent_generation))
             {
-                return child;
+                return {};
+            }
+            EdgeBuilder::EdgeData before{};
+            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            {
+                return {};
             }
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
                 continue;
             }
-            
-            if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
+            if (
+                before.Status != EdgeBuilder::EdgeStatus::LIVE ||
+                before.TailLocator == EdgeBuilder::RELATION_NULL
+            )
             {
-                return child;
-            }
-            
-            if (before.TailLocator == EdgeBuilder::RELATION_NULL)
-            {
-                return child;
+                return {};
             }
 
-            const SeqLockedOperation resolved = ResolveChildLocator_(
-                parent_slot,
-                parent_generation,
+            uint64_t owner = FABRIC_CELL_SENTINAL;
+            const uint32_t tail = before.TailLocator;
+            const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
-                before.TailLocator,
-                child
+                EdgeBuilder::RelationSlot(tail),
+                EdgeBuilder::RelationOrdinal(tail),
+                owner,
+                1u
             );
-
-            if (resolved == SeqLockedOperation::RETRY)
+            if (owner_read == SeqLockedOperation::RETRY)
             {
                 continue;
             }
-            if (resolved != SeqLockedOperation::FOUND)
+            if (owner_read != SeqLockedOperation::FOUND || owner != expected_parent)
             {
-                return child;
+                return {};
+            }
+
+            AdaptivePackedCellContainer child{};
+            if (ResolveChildLocator_(
+                parent_slot,
+                parent_generation,
+                edge_table,
+                tail,
+                child
+            ) != SeqLockedOperation::FOUND)
+            {
+                return {};
             }
 
             EdgeBuilder::EdgeData after{};
             if (
                 !ReadEdgeHeader_(edge_table, parent_slot, after) ||
-                !ConstructDAGOnEachAxis::SameHeader_(before, after)
+                !SameHeader_(before, after) ||
+                !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
             {
                 continue;
             }
 
-            result.RelationLocator_ = before.TailLocator;
+            result.RelationLocator_ = tail;
             result.MutationOP_ = SeqLockedOperation::FOUND;
             if (result_ptr)
             {
@@ -387,16 +394,12 @@ namespace BidirectionalInMemGraph
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
-
         if (result_ptr)
         {
             *result_ptr = std::move(result);
         }
-
-        child = AdaptivePackedCellContainer{};
-        return child;
+        return {};
     }
-
 
     AdaptivePackedCellContainer APCFinilizer::FindNextChild_(
         uint32_t parent_slot,
@@ -408,109 +411,107 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
-        AdaptivePackedCellContainer child{};
-        if (
-            parent_slot >= FabCache_->CountOfAPC_  ||
-            !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
-            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            !EdgeBuilder::IsValidRelationLocator(
-                current_relation_locator,
-                static_cast<uint32_t>(FabCache_->CountOfAPC_),
-                FabCache_->MaxDirectParentsPerAxis_
-            )
-        )
+        if (!EdgeBuilder::IsValidRelationLocator(
+            current_relation_locator,
+            static_cast<uint32_t>(FabCache_->CountOfAPC_),
+            FabCache_->MaxDirectParentsPerAxis_
+        ))
         {
-            return child;
+            return {};
         }
-        
+        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
+            parent_slot,
+            parent_generation
+        );
 
-        const uint64_t parent_handle = EdgeBuilder::MakeParentHandle(parent_slot, parent_generation);
-
-        for (uint32_t i = 0; i < max_tries; i++)
+        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
-            child = AdaptivePackedCellContainer{};
+            if (!IsOpenAPCGeneration_(parent_slot, parent_generation))
+            {
+                return {};
+            }
             EdgeBuilder::EdgeData before{};
             if (!ReadEdgeHeader_(edge_table, parent_slot, before))
             {
-                return child;
+                return {};
             }
-            
-            if (
-                before.Status == EdgeBuilder::EdgeStatus::RESERVED
-            )
+            if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
                 continue;
             }
-
             if (
                 before.Status != EdgeBuilder::EdgeStatus::LIVE ||
                 before.TailLocator == EdgeBuilder::RELATION_NULL
             )
             {
-                return child;
+                return {};
             }
 
-            EdgeBuilder::ParentRelation current{};
-            const SeqLockedOperation current_read = ReadParentRelation_(
+            uint64_t owner = FABRIC_CELL_SENTINAL;
+            const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
                 EdgeBuilder::RelationSlot(current_relation_locator),
                 EdgeBuilder::RelationOrdinal(current_relation_locator),
-                current,
-                DEFAULT_INTERNAL_TRIES__
+                owner,
+                1u
             );
-
-            if (current_read == SeqLockedOperation::RETRY)
+            if (owner_read == SeqLockedOperation::RETRY)
             {
                 continue;
             }
-
-            if (
-                current_read != SeqLockedOperation::FOUND ||
-                current.ParentHandle != parent_handle
-            )
+            if (owner_read != SeqLockedOperation::FOUND || owner != expected_parent)
             {
-                return child;
+                return {};
             }
-            
+
             if (current_relation_locator == before.TailLocator)
             {
                 EdgeBuilder::EdgeData after{};
                 if (
                     ReadEdgeHeader_(edge_table, parent_slot, after) &&
-                    SameHeader_(before, after) 
+                    SameHeader_(before, after) &&
+                    IsOpenAPCGeneration_(parent_slot, parent_generation)
                 )
                 {
-                    return child;
+                    return {};
                 }
                 continue;
             }
-            
-            const uint32_t next = EdgeBuilder::NextLocator(current);
 
-            const SeqLockedOperation resolved = ResolveChildLocator_(
-                parent_slot,
-                parent_generation,
+            const std::span<EdgeBuilder::ParentRelation> row = ParentRelations_(
                 edge_table,
-                next,
-                child
+                EdgeBuilder::RelationSlot(current_relation_locator)
             );
+            const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
+                row[EdgeBuilder::RelationOrdinal(current_relation_locator)]
+                    .SiblingLocators
+            ).load(std::memory_order_relaxed);
+            const uint32_t next = TwinU32ToU64::ExtractHigh32Of64(sibling_raw);
 
-            if (resolved == SeqLockedOperation::RETRY)
+            AdaptivePackedCellContainer child{};
+            if (
+                !EdgeBuilder::IsValidRelationLocator(
+                    next,
+                    static_cast<uint32_t>(FabCache_->CountOfAPC_),
+                    FabCache_->MaxDirectParentsPerAxis_
+                ) ||
+                ResolveChildLocator_(
+                    parent_slot,
+                    parent_generation,
+                    edge_table,
+                    next,
+                    child
+                ) != SeqLockedOperation::FOUND
+            )
             {
-                continue;
-            }
-
-            if (resolved != SeqLockedOperation::FOUND)
-            {
-                child = AdaptivePackedCellContainer{};
-                return child;
+                return {};
             }
 
             EdgeBuilder::EdgeData after{};
-
             if (
                 !ReadEdgeHeader_(edge_table, parent_slot, after) ||
-                !SameHeader_(before, after)
+                !SameHeader_(before, after) ||
+                !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
             {
                 continue;
@@ -522,19 +523,15 @@ namespace BidirectionalInMemGraph
             {
                 *result_ptr = std::move(result);
             }
-            
             return child;
         }
 
         result.MutationOP_ = SeqLockedOperation::RETRY;
-
         if (result_ptr)
         {
             *result_ptr = std::move(result);
         }
-
-        child = AdaptivePackedCellContainer{};
-        return child;
+        return {};
     }
 
     AdaptivePackedCellContainer APCFinilizer::FindPreviousChild_(
@@ -547,35 +544,29 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
-        AdaptivePackedCellContainer child{};
-
-        if (
-            parent_slot >= FabCache_->CountOfAPC_ ||
-            !HandleOfAPCStatic::IsGenerationValid(parent_generation) ||
-            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            !EdgeBuilder::IsValidRelationLocator(
-                current_relation_locator,
-                static_cast<uint32_t>(FabCache_->CountOfAPC_),
-                FabCache_->MaxDirectParentsPerAxis_
-            )
-        )
+        if (!EdgeBuilder::IsValidRelationLocator(
+            current_relation_locator,
+            static_cast<uint32_t>(FabCache_->CountOfAPC_),
+            FabCache_->MaxDirectParentsPerAxis_
+        ))
         {
-            return child;
+            return {};
         }
-
-        const uint64_t parent_handle = EdgeBuilder::MakeParentHandle(
+        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
             parent_slot,
             parent_generation
         );
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
-            child = AdaptivePackedCellContainer{};
-
+            if (!IsOpenAPCGeneration_(parent_slot, parent_generation))
+            {
+                return {};
+            }
             EdgeBuilder::EdgeData before{};
             if (!ReadEdgeHeader_(edge_table, parent_slot, before))
             {
-                return child;
+                return {};
             }
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
@@ -586,67 +577,74 @@ namespace BidirectionalInMemGraph
                 before.TailLocator == EdgeBuilder::RELATION_NULL
             )
             {
-                return child;
+                return {};
             }
 
-            EdgeBuilder::ParentRelation current{};
-            const SeqLockedOperation current_read = ReadParentRelation_(
+            uint64_t owner = FABRIC_CELL_SENTINAL;
+            const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
                 EdgeBuilder::RelationSlot(current_relation_locator),
                 EdgeBuilder::RelationOrdinal(current_relation_locator),
-                current,
+                owner,
                 1u
             );
-
-            if (current_read == SeqLockedOperation::RETRY)
+            if (owner_read == SeqLockedOperation::RETRY)
             {
                 continue;
             }
-            if (
-                current_read != SeqLockedOperation::FOUND ||
-                current.ParentHandle != parent_handle
-            )
+            if (owner_read != SeqLockedOperation::FOUND || owner != expected_parent)
             {
-                return child;
+                return {};
             }
 
-            const uint32_t previous = EdgeBuilder::PreviousLocator(current);
+            const std::span<EdgeBuilder::ParentRelation> row = ParentRelations_(
+                edge_table,
+                EdgeBuilder::RelationSlot(current_relation_locator)
+            );
+            const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
+                row[EdgeBuilder::RelationOrdinal(current_relation_locator)]
+                    .SiblingLocators
+            ).load(std::memory_order_relaxed);
+            const uint32_t previous = TwinU32ToU64::ExtractLow32Of64(sibling_raw);
 
-            // In this circular list, first.previous is the parent tail.
             if (previous == before.TailLocator)
             {
                 EdgeBuilder::EdgeData after{};
                 if (
                     ReadEdgeHeader_(edge_table, parent_slot, after) &&
-                    ConstructDAGOnEachAxis::SameHeader_(before, after)
+                    SameHeader_(before, after) &&
+                    IsOpenAPCGeneration_(parent_slot, parent_generation)
                 )
                 {
-                    return child;
+                    return {};
                 }
                 continue;
             }
 
-            const SeqLockedOperation resolved = ResolveChildLocator_(
-                parent_slot,
-                parent_generation,
-                edge_table,
-                previous,
-                child
-            );
-
-            if (resolved == SeqLockedOperation::RETRY)
+            AdaptivePackedCellContainer child{};
+            if (
+                !EdgeBuilder::IsValidRelationLocator(
+                    previous,
+                    static_cast<uint32_t>(FabCache_->CountOfAPC_),
+                    FabCache_->MaxDirectParentsPerAxis_
+                ) ||
+                ResolveChildLocator_(
+                    parent_slot,
+                    parent_generation,
+                    edge_table,
+                    previous,
+                    child
+                ) != SeqLockedOperation::FOUND
+            )
             {
-                continue;
-            }
-            if (resolved != SeqLockedOperation::FOUND)
-            {
-                return AdaptivePackedCellContainer{};
+                return {};
             }
 
             EdgeBuilder::EdgeData after{};
             if (
                 !ReadEdgeHeader_(edge_table, parent_slot, after) ||
-                !ConstructDAGOnEachAxis::SameHeader_(before, after)
+                !SameHeader_(before, after) ||
+                !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
             {
                 continue;
@@ -666,20 +664,17 @@ namespace BidirectionalInMemGraph
         {
             *result_ptr = std::move(result);
         }
-        return AdaptivePackedCellContainer{};
+        return {};
     }
 
     bool APCFinilizer::CreateAPC(
         AdaptivePackedCellContainer& desired_apc,
-        const SchemaDefinition::RegionSchemaTable& region_schemas,
+        const SD::RegionSchemaTable& region_schemas,
         uint32_t internal_max_tries,
-        bool override_table 
+        bool override_table
     ) noexcept
     {
-        if (
-            !IsFabricActive() ||
-            desired_apc.IsFabricBound_()
-        )
+        if (!IsFabricActive() || desired_apc.IsFabricBound_())
         {
             return false;
         }
@@ -689,17 +684,62 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
-        
-        const uint32_t slot = slot_new.value();
-        EdgeBuilder::EdgeData horizontal_before{};
-        EdgeBuilder::EdgeData vertical_before{};
 
-        bool horizontal_reserved = false;
-        bool vertical_reserved = false;
+        using Domain = EdgeBuilder::EdgeDomain;
+        constexpr FabricSegments H =
+            FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+        constexpr FabricSegments V =
+            FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
+        const uint32_t slot = slot_new.value();
+
+        EdgeBuilder::EdgeData h_parent_before{};
+        EdgeBuilder::EdgeData h_list_before{};
+        EdgeBuilder::EdgeData v_parent_before{};
+        EdgeBuilder::EdgeData v_list_before{};
+        bool h_parent_reserved = false;
+        bool h_list_reserved = false;
+        bool v_parent_reserved = false;
+        bool v_list_reserved = false;
         bool descriptor_live = false;
         bool matrix_view_prepared = false;
 
-        auto AbortCreation___ = [&]()
+        const auto ReleaseDomains___ = [&](EdgeBuilder::EdgeStatus list_status) noexcept
+        {
+            if (v_list_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    V, slot, Domain::CHILD_LIST, v_list_before,
+                    EdgeBuilder::RELATION_NULL, list_status
+                );
+                v_list_reserved = false;
+            }
+            if (v_parent_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    V, slot, Domain::PARENT_RELATIONS, v_parent_before,
+                    EdgeBuilder::RELATION_NULL, EdgeBuilder::EdgeStatus::LIVE
+                );
+                v_parent_reserved = false;
+            }
+            if (h_list_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    H, slot, Domain::CHILD_LIST, h_list_before,
+                    EdgeBuilder::RELATION_NULL, list_status
+                );
+                h_list_reserved = false;
+            }
+            if (h_parent_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    H, slot, Domain::PARENT_RELATIONS, h_parent_before,
+                    EdgeBuilder::RELATION_NULL, EdgeBuilder::EdgeStatus::LIVE
+                );
+                h_parent_reserved = false;
+            }
+        };
+
+        const auto AbortCreation___ = [&]() noexcept
         {
             if (descriptor_live)
             {
@@ -710,35 +750,11 @@ namespace BidirectionalInMemGraph
                     internal_max_tries
                 );
             }
-            
-            if (vertical_reserved)
-            {
-                PublishReservedEdgeRow_(
-                    FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
-                    slot,
-                    vertical_before,
-                    EdgeBuilder::RELATION_NULL,
-                    EdgeBuilder::EdgeStatus::FREE
-                );
-            }
-
-            if (horizontal_reserved)
-            {
-                PublishReservedEdgeRow_(
-                    FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
-                    slot,
-                    horizontal_before,
-                    EdgeBuilder::RELATION_NULL,
-                    EdgeBuilder::EdgeStatus::FREE
-                );
-            }
-
+            ReleaseDomains___(EdgeBuilder::EdgeStatus::FREE);
             if (matrix_view_prepared)
             {
                 ClearMatrixViewRow_(slot);
             }
-            
-
             SwitchDescriptionState(
                 slot,
                 StateOfAPC::FREE,
@@ -748,20 +764,21 @@ namespace BidirectionalInMemGraph
             desired_apc.ReleseFabricBindingOnly_();
         };
 
-        uint64_t* generation_cell = GetAPCGenerationPtr_(slot);
+        uint64_t* const generation_cell = GetAPCGenerationPtr_(slot);
         if (!generation_cell)
         {
             AbortCreation___();
             return false;
         }
-        
-        const uint64_t control_raw = std::atomic_ref<const uint64_t>(*generation_cell).load(std::memory_order_acquire);
-
-        const HandleOfAPCStatic::ControlValues control_values = HandleOfAPCStatic::ReadControlCell(control_raw);
-
+        const HandleOfAPCStatic::ControlValues control_values =
+            HandleOfAPCStatic::ReadControlCell(
+                std::atomic_ref<const uint64_t>(*generation_cell).load(
+                    std::memory_order_acquire
+                )
+            );
         if (
             !control_values.Closed ||
-            control_values.ActiveAccess != UNSIGNED_ZERO ||
+            control_values.ActiveAccess != 0u ||
             !HandleOfAPCStatic::IsGenerationValid(control_values.Generation)
         )
         {
@@ -773,23 +790,25 @@ namespace BidirectionalInMemGraph
             !FabCache_->HasDefaultRegionTable_ ||
             override_table ||
             control_values.Generation != HandleOfAPCStatic::FIRST_GENERATION
-
         )
         {
-            if (!PrepareMatrixViewRow_(slot, FabCache_->HasDefaultRegionTable_ && !override_table ? DefaultRegionTable_ : region_schemas))
+            const SD::RegionSchemaTable& schemas =
+                FabCache_->HasDefaultRegionTable_ && !override_table
+                    ? DefaultRegionTable_
+                    : region_schemas;
+            if (!PrepareMatrixViewRow_(slot, schemas))
             {
                 AbortCreation___();
                 return false;
             }
             matrix_view_prepared = true;
-
             if (!InitializeRegionProtocolStorage_(slot))
             {
                 AbortCreation___();
                 return false;
             }
         }
-        
+
         const ADS::RangeOfAPC range = GetSegmentPoolRange(slot);
         if (
             !range.IsValid ||
@@ -806,51 +825,68 @@ namespace BidirectionalInMemGraph
             AbortCreation___();
             return false;
         }
-        
-        if (
-            ReserveEdgeRow_(
-                FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
-                slot,
-                EdgeBuilder::EdgeStatus::FREE,
-                horizontal_before,
-                internal_max_tries
-            ) != SeqLockedOperation::FOUND
-        )
+
+        if (ReserveEdgeDomain_(
+            H, slot, Domain::PARENT_RELATIONS,
+            EdgeBuilder::EdgeStatus::LIVE,
+            h_parent_before, internal_max_tries
+        ) != SeqLockedOperation::FOUND)
         {
             AbortCreation___();
             return false;
         }
-        horizontal_reserved = true;
-
-        if (
-            ReserveEdgeRow_(
-                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
-                slot,
-                EdgeBuilder::EdgeStatus::FREE,
-                vertical_before,
-                internal_max_tries
-            ) != SeqLockedOperation::FOUND
-        )
+        h_parent_reserved = true;
+        if (ReserveEdgeDomain_(
+            H, slot, Domain::CHILD_LIST,
+            EdgeBuilder::EdgeStatus::FREE,
+            h_list_before, internal_max_tries
+        ) != SeqLockedOperation::FOUND)
         {
             AbortCreation___();
             return false;
         }
-        vertical_reserved = true;
-
-        auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept -> bool
+        h_list_reserved = true;
+        if (ReserveEdgeDomain_(
+            V, slot, Domain::PARENT_RELATIONS,
+            EdgeBuilder::EdgeStatus::LIVE,
+            v_parent_before, internal_max_tries
+        ) != SeqLockedOperation::FOUND)
         {
-            std::span<EdgeBuilder::ParentRelation> relations = ParentRelations_(table, slot);
+            AbortCreation___();
+            return false;
+        }
+        v_parent_reserved = true;
+        if (ReserveEdgeDomain_(
+            V, slot, Domain::CHILD_LIST,
+            EdgeBuilder::EdgeStatus::FREE,
+            v_list_before, internal_max_tries
+        ) != SeqLockedOperation::FOUND)
+        {
+            AbortCreation___();
+            return false;
+        }
+        v_list_reserved = true;
+
+        const auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept
+        {
+            const std::span<EdgeBuilder::ParentRelation> relations =
+                ParentRelations_(table, slot);
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {
                 return false;
             }
-
-            for (uint8_t ordinal = 0; ordinal < FabCache_->MaxDirectParentsPerAxis_; ordinal++)
+            for (uint8_t ordinal = 0u;
+                ordinal < FabCache_->MaxDirectParentsPerAxis_;
+                ++ordinal)
             {
-                EdgeBuilder::ParentRelation relation{};
-                relation.ParentHandle = std::atomic_ref<uint64_t>(relations[ordinal].ParentHandle).load(std::memory_order_relaxed);
-                relation.SiblingLocators = std::atomic_ref<uint64_t>(relations[ordinal].SiblingLocators).load(std::memory_order_relaxed);
-                if (!EdgeBuilder::IsEmpty(relation))
+                if (
+                    std::atomic_ref<const uint64_t>(
+                        relations[ordinal].ParentHandle
+                    ).load(std::memory_order_relaxed) != FABRIC_CELL_SENTINAL ||
+                    std::atomic_ref<const uint64_t>(
+                        relations[ordinal].SiblingLocators
+                    ).load(std::memory_order_relaxed) != FABRIC_CELL_SENTINAL
+                )
                 {
                     return false;
                 }
@@ -859,53 +895,30 @@ namespace BidirectionalInMemGraph
         };
 
         if (
-            horizontal_before.TailLocator != EdgeBuilder::RELATION_NULL ||
-            vertical_before.TailLocator != EdgeBuilder::RELATION_NULL ||
-            !ReservedRowIsEmpty___(FabricSegments::VALUE_PARENT_EDGE_TABLE_H) ||
-            !ReservedRowIsEmpty___(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V)
+            h_list_before.TailLocator != EdgeBuilder::RELATION_NULL ||
+            v_list_before.TailLocator != EdgeBuilder::RELATION_NULL ||
+            !ReservedRowIsEmpty___(H) ||
+            !ReservedRowIsEmpty___(V) ||
+            !SwitchDescriptionState(
+                slot,
+                StateOfAPC::LIVE,
+                StateOfAPC::RESERVED,
+                internal_max_tries
+            )
         )
         {
             AbortCreation___();
             return false;
         }
-        
-        if (!SwitchDescriptionState(
-            slot,
-            StateOfAPC::LIVE,
-            StateOfAPC::RESERVED,
-            internal_max_tries
-        ))
-        {
-            AbortCreation___();
-            return false;
-        }
-        
         descriptor_live = true;
+
         if (!OpenAPCGeneration_(slot, control_values.Generation))
         {
             AbortCreation___();
             return false;
         }
-        
 
-        PublishReservedEdgeRow_(
-            FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
-            slot,
-            horizontal_before,
-            EdgeBuilder::RELATION_NULL,
-            EdgeBuilder::EdgeStatus::LIVE
-        );
-        horizontal_reserved = false;
-
-        PublishReservedEdgeRow_(
-            FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
-            slot,
-            vertical_before,
-            EdgeBuilder::RELATION_NULL,
-            EdgeBuilder::EdgeStatus::LIVE
-        );
-        vertical_reserved = false;
-        
+        ReleaseDomains___(EdgeBuilder::EdgeStatus::LIVE);
         return true;
     }
 
@@ -984,83 +997,150 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        EdgeBuilder::EdgeData horizontal_before{};
-        EdgeBuilder::EdgeData vertical_before{};
+        using Domain = EdgeBuilder::EdgeDomain;
+        constexpr FabricSegments H =
+            FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+        constexpr FabricSegments V =
+            FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
 
-        if (
-            ReserveEdgeRow_(
-                FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
-                slot,
-                EdgeBuilder::EdgeStatus::LIVE,
-                horizontal_before,
-                max_tries
-            ) != SeqLockedOperation::FOUND
-        )
-        {
-            return false;
-        }
+        EdgeBuilder::EdgeData h_parent_before{};
+        EdgeBuilder::EdgeData h_list_before{};
+        EdgeBuilder::EdgeData v_parent_before{};
+        EdgeBuilder::EdgeData v_list_before{};
+        bool h_parent_reserved = false;
+        bool h_list_reserved = false;
+        bool v_parent_reserved = false;
+        bool v_list_reserved = false;
 
-        if (
-            ReserveEdgeRow_(
-                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
-                slot,
-                EdgeBuilder::EdgeStatus::LIVE,
-                vertical_before,
-                max_tries
-            ) != SeqLockedOperation::FOUND
-        )
+        const auto ReleaseDomains___ = [&]() noexcept
         {
-            PublishReservedEdgeRow_(
-                FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
-                slot,
-                horizontal_before,
-                horizontal_before.TailLocator,
-                EdgeBuilder::EdgeStatus::LIVE
-            );
-            return false;
-        }
-
-        auto ReleaseRows___ = [&]() noexcept
-        {
-            PublishReservedEdgeRow_(
-                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
-                slot,
-                vertical_before,
-                vertical_before.TailLocator,
-                EdgeBuilder::EdgeStatus::LIVE
-            );
-            PublishReservedEdgeRow_(
-                FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
-                slot,
-                horizontal_before,
-                horizontal_before.TailLocator,
-                EdgeBuilder::EdgeStatus::LIVE
-            );
+            if (v_list_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    V,
+                    slot,
+                    Domain::CHILD_LIST,
+                    v_list_before,
+                    v_list_before.TailLocator,
+                    EdgeBuilder::EdgeStatus::LIVE
+                );
+                v_list_reserved = false;
+            }
+            if (v_parent_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    V,
+                    slot,
+                    Domain::PARENT_RELATIONS,
+                    v_parent_before,
+                    EdgeBuilder::RELATION_NULL,
+                    EdgeBuilder::EdgeStatus::LIVE
+                );
+                v_parent_reserved = false;
+            }
+            if (h_list_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    H,
+                    slot,
+                    Domain::CHILD_LIST,
+                    h_list_before,
+                    h_list_before.TailLocator,
+                    EdgeBuilder::EdgeStatus::LIVE
+                );
+                h_list_reserved = false;
+            }
+            if (h_parent_reserved)
+            {
+                PublishReservedEdgeDomain_(
+                    H,
+                    slot,
+                    Domain::PARENT_RELATIONS,
+                    h_parent_before,
+                    EdgeBuilder::RELATION_NULL,
+                    EdgeBuilder::EdgeStatus::LIVE
+                );
+                h_parent_reserved = false;
+            }
         };
 
-        auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept
+        if (ReserveEdgeDomain_(
+            H,
+            slot,
+            Domain::PARENT_RELATIONS,
+            EdgeBuilder::EdgeStatus::LIVE,
+            h_parent_before,
+            max_tries
+        ) != SeqLockedOperation::FOUND)
         {
-            std::span<EdgeBuilder::ParentRelation> relations =
-                ParentRelations_(table, slot);
+            return false;
+        }
+        h_parent_reserved = true;
 
+        if (ReserveEdgeDomain_(
+            H,
+            slot,
+            Domain::CHILD_LIST,
+            EdgeBuilder::EdgeStatus::LIVE,
+            h_list_before,
+            max_tries
+        ) != SeqLockedOperation::FOUND)
+        {
+            ReleaseDomains___();
+            return false;
+        }
+        h_list_reserved = true;
+
+        if (ReserveEdgeDomain_(
+            V,
+            slot,
+            Domain::PARENT_RELATIONS,
+            EdgeBuilder::EdgeStatus::LIVE,
+            v_parent_before,
+            max_tries
+        ) != SeqLockedOperation::FOUND)
+        {
+            ReleaseDomains___();
+            return false;
+        }
+        v_parent_reserved = true;
+
+        if (ReserveEdgeDomain_(
+            V,
+            slot,
+            Domain::CHILD_LIST,
+            EdgeBuilder::EdgeStatus::LIVE,
+            v_list_before,
+            max_tries
+        ) != SeqLockedOperation::FOUND)
+        {
+            ReleaseDomains___();
+            return false;
+        }
+        v_list_reserved = true;
+
+        const auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept
+        {
+            const std::span<EdgeBuilder::ParentRelation> relations =
+                ParentRelations_(table, slot);
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {
                 return false;
             }
-
             for (uint8_t ordinal = 0u;
                 ordinal < FabCache_->MaxDirectParentsPerAxis_;
                 ++ordinal)
             {
-                EdgeBuilder::ParentRelation relation{};
-                relation.ParentHandle = std::atomic_ref<uint64_t>(
+                const uint64_t parent = std::atomic_ref<const uint64_t>(
                     relations[ordinal].ParentHandle
                 ).load(std::memory_order_relaxed);
-                relation.SiblingLocators = std::atomic_ref<uint64_t>(
+                const uint64_t siblings = std::atomic_ref<const uint64_t>(
                     relations[ordinal].SiblingLocators
                 ).load(std::memory_order_relaxed);
-
-                if (!EdgeBuilder::IsEmpty(relation))
+                if (
+                    parent != FABRIC_CELL_SENTINAL ||
+                    siblings != FABRIC_CELL_SENTINAL
+                )
                 {
                     return false;
                 }
@@ -1069,26 +1149,14 @@ namespace BidirectionalInMemGraph
         };
 
         if (
-            horizontal_before.TailLocator != EdgeBuilder::RELATION_NULL ||
-            vertical_before.TailLocator != EdgeBuilder::RELATION_NULL ||
-            !ReservedRowIsEmpty___(
-                FabricSegments::VALUE_PARENT_EDGE_TABLE_H
-            ) ||
-            !ReservedRowIsEmpty___(
-                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V
-            )
-        )
-        {
-            ReleaseRows___();
-            return false;
-        }
-
-
-        if (
+            h_list_before.TailLocator != EdgeBuilder::RELATION_NULL ||
+            v_list_before.TailLocator != EdgeBuilder::RELATION_NULL ||
+            !ReservedRowIsEmpty___(H) ||
+            !ReservedRowIsEmpty___(V) ||
             !CloseAPCGeneration_(slot, generation)
         )
         {
-            ReleaseRows___();
+            ReleaseDomains___();
             return false;
         }
 
@@ -1100,10 +1168,9 @@ namespace BidirectionalInMemGraph
         ))
         {
             OpenAPCGeneration_(slot, generation);
-            ReleaseRows___();
+            ReleaseDomains___();
             return false;
         }
-
         if (!SwitchDescriptionState(
             slot,
             StateOfAPC::RETIRED,
@@ -1118,27 +1185,48 @@ namespace BidirectionalInMemGraph
                 max_tries
             );
             OpenAPCGeneration_(slot, generation);
-            ReleaseRows___();
+            ReleaseDomains___();
             return false;
         }
 
-        PublishReservedEdgeRow_(
-            FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
+        PublishReservedEdgeDomain_(
+            V,
             slot,
-            vertical_before,
+            Domain::CHILD_LIST,
+            v_list_before,
             EdgeBuilder::RELATION_NULL,
             EdgeBuilder::EdgeStatus::FREE
         );
-        PublishReservedEdgeRow_(
-            FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+        v_list_reserved = false;
+        PublishReservedEdgeDomain_(
+            V,
             slot,
-            horizontal_before,
+            Domain::PARENT_RELATIONS,
+            v_parent_before,
+            EdgeBuilder::RELATION_NULL,
+            EdgeBuilder::EdgeStatus::LIVE
+        );
+        v_parent_reserved = false;
+        PublishReservedEdgeDomain_(
+            H,
+            slot,
+            Domain::CHILD_LIST,
+            h_list_before,
             EdgeBuilder::RELATION_NULL,
             EdgeBuilder::EdgeStatus::FREE
         );
+        h_list_reserved = false;
+        PublishReservedEdgeDomain_(
+            H,
+            slot,
+            Domain::PARENT_RELATIONS,
+            h_parent_before,
+            EdgeBuilder::RELATION_NULL,
+            EdgeBuilder::EdgeStatus::LIVE
+        );
+        h_parent_reserved = false;
         return true;
     }
-
     bool APCFinilizer::ReclaimRetiredSlotTemp_(uint32_t slot) noexcept
     {
         if (slot >= FabCache_->CountOfAPC_)

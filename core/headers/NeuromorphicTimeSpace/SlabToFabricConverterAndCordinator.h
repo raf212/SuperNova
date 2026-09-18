@@ -14,6 +14,8 @@ namespace BidirectionalInMemGraph
         bool ReopenLiveAPCGenerations_() noexcept;
 
     protected :
+        std::atomic<bool> TrackDAGRevision_{false};
+
         SD::RegionSchemaTable DefaultRegionTable_{};
 
         void FreeRawPackedCells_(uint64_t*packed_cell_memory_ptr, size_t packed_cell_count) noexcept;
@@ -73,16 +75,17 @@ namespace BidirectionalInMemGraph
     class DAGMutationConf : public SlabToFabricConverterAndCordinator
     {
     protected:
-        static constexpr uint8_t DAG_MAX_ROW_PARTICIPANTS = 7u;
+        static constexpr uint8_t DAG_MAX_ROW_PARTICIPANTS = 3u;
         static constexpr uint8_t DAG_MAX_RELATION_DELTAS = 5u;
         static constexpr uint8_t INVALID_RELATION_ORDINAL = UINT8_MAX;
 
         struct DAGRowParticipant
         {
             uint32_t Slot = ADS::APC_INDEX_BOUND_SENTINAL;
+            EdgeBuilder::EdgeDomain Domain =
+                EdgeBuilder::EdgeDomain::PARENT_RELATIONS;
             EdgeBuilder::EdgeData Before{};
             uint32_t WorkTail = EdgeBuilder::RELATION_NULL;
-            bool IsParentAnchor = false;
             bool Reserved = false;
         };
 
@@ -92,6 +95,8 @@ namespace BidirectionalInMemGraph
             uint8_t Ordinal = INVALID_RELATION_ORDINAL;
             EdgeBuilder::ParentRelation Before{};
             EdgeBuilder::ParentRelation Work{};
+            bool ParentHandleDirty = false;
+            bool SiblingLocatorsDirty = false;
         };
 
         struct DAGMutationTransaction
@@ -106,23 +111,35 @@ namespace BidirectionalInMemGraph
         bool AddRowParticipant_(
             DAGMutationTransaction& transaction,
             uint32_t slot,
-            bool is_parent_anchor = false
+            EdgeBuilder::EdgeDomain domain
         ) noexcept;
 
         DAGRowParticipant* FindRowParticipant_(
             DAGMutationTransaction& transaction,
-            uint32_t slot
+            uint32_t slot,
+            EdgeBuilder::EdgeDomain domain
         ) noexcept;
 
-        DAGRelationDelta* EditReservedRelation_(
+        DAGRelationDelta* FindOrInsertRelationDelta_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
             uint8_t ordinal
         ) noexcept;
 
+        DAGRelationDelta* EditReservedParentHandle_(
+            DAGMutationTransaction& transaction,
+            uint32_t child_slot,
+            uint8_t ordinal
+        ) noexcept;
+
+        DAGRelationDelta* EditReservedSiblingLocators_(
+            DAGMutationTransaction& transaction,
+            uint32_t owner_parent_slot,
+            uint32_t relation_locator
+        ) noexcept;
+
         bool ReserveAllRows_(
             DAGMutationTransaction& transaction,
-            EdgeBuilder::EdgeStatus required_status,
             uint32_t max_tries
         ) noexcept;
 
@@ -131,9 +148,7 @@ namespace BidirectionalInMemGraph
         ) noexcept;
 
         void CommitRowTransaction_(
-            DAGMutationTransaction& transaction,
-            EdgeBuilder::EdgeStatus final_status =
-                EdgeBuilder::EdgeStatus::LIVE
+            DAGMutationTransaction& transaction
         ) noexcept;
     };
 
@@ -161,11 +176,10 @@ namespace BidirectionalInMemGraph
 
         struct ParentRowScan
         {
-            EdgeBuilder::EdgeData Header{};
             uint8_t MatchOrdinal = UINT8_MAX;
             uint8_t OtherOrdinal = UINT8_MAX;
             uint8_t EmptyOrdinal = UINT8_MAX;
-            EdgeBuilder::ParentRelation Match{};
+            uint64_t MatchParentHandle = FABRIC_CELL_SENTINAL;
         };
 
         static constexpr bool SameRelation_(
@@ -178,13 +192,12 @@ namespace BidirectionalInMemGraph
                 left.SiblingLocators == right.SiblingLocators;
         }
 
-        SeqLockedOperation ScanParentRow_(
-            FabricSegments edge_table,
+        bool ScanReservedParentRow_(
+            DAGMutationTransaction& transaction,
             uint32_t child_slot,
             uint64_t wanted_parent_handle,
             uint64_t other_parent_handle,
-            ParentRowScan& scan,
-            uint32_t max_tries
+            ParentRowScan& scan
         ) noexcept;
 
         bool AddParentRelation_(
