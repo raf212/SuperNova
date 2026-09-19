@@ -1,6 +1,3 @@
-#pragma once
-
-// ============================================================================
 // GHGFTestKit.hpp
 // Internal-learning validation for SuperNova GHGF (C++20)
 //
@@ -16,6 +13,13 @@
 // The tests use only the public GHGFModelConstructor API. They deliberately do
 // not expose or mutate private WEIGHT_SLOT data. Where a slow reference is
 // needed, FitGHGFParameters() is used as the global fitting oracle.
+//
+// Paper use:
+//   * compile with the same C++20 release flags on every compared platform;
+//   * report the compiler, CPU, OS, flags, and repeated-run distribution;
+//   * call concurrent results aggregate throughput, not per-call latency;
+//   * Test J uses independent model instances and does not establish that one
+//     GHGFModelConstructor is safe for simultaneous public method calls.
 // ============================================================================
 
 #ifndef APC_DAG_TEST_EXTERNAL_TYPES
@@ -24,6 +28,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +39,9 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace GHGFTestKit
@@ -45,6 +54,35 @@ using Role = GM::GHGFNodeRole;
 static constexpr std::uint8_t PARENT_CAPACITY = 2u;
 static constexpr double LOSS_EPS = 1.0e-10;
 static constexpr double DELTA_EPS = 1.0e-12;
+
+struct TestConst final
+{
+    static constexpr float BINARY_ZERO = 0.0f;
+    static constexpr float BINARY_ONE = 1.0f;
+    static constexpr double HALF = 0.5;
+    static constexpr double PROBABILITY_CLIP = 1.0e-12;
+    static constexpr double API_LOSS_TOLERANCE = 1.0e-9;
+    static constexpr float DEFAULT_GRADIENT_CLIP = 10.0f;
+    static constexpr float DEFAULT_MIN_TONIC_LOG_VOLATILITY = -20.0f;
+    static constexpr float DEFAULT_MAX_TONIC_LOG_VOLATILITY = 10.0f;
+    static constexpr int REPORT_WIDTH = 48;
+    static constexpr int SHORT_PRECISION = 6;
+    static constexpr int LONG_PRECISION = 9;
+    static constexpr int SUMMARY_PRECISION = 3;
+    static constexpr int THREAD_COLUMN_WIDTH = 2;
+    static constexpr int THROUGHPUT_COLUMN_WIDTH = 12;
+    static constexpr int SPEEDUP_COLUMN_WIDTH = 10;
+
+    static constexpr std::uint32_t VALUE_SLOT = 0u;
+    static constexpr std::uint32_t SECOND_VALUE_SLOT = 1u;
+    static constexpr std::uint32_t TWO_NODE_OBSERVATION_SLOT = 1u;
+    static constexpr std::uint32_t THREE_NODE_OBSERVATION_SLOT = 2u;
+    static constexpr std::size_t TWO_NODE_COUNT = 2u;
+    static constexpr std::size_t THREE_NODE_COUNT = 3u;
+    static constexpr std::size_t ONE_EDGE_COUNT = 1u;
+    static constexpr std::size_t TWO_EDGE_COUNT = 2u;
+    static constexpr std::size_t ONE_PARAMETER_COUNT = 1u;
+};
 
 static_assert(std::is_trivially_copyable_v<GHGFLearningConfig>);
 
@@ -88,21 +126,23 @@ inline void Report(
 )
 {
     std::cout
-        << "  " << std::left << std::setw(48) << name
+        << "  " << std::left << std::setw(TestConst::REPORT_WIDTH) << name
         << (passed ? "PASS" : "FAIL") << '\n';
 }
 
 inline GHGFLearningConfig ZeroLearning() noexcept
 {
     GHGFLearningConfig learning{};
-    learning.HCouplingLearningRate = 0.0f;
-    learning.DriftLearningRate = 0.0f;
-    learning.VolatilityLearningRate = 0.0f;
-    learning.VCouplingLearningRate = 0.0f;
-    learning.AutoConnectionLearningRate = 0.0f;
-    learning.GradientClip = 10.0f;
-    learning.MinTonicLogVolatility = -20.0f;
-    learning.MaxTonicLogVolatility = 10.0f;
+    learning.HCouplingLearningRate = TestConst::BINARY_ZERO;
+    learning.DriftLearningRate = TestConst::BINARY_ZERO;
+    learning.VolatilityLearningRate = TestConst::BINARY_ZERO;
+    learning.VCouplingLearningRate = TestConst::BINARY_ZERO;
+    learning.AutoConnectionLearningRate = TestConst::BINARY_ZERO;
+    learning.GradientClip = TestConst::DEFAULT_GRADIENT_CLIP;
+    learning.MinTonicLogVolatility =
+        TestConst::DEFAULT_MIN_TONIC_LOG_VOLATILITY;
+    learning.MaxTonicLogVolatility =
+        TestConst::DEFAULT_MAX_TONIC_LOG_VOLATILITY;
     return learning;
 }
 
@@ -133,17 +173,17 @@ inline bool ConstructValueObservationModel(
     if (!MakeProfile(profile, batch))
         return false;
 
-    std::array<GHGFNode, 2u> nodes{};
+    std::array<GHGFNode, TestConst::TWO_NODE_COUNT> nodes{};
 
     const std::array roles{
         Role::VALUE,
         Role::OBSERVATION
     };
 
-    const std::array<GM::GHGFConnection, 1u> connections{{
+    const std::array<GM::GHGFConnection, TestConst::ONE_EDGE_COUNT> connections{{
         {
-            0u,
-            1u,
+            TestConst::VALUE_SLOT,
+            TestConst::TWO_NODE_OBSERVATION_SLOT,
             FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
             h_coupling
         }
@@ -172,7 +212,7 @@ inline bool ConstructVolatileValueObservationModel(
     if (!MakeProfile(profile, batch))
         return false;
 
-    std::array<GHGFNode, 3u> nodes{};
+    std::array<GHGFNode, TestConst::THREE_NODE_COUNT> nodes{};
 
     const std::array roles{
         Role::VOLATILE,
@@ -180,16 +220,16 @@ inline bool ConstructVolatileValueObservationModel(
         Role::OBSERVATION
     };
 
-    const std::array<GM::GHGFConnection, 2u> connections{{
+    const std::array<GM::GHGFConnection, TestConst::TWO_EDGE_COUNT> connections{{
         {
-            0u,
-            1u,
+            TestConst::VALUE_SLOT,
+            TestConst::SECOND_VALUE_SLOT,
             FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
             v_coupling
         },
         {
-            1u,
-            2u,
+            TestConst::SECOND_VALUE_SLOT,
+            TestConst::THREE_NODE_OBSERVATION_SLOT,
             FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
             h_coupling
         }
@@ -199,6 +239,73 @@ inline bool ConstructVolatileValueObservationModel(
         nodes,
         roles,
         connections
+    };
+
+    return model.ConstructGHGFModel(values, profile);
+}
+
+enum class PredictiveStructure : std::uint8_t
+{
+    SHALLOW = 0u,
+    HIERARCHICAL = 1u
+};
+
+inline bool ConstructPredictiveStructure(
+    GHGFModelConstructor& model,
+    std::uint32_t batch,
+    PredictiveStructure structure,
+    float hidden_coupling,
+    float observation_coupling
+) noexcept
+{
+    if (
+        !std::isfinite(hidden_coupling) ||
+        !std::isfinite(observation_coupling)
+    )
+    {
+        return false;
+    }
+
+    GM::GHGFStorageProfile profile{};
+    if (!MakeProfile(profile, batch))
+        return false;
+
+    std::array<GHGFNode, TestConst::THREE_NODE_COUNT> nodes{};
+    const std::array roles{
+        Role::VALUE,
+        Role::VALUE,
+        Role::OBSERVATION
+    };
+
+    const GM::GHGFConnection hidden_edge{
+        TestConst::VALUE_SLOT,
+        TestConst::SECOND_VALUE_SLOT,
+        FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+        hidden_coupling
+    };
+
+    const GM::GHGFConnection observation_edge{
+        TestConst::SECOND_VALUE_SLOT,
+        TestConst::THREE_NODE_OBSERVATION_SLOT,
+        FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+        observation_coupling
+    };
+
+    const std::array<GM::GHGFConnection, TestConst::TWO_EDGE_COUNT>
+        hierarchical_edges{{hidden_edge, observation_edge}};
+
+    const std::array<GM::GHGFConnection, TestConst::ONE_EDGE_COUNT>
+        shallow_edges{{observation_edge}};
+
+    const std::span<const GM::GHGFConnection> edges =
+        structure == PredictiveStructure::HIERARCHICAL
+            ? std::span<const GM::GHGFConnection>(hierarchical_edges)
+            : std::span<const GM::GHGFConnection>(shallow_edges);
+
+    GHGFModelConstructor::GHGFModelConstructionValues values{
+        nodes,
+        roles,
+        edges
     };
 
     return model.ConstructGHGFModel(values, profile);
@@ -224,7 +331,7 @@ inline std::vector<float> FixedBernoulliBatchDataset(
 {
     std::vector<float> data(
         static_cast<std::size_t>(steps) * batch,
-        0.0f
+        TestConst::BINARY_ZERO
     );
 
     ones_per_batch = std::min(ones_per_batch, batch);
@@ -232,7 +339,8 @@ inline std::vector<float> FixedBernoulliBatchDataset(
     for (std::uint32_t t = 0u; t < steps; ++t)
     {
         for (std::uint32_t lane = 0u; lane < ones_per_batch; ++lane)
-            data[static_cast<std::size_t>(t) * batch + lane] = 1.0f;
+            data[static_cast<std::size_t>(t) * batch + lane] =
+                TestConst::BINARY_ONE;
     }
 
     return data;
@@ -246,15 +354,15 @@ inline std::vector<float> AlternatingDataset(
 {
     std::vector<float> data(
         static_cast<std::size_t>(steps) * batch,
-        0.0f
+        TestConst::BINARY_ZERO
     );
 
     for (std::uint32_t t = 0u; t < steps; ++t)
     {
         const float value =
             ((t + time_offset) & 1u) != 0u
-                ? 1.0f
-                : 0.0f;
+                ? TestConst::BINARY_ONE
+                : TestConst::BINARY_ZERO;
 
         for (std::uint32_t lane = 0u; lane < batch; ++lane)
             data[static_cast<std::size_t>(t) * batch + lane] = value;
@@ -272,7 +380,7 @@ inline std::vector<float> BlockDataset(
 {
     std::vector<float> data(
         static_cast<std::size_t>(steps) * batch,
-        0.0f
+        TestConst::BINARY_ZERO
     );
 
     if (block_length == 0u)
@@ -283,8 +391,8 @@ inline std::vector<float> BlockDataset(
         const std::uint32_t global_time = t + time_offset;
         const float value =
             ((global_time / block_length) & 1u) != 0u
-                ? 1.0f
-                : 0.0f;
+                ? TestConst::BINARY_ONE
+                : TestConst::BINARY_ZERO;
 
         for (std::uint32_t lane = 0u; lane < batch; ++lane)
             data[static_cast<std::size_t>(t) * batch + lane] = value;
@@ -307,8 +415,8 @@ inline bool ValidPredictions(
         {
             return
                 std::isfinite(value) &&
-                value > 0.0f &&
-                value < 1.0f;
+                value > TestConst::BINARY_ZERO &&
+                value < TestConst::BINARY_ONE;
         }
     );
 }
@@ -332,12 +440,12 @@ inline double BinaryLogLoss(
     {
         const double p = std::clamp(
             static_cast<double>(predictions[i]),
-            1.0e-12,
-            1.0 - 1.0e-12
+            TestConst::PROBABILITY_CLIP,
+            1.0 - TestConst::PROBABILITY_CLIP
         );
 
         loss -=
-            observations[i] == 1.0f
+            observations[i] == TestConst::BINARY_ONE
                 ? std::log(p)
                 : std::log1p(-p);
     }
@@ -439,7 +547,17 @@ inline Evaluation Evaluate(
     if (
         steps == 0u ||
         batch == 0u ||
-        observations.size() != expected
+        observations.size() != expected ||
+        !std::all_of(
+            observations.begin(),
+            observations.end(),
+            [](float value) noexcept
+            {
+                return
+                    value == TestConst::BINARY_ZERO ||
+                    value == TestConst::BINARY_ONE;
+            }
+        )
     )
     {
         return result;
@@ -465,8 +583,20 @@ inline Evaluation Evaluate(
         return result;
     }
 
+    const double independently_computed_loss =
+        BinaryLogLoss(observations, result.Predictions);
+
+    if (
+        !std::isfinite(independently_computed_loss) ||
+        std::abs(loss.value() - independently_computed_loss) >
+            TestConst::API_LOSS_TOLERANCE
+    )
+    {
+        return result;
+    }
+
     result.Valid = true;
-    result.Loss = loss.value();
+    result.Loss = independently_computed_loss;
     return result;
 }
 
@@ -485,7 +615,17 @@ inline bool TrainSequence(
         steps == 0u ||
         batch == 0u ||
         observations.size() !=
-            static_cast<std::size_t>(steps) * step_size
+            static_cast<std::size_t>(steps) * step_size ||
+        !std::all_of(
+            observations.begin(),
+            observations.end(),
+            [](float value) noexcept
+            {
+                return
+                    value == TestConst::BINARY_ZERO ||
+                    value == TestConst::BINARY_ONE;
+            }
+        )
     )
     {
         return false;
@@ -504,7 +644,7 @@ inline bool TrainSequence(
         if (!model.PredictModelNONVectorized(
             batch,
             predictions
-        ))
+        ) || !ValidPredictions(predictions))
         {
             return false;
         }
@@ -534,7 +674,8 @@ inline bool FitOneParameter(
     std::uint32_t passes
 )
 {
-    const std::array<GM::GHGFParameterRange, 1u> parameter{{
+    const std::array<GM::GHGFParameterRange, TestConst::ONE_PARAMETER_COUNT>
+        parameter{{
         {
             slot,
             index,
@@ -568,6 +709,9 @@ inline bool TestA_ZeroRateIdentity()
 
     static constexpr std::uint32_t BATCH = 4u;
     static constexpr std::uint32_t STEPS = 64u;
+    static constexpr std::uint32_t BLOCK_LENGTH = 3u;
+    static constexpr float H_COUPLING = 0.75f;
+    static constexpr double MAX_IDENTITY_DIFFERENCE = 1.0e-7;
 
     ScopedModel update_model{};
     ScopedModel train_model{};
@@ -576,12 +720,12 @@ inline bool TestA_ZeroRateIdentity()
         !ConstructValueObservationModel(
             update_model.Model,
             BATCH,
-            0.75f
+            H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             train_model.Model,
             BATCH,
-            0.75f
+            H_COUPLING
         )
     )
     {
@@ -593,7 +737,7 @@ inline bool TestA_ZeroRateIdentity()
         BlockDataset(
             STEPS,
             BATCH,
-            3u
+            BLOCK_LENGTH
         );
 
     const GHGFLearningConfig zero =
@@ -681,11 +825,11 @@ inline bool TestA_ZeroRateIdentity()
 
     const bool ok =
         std::isfinite(maximum_difference) &&
-        maximum_difference <= 1.0e-7;
+        maximum_difference <= MAX_IDENTITY_DIFFERENCE;
 
     std::cout
         << std::fixed
-        << std::setprecision(9)
+        << std::setprecision(TestConst::LONG_PRECISION)
         << "  maximum prediction difference                 "
         << maximum_difference << '\n';
 
@@ -704,15 +848,22 @@ inline bool TestB_ObservationBias()
     Banner("TEST B - OBSERVATION BIAS / TONIC-DRIFT LEARNING");
 
     static constexpr std::uint32_t BATCH = 10u;
-    static constexpr std::uint32_t STEPS = 160u;
+    static constexpr std::uint32_t TRAIN_STEPS = 160u;
+    static constexpr std::uint32_t TEST_STEPS = 40u;
     static constexpr std::uint32_t ONES = 8u;
+    static constexpr float DISABLED_H_COUPLING = 0.0f;
+    static constexpr float DRIFT_LEARNING_RATE = 0.25f;
+    static constexpr float GRADIENT_CLIP = 2.0f;
+    static constexpr double TARGET_PROBABILITY = 0.8;
+    static constexpr double PROBABILITY_TOLERANCE = 0.05;
+    static constexpr double MINIMUM_LOSS_IMPROVEMENT = 0.05;
 
     ScopedModel model{};
 
     if (!ConstructValueObservationModel(
         model.Model,
         BATCH,
-        0.0f
+        DISABLED_H_COUPLING
     ))
     {
         Report("model construction", false);
@@ -721,7 +872,14 @@ inline bool TestB_ObservationBias()
 
     const std::vector<float> training =
         FixedBernoulliBatchDataset(
-            STEPS,
+            TRAIN_STEPS,
+            BATCH,
+            ONES
+        );
+
+    const std::vector<float> testing =
+        FixedBernoulliBatchDataset(
+            TEST_STEPS,
             BATCH,
             ONES
         );
@@ -729,13 +887,13 @@ inline bool TestB_ObservationBias()
     GHGFLearningConfig learning =
         ZeroLearning();
 
-    learning.DriftLearningRate = 0.25f;
-    learning.GradientClip = 2.0f;
+    learning.DriftLearningRate = DRIFT_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
 
     if (!TrainSequence(
         model.Model,
         training,
-        STEPS,
+        TRAIN_STEPS,
         BATCH,
         learning,
         true
@@ -745,63 +903,48 @@ inline bool TestB_ObservationBias()
         return false;
     }
 
-    if (!model.Model.ResetGHGFState())
-    {
-        Report("reset after training", false);
-        return false;
-    }
-
-    std::vector<float> predictions(BATCH);
-
-    if (!model.Model.PredictModelNONVectorized(
+    const Evaluation held_out = Evaluate(
+        model.Model,
+        testing,
+        TEST_STEPS,
         BATCH,
-        predictions
-    ))
+        true
+    );
+
+    if (!held_out.Valid)
     {
-        Report("post-training prediction", false);
+        Report("held-out evaluation", false);
         return false;
     }
 
     double mean_probability = 0.0;
 
-    for (float value : predictions)
+    for (float value : held_out.Predictions)
         mean_probability += value;
 
     mean_probability /=
-        static_cast<double>(predictions.size());
+        static_cast<double>(held_out.Predictions.size());
 
-    const std::span<const float> target{
-        training.data(),
-        BATCH
-    };
-
-    const double final_loss =
-        BinaryLogLoss(
-            target,
-            predictions
-        );
-
-    const double initial_loss =
-        -std::log(0.5);
+    const double initial_loss = -std::log(TestConst::HALF);
 
     const bool probability_ok =
-        std::abs(mean_probability - 0.8) < 0.05;
+        std::abs(mean_probability - TARGET_PROBABILITY) <
+            PROBABILITY_TOLERANCE;
 
     const bool loss_ok =
-        std::isfinite(final_loss) &&
-        final_loss < initial_loss - 0.05;
+        held_out.Loss < initial_loss - MINIMUM_LOSS_IMPROVEMENT;
 
     std::cout
         << std::fixed
-        << std::setprecision(6)
+        << std::setprecision(TestConst::SHORT_PRECISION)
         << "  learned mean probability                     "
         << mean_probability << '\n'
         << "  target probability                           "
-        << 0.8 << '\n'
+        << TARGET_PROBABILITY << '\n'
         << "  initial 0.5 loss                             "
         << initial_loss << '\n'
         << "  learned loss                                 "
-        << final_loss << '\n';
+        << held_out.Loss << '\n';
 
     Report("bias approaches empirical Bernoulli rate", probability_ok);
     Report("bias learning lowers binary loss", loss_ok);
@@ -822,19 +965,24 @@ inline bool TestC_HCouplingLearning()
     static constexpr std::uint32_t BATCH = 1u;
     static constexpr std::uint32_t TRAIN_STEPS = 128u;
     static constexpr std::uint32_t TEST_STEPS = 16u;
+    static constexpr float OBSERVATION = 1.0f;
+    static constexpr float INITIAL_H_COUPLING = 0.20f;
+    static constexpr float H_LEARNING_RATE = 0.05f;
+    static constexpr float GRADIENT_CLIP = 5.0f;
+    static constexpr double MINIMUM_IMPROVEMENT = 1.0e-5;
 
     const std::vector<float> training =
         ConstantDataset(
             TRAIN_STEPS,
             BATCH,
-            1.0f
+            OBSERVATION
         );
 
     const std::vector<float> testing =
         ConstantDataset(
             TEST_STEPS,
             BATCH,
-            1.0f
+            OBSERVATION
         );
 
     ScopedModel baseline{};
@@ -844,12 +992,12 @@ inline bool TestC_HCouplingLearning()
         !ConstructValueObservationModel(
             baseline.Model,
             BATCH,
-            0.20f
+            INITIAL_H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             learned.Model,
             BATCH,
-            0.20f
+            INITIAL_H_COUPLING
         )
     )
     {
@@ -860,8 +1008,8 @@ inline bool TestC_HCouplingLearning()
     GHGFLearningConfig learning =
         ZeroLearning();
 
-    learning.HCouplingLearningRate = 0.05f;
-    learning.GradientClip = 5.0f;
+    learning.HCouplingLearningRate = H_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
 
     if (!TrainSequence(
         learned.Model,
@@ -897,11 +1045,11 @@ inline bool TestC_HCouplingLearning()
     const bool ok =
         before.Valid &&
         after.Valid &&
-        after.Loss + 1.0e-5 < before.Loss;
+        after.Loss + MINIMUM_IMPROVEMENT < before.Loss;
 
     std::cout
         << std::fixed
-        << std::setprecision(8)
+        << std::setprecision(TestConst::LONG_PRECISION)
         << "  frozen coupling loss                         "
         << before.Loss << '\n'
         << "  internally learned coupling loss             "
@@ -927,19 +1075,24 @@ inline bool TestD_HCouplingFiniteDifference()
     static constexpr std::uint32_t PROBE_STEPS = 24u;
     static constexpr float CENTER = 0.50f;
     static constexpr float EPSILON = 0.10f;
+    static constexpr float OBSERVATION = 1.0f;
+    static constexpr float H_LEARNING_RATE = 0.02f;
+    static constexpr float GRADIENT_CLIP = 5.0f;
+    static constexpr double CENTRAL_DIFFERENCE_DENOMINATOR = 2.0;
+    static constexpr double MINIMUM_RESOLVABLE_LOSS_DELTA = 1.0e-8;
 
     const std::vector<float> training =
         ConstantDataset(
             TRAIN_STEPS,
             BATCH,
-            1.0f
+            OBSERVATION
         );
 
     const std::vector<float> probe =
         ConstantDataset(
             PROBE_STEPS,
             BATCH,
-            1.0f
+            OBSERVATION
         );
 
     ScopedModel minus_model{};
@@ -1009,13 +1162,13 @@ inline bool TestD_HCouplingFiniteDifference()
 
     const double numerical_loss_gradient =
         (plus.Loss - minus.Loss) /
-        (2.0 * static_cast<double>(EPSILON));
+        (CENTRAL_DIFFERENCE_DENOMINATOR * static_cast<double>(EPSILON));
 
     GHGFLearningConfig learning =
         ZeroLearning();
 
-    learning.HCouplingLearningRate = 0.02f;
-    learning.GradientClip = 5.0f;
+    learning.HCouplingLearningRate = H_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
 
     if (!TrainSequence(
         local_model.Model,
@@ -1058,7 +1211,8 @@ inline bool TestD_HCouplingFiniteDifference()
         );
 
     const bool finite_difference_has_direction =
-        std::abs(plus.Loss - minus.Loss) > 1.0e-8;
+        std::abs(plus.Loss - minus.Loss) >
+            MINIMUM_RESOLVABLE_LOSS_DELTA;
 
     const bool direction_ok =
         agreement > DELTA_EPS;
@@ -1068,7 +1222,7 @@ inline bool TestD_HCouplingFiniteDifference()
 
     std::cout
         << std::fixed
-        << std::setprecision(9)
+        << std::setprecision(TestConst::LONG_PRECISION)
         << "  loss(k-eps)                                  "
         << minus.Loss << '\n'
         << "  loss(k)                                      "
@@ -1117,19 +1271,26 @@ inline bool TestE_DriftOracleAgreement()
     static constexpr std::uint32_t BATCH = 1u;
     static constexpr std::uint32_t TRAIN_STEPS = 48u;
     static constexpr std::uint32_t TEST_STEPS = 16u;
+    static constexpr float OBSERVATION = 1.0f;
+    static constexpr float DISABLED_H_COUPLING = 0.0f;
+    static constexpr float DRIFT_LEARNING_RATE = 0.10f;
+    static constexpr float GRADIENT_CLIP = 2.0f;
+    static constexpr float SEARCH_LOWER = -2.0f;
+    static constexpr float SEARCH_UPPER = 2.0f;
+    static constexpr std::uint32_t SEARCH_PASSES = 2u;
 
     const std::vector<float> training =
         ConstantDataset(
             TRAIN_STEPS,
             BATCH,
-            1.0f
+            OBSERVATION
         );
 
     const std::vector<float> testing =
         ConstantDataset(
             TEST_STEPS,
             BATCH,
-            1.0f
+            OBSERVATION
         );
 
     ScopedModel baseline{};
@@ -1140,17 +1301,17 @@ inline bool TestE_DriftOracleAgreement()
         !ConstructValueObservationModel(
             baseline.Model,
             BATCH,
-            0.0f
+            DISABLED_H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             local.Model,
             BATCH,
-            0.0f
+            DISABLED_H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             oracle.Model,
             BATCH,
-            0.0f
+            DISABLED_H_COUPLING
         )
     )
     {
@@ -1161,8 +1322,8 @@ inline bool TestE_DriftOracleAgreement()
     GHGFLearningConfig learning =
         ZeroLearning();
 
-    learning.DriftLearningRate = 0.10f;
-    learning.GradientClip = 2.0f;
+    learning.DriftLearningRate = DRIFT_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
 
     if (!TrainSequence(
         local.Model,
@@ -1187,11 +1348,11 @@ inline bool TestE_DriftOracleAgreement()
         training,
         TRAIN_STEPS,
         BATCH,
-        1u,
+        TestConst::TWO_NODE_OBSERVATION_SLOT,
         drift_index,
-        -2.0f,
-        2.0f,
-        2u
+        SEARCH_LOWER,
+        SEARCH_UPPER,
+        SEARCH_PASSES
     ))
     {
         Report("global drift fit", false);
@@ -1253,7 +1414,7 @@ inline bool TestE_DriftOracleAgreement()
 
     std::cout
         << std::fixed
-        << std::setprecision(9)
+        << std::setprecision(TestConst::LONG_PRECISION)
         << "  baseline loss                                "
         << base_eval.Loss << '\n'
         << "  local drift loss                             "
@@ -1287,6 +1448,13 @@ inline bool TestF_TemporalParameter()
     static constexpr std::uint32_t BATCH = 1u;
     static constexpr std::uint32_t TRAIN_STEPS = 256u;
     static constexpr std::uint32_t TEST_STEPS = 64u;
+    static constexpr float INITIAL_H_COUPLING = 1.0f;
+    static constexpr float TEMPORAL_LEARNING_RATE = 0.05f;
+    static constexpr float GRADIENT_CLIP = 2.0f;
+    static constexpr float SEARCH_LOWER = 0.0f;
+    static constexpr float SEARCH_UPPER = 1.0f;
+    static constexpr std::uint32_t SEARCH_PASSES = 4u;
+    static constexpr double MINIMUM_IMPROVEMENT = 1.0e-6;
 
     const std::vector<float> training =
         AlternatingDataset(
@@ -1297,7 +1465,8 @@ inline bool TestF_TemporalParameter()
     const std::vector<float> testing =
         AlternatingDataset(
             TEST_STEPS,
-            BATCH
+            BATCH,
+            TRAIN_STEPS
         );
 
     ScopedModel baseline{};
@@ -1308,17 +1477,17 @@ inline bool TestF_TemporalParameter()
         !ConstructValueObservationModel(
             baseline.Model,
             BATCH,
-            1.0f
+            INITIAL_H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             local.Model,
             BATCH,
-            1.0f
+            INITIAL_H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             oracle.Model,
             BATCH,
-            1.0f
+            INITIAL_H_COUPLING
         )
     )
     {
@@ -1329,8 +1498,8 @@ inline bool TestF_TemporalParameter()
     GHGFLearningConfig learning =
         ZeroLearning();
 
-    learning.AutoConnectionLearningRate = 0.05f;
-    learning.GradientClip = 2.0f;
+    learning.AutoConnectionLearningRate = TEMPORAL_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
 
     if (!TrainSequence(
         local.Model,
@@ -1355,11 +1524,11 @@ inline bool TestF_TemporalParameter()
         training,
         TRAIN_STEPS,
         BATCH,
-        0u,
+        TestConst::VALUE_SLOT,
         temporal_index,
-        0.0f,
-        1.0f,
-        4u
+        SEARCH_LOWER,
+        SEARCH_UPPER,
+        SEARCH_PASSES
     ))
     {
         Report("global temporal fit", false);
@@ -1411,7 +1580,7 @@ inline bool TestF_TemporalParameter()
         );
 
     const bool local_improved =
-        local_eval.Loss + 1.0e-6 < base_eval.Loss;
+        local_eval.Loss + MINIMUM_IMPROVEMENT < base_eval.Loss;
 
     const bool oracle_non_regression =
         oracle_eval.Loss <= base_eval.Loss + LOSS_EPS;
@@ -1421,7 +1590,7 @@ inline bool TestF_TemporalParameter()
 
     std::cout
         << std::fixed
-        << std::setprecision(9)
+        << std::setprecision(TestConst::LONG_PRECISION)
         << "  fixed lambda loss                             "
         << base_eval.Loss << '\n'
         << "  locally learned lambda loss                   "
@@ -1455,13 +1624,22 @@ inline bool TestG_TonicVolatility()
     static constexpr std::uint32_t TRAIN_STEPS = 256u;
     static constexpr std::uint32_t TEST_STEPS = 96u;
     static constexpr std::uint32_t BLOCK = 8u;
+    static constexpr float INITIAL_H_COUPLING = 1.0f;
+    static constexpr float VOLATILITY_LEARNING_RATE = 0.01f;
+    static constexpr float GRADIENT_CLIP = 2.0f;
+    static constexpr float MIN_TONIC_LOG_VOLATILITY = -10.0f;
+    static constexpr float MAX_TONIC_LOG_VOLATILITY = 2.0f;
+    static constexpr float SEARCH_LOWER = -8.0f;
+    static constexpr float SEARCH_UPPER = 0.0f;
+    static constexpr std::uint32_t SEARCH_PASSES = 4u;
+    static constexpr double MINIMUM_MEAN_SQUARED_EFFECT = 1.0e-8;
+    static constexpr double MINIMUM_LOSS_IMPROVEMENT = 1.0e-6;
 
     const std::vector<float> training =
         BlockDataset(
             TRAIN_STEPS,
             BATCH,
-            BLOCK,
-            0u
+            BLOCK
         );
 
     const std::vector<float> testing =
@@ -1480,17 +1658,17 @@ inline bool TestG_TonicVolatility()
         !ConstructValueObservationModel(
             baseline.Model,
             BATCH,
-            1.0f
+            INITIAL_H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             local.Model,
             BATCH,
-            1.0f
+            INITIAL_H_COUPLING
         ) ||
         !ConstructValueObservationModel(
             oracle.Model,
             BATCH,
-            1.0f
+            INITIAL_H_COUPLING
         )
     )
     {
@@ -1501,10 +1679,10 @@ inline bool TestG_TonicVolatility()
     GHGFLearningConfig learning =
         ZeroLearning();
 
-    learning.VolatilityLearningRate = 0.01f;
-    learning.GradientClip = 2.0f;
-    learning.MinTonicLogVolatility = -10.0f;
-    learning.MaxTonicLogVolatility = 2.0f;
+    learning.VolatilityLearningRate = VOLATILITY_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
+    learning.MinTonicLogVolatility = MIN_TONIC_LOG_VOLATILITY;
+    learning.MaxTonicLogVolatility = MAX_TONIC_LOG_VOLATILITY;
 
     if (!TrainSequence(
         local.Model,
@@ -1529,11 +1707,11 @@ inline bool TestG_TonicVolatility()
         training,
         TRAIN_STEPS,
         BATCH,
-        0u,
+        TestConst::VALUE_SLOT,
         volatility_index,
-        -8.0f,
-        0.0f,
-        4u
+        SEARCH_LOWER,
+        SEARCH_UPPER,
+        SEARCH_PASSES
     ))
     {
         Report("global volatility fit", false);
@@ -1590,11 +1768,14 @@ inline bool TestG_TonicVolatility()
             oracle_eval.Predictions
         );
 
-    const bool local_changed =
-        local_change > DELTA_EPS;
+    const double mean_squared_effect =
+        local_change / static_cast<double>(local_eval.Predictions.size());
 
-    const bool local_non_catastrophic =
-        local_eval.Loss <= base_eval.Loss + 0.02;
+    const bool local_changed_meaningfully =
+        mean_squared_effect > MINIMUM_MEAN_SQUARED_EFFECT;
+
+    const bool local_improved =
+        local_eval.Loss + MINIMUM_LOSS_IMPROVEMENT < base_eval.Loss;
 
     const bool oracle_non_regression =
         oracle_eval.Loss <= base_eval.Loss + LOSS_EPS;
@@ -1607,7 +1788,7 @@ inline bool TestG_TonicVolatility()
 
     std::cout
         << std::fixed
-        << std::setprecision(9)
+        << std::setprecision(TestConst::LONG_PRECISION)
         << "  fixed volatility loss                         "
         << base_eval.Loss << '\n'
         << "  locally learned volatility loss               "
@@ -1617,12 +1798,14 @@ inline bool TestG_TonicVolatility()
         << std::scientific
         << "  local prediction delta^2                      "
         << local_change << '\n'
+        << "  local mean squared prediction effect          "
+        << mean_squared_effect << '\n'
         << "  local/global prediction-direction dot         "
         << agreement << '\n'
         << std::fixed;
 
-    Report("tonic volatility changes model behaviour", local_changed);
-    Report("local volatility remains stable", local_non_catastrophic);
+    Report("tonic volatility has meaningful held-out effect", local_changed_meaningfully);
+    Report("local volatility lowers held-out loss", local_improved);
     Report("global volatility fit is non-regressive", oracle_non_regression);
 
     std::cout
@@ -1631,8 +1814,8 @@ inline bool TestG_TonicVolatility()
         << " (not a hard failure)\n";
 
     return
-        local_changed &&
-        local_non_catastrophic &&
+        local_changed_meaningfully &&
+        local_improved &&
         oracle_non_regression;
 }
 
@@ -1651,13 +1834,21 @@ inline bool TestH_VCoupling()
     static constexpr std::uint32_t TEST_STEPS = 128u;
     static constexpr std::uint32_t BLOCK = 8u;
     static constexpr float INITIAL_V = 0.25f;
+    static constexpr float INITIAL_H = 1.0f;
+    static constexpr float V_LEARNING_RATE = 0.01f;
+    static constexpr float GRADIENT_CLIP = 2.0f;
+    static constexpr float SEARCH_LOWER = -2.0f;
+    static constexpr float SEARCH_UPPER = 2.0f;
+    static constexpr std::uint32_t SEARCH_PASSES = 4u;
+    static constexpr std::uint8_t FIRST_RELATION_ORDINAL = 0u;
+    static constexpr double MINIMUM_MEAN_SQUARED_EFFECT = 1.0e-8;
+    static constexpr double MINIMUM_LOSS_IMPROVEMENT = 1.0e-6;
 
     const std::vector<float> training =
         BlockDataset(
             TRAIN_STEPS,
             BATCH,
-            BLOCK,
-            0u
+            BLOCK
         );
 
     const std::vector<float> testing =
@@ -1677,19 +1868,19 @@ inline bool TestH_VCoupling()
             baseline.Model,
             BATCH,
             INITIAL_V,
-            1.0f
+            INITIAL_H
         ) ||
         !ConstructVolatileValueObservationModel(
             local.Model,
             BATCH,
             INITIAL_V,
-            1.0f
+            INITIAL_H
         ) ||
         !ConstructVolatileValueObservationModel(
             oracle.Model,
             BATCH,
             INITIAL_V,
-            1.0f
+            INITIAL_H
         )
     )
     {
@@ -1700,8 +1891,8 @@ inline bool TestH_VCoupling()
     GHGFLearningConfig learning =
         ZeroLearning();
 
-    learning.VCouplingLearningRate = 0.01f;
-    learning.GradientClip = 2.0f;
+    learning.VCouplingLearningRate = V_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
 
     if (!TrainSequence(
         local.Model,
@@ -1719,7 +1910,7 @@ inline bool TestH_VCoupling()
     const std::uint32_t v_index =
         GM::CouplingIndex(
             FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
-            0u,
+            FIRST_RELATION_ORDINAL,
             PARENT_CAPACITY
         );
 
@@ -1728,11 +1919,11 @@ inline bool TestH_VCoupling()
         training,
         TRAIN_STEPS,
         BATCH,
-        1u,
+        TestConst::SECOND_VALUE_SLOT,
         v_index,
-        -2.0f,
-        2.0f,
-        4u
+        SEARCH_LOWER,
+        SEARCH_UPPER,
+        SEARCH_PASSES
     ))
     {
         Report("global V-coupling fit", false);
@@ -1789,11 +1980,14 @@ inline bool TestH_VCoupling()
             oracle_eval.Predictions
         );
 
-    const bool local_changed =
-        local_change > DELTA_EPS;
+    const double mean_squared_effect =
+        local_change / static_cast<double>(local_eval.Predictions.size());
 
-    const bool local_non_catastrophic =
-        local_eval.Loss <= base_eval.Loss + 0.02;
+    const bool local_changed_meaningfully =
+        mean_squared_effect > MINIMUM_MEAN_SQUARED_EFFECT;
+
+    const bool local_improved =
+        local_eval.Loss + MINIMUM_LOSS_IMPROVEMENT < base_eval.Loss;
 
     const bool oracle_non_regression =
         oracle_eval.Loss <= base_eval.Loss + LOSS_EPS;
@@ -1806,7 +2000,7 @@ inline bool TestH_VCoupling()
 
     std::cout
         << std::fixed
-        << std::setprecision(9)
+        << std::setprecision(TestConst::LONG_PRECISION)
         << "  fixed V-coupling loss                         "
         << base_eval.Loss << '\n'
         << "  locally learned V-coupling loss               "
@@ -1816,12 +2010,14 @@ inline bool TestH_VCoupling()
         << std::scientific
         << "  local prediction delta^2                      "
         << local_change << '\n'
+        << "  local mean squared prediction effect          "
+        << mean_squared_effect << '\n'
         << "  local/global prediction-direction dot         "
         << agreement << '\n'
         << std::fixed;
 
-    Report("V coupling changes model behaviour", local_changed);
-    Report("local V learning remains stable", local_non_catastrophic);
+    Report("V coupling has meaningful held-out effect", local_changed_meaningfully);
+    Report("local V learning lowers held-out loss", local_improved);
     Report("global V fit is non-regressive", oracle_non_regression);
 
     std::cout
@@ -1830,53 +2026,926 @@ inline bool TestH_VCoupling()
         << " (not a hard failure)\n";
 
     return
-        local_changed &&
-        local_non_catastrophic &&
+        local_changed_meaningfully &&
+        local_improved &&
         oracle_non_regression;
 }
 
 // ----------------------------------------------------------------------------
-// Run all A-H
+// TEST I - offline score-based predictive-structure selection
+//
+// This is deliberately not described as causal discovery or online rewiring.
+// The current public API can construct candidate DAGs, but a post-construction
+// ConnectGHGFParent()/RemoveParent() invalidates the private compiled plan and
+// cannot publicly reseal it. We therefore train two freshly constructed legal
+// candidate DAGs, select only from validation score, refit the selected DAG on
+// train+validation data, and touch the test split exactly once for reporting.
+// ----------------------------------------------------------------------------
+
+struct StructureScore final
+{
+    bool Valid = false;
+    PredictiveStructure Structure = PredictiveStructure::SHALLOW;
+    std::uint32_t EdgeCount = 0u;
+    double ValidationLoss = std::numeric_limits<double>::infinity();
+    double PenalizedScore = std::numeric_limits<double>::infinity();
+};
+
+inline double BICStylePerSamplePenalty(
+    std::uint32_t edge_count,
+    std::size_t sample_count
+) noexcept
+{
+    static constexpr double HALF_BIC_SCALE = 0.5;
+
+    if (edge_count == 0u || sample_count < 2u)
+        return 0.0;
+
+    return
+        HALF_BIC_SCALE *
+        static_cast<double>(edge_count) *
+        std::log(static_cast<double>(sample_count)) /
+        static_cast<double>(sample_count);
+}
+
+inline StructureScore TrainAndScoreStructure(
+    PredictiveStructure structure,
+    std::span<const float> training,
+    std::uint32_t train_steps,
+    std::span<const float> validation,
+    std::uint32_t validation_steps,
+    std::uint32_t batch,
+    float hidden_coupling,
+    float observation_coupling,
+    const GHGFLearningConfig& learning
+)
+{
+    static constexpr std::uint32_t SHALLOW_EDGE_COUNT = 1u;
+    static constexpr std::uint32_t HIERARCHICAL_EDGE_COUNT = 2u;
+
+    StructureScore score{};
+    score.Structure = structure;
+    score.EdgeCount =
+        structure == PredictiveStructure::HIERARCHICAL
+            ? HIERARCHICAL_EDGE_COUNT
+            : SHALLOW_EDGE_COUNT;
+
+    ScopedModel candidate{};
+
+    if (
+        !ConstructPredictiveStructure(
+            candidate.Model,
+            batch,
+            structure,
+            hidden_coupling,
+            observation_coupling
+        ) ||
+        !TrainSequence(
+            candidate.Model,
+            training,
+            train_steps,
+            batch,
+            learning,
+            true
+        )
+    )
+    {
+        return score;
+    }
+
+    const Evaluation evaluation = Evaluate(
+        candidate.Model,
+        validation,
+        validation_steps,
+        batch,
+        true
+    );
+
+    if (!evaluation.Valid)
+        return score;
+
+    score.ValidationLoss = evaluation.Loss;
+    score.PenalizedScore =
+        evaluation.Loss +
+        BICStylePerSamplePenalty(
+            score.EdgeCount,
+            validation.size()
+        );
+
+    score.Valid = std::isfinite(score.PenalizedScore);
+    return score;
+}
+
+inline Evaluation RefitAndTestStructure(
+    PredictiveStructure structure,
+    std::span<const float> fitting_data,
+    std::uint32_t fitting_steps,
+    std::span<const float> testing,
+    std::uint32_t test_steps,
+    std::uint32_t batch,
+    float hidden_coupling,
+    float observation_coupling,
+    const GHGFLearningConfig& learning
+)
+{
+    ScopedModel model{};
+
+    if (
+        !ConstructPredictiveStructure(
+            model.Model,
+            batch,
+            structure,
+            hidden_coupling,
+            observation_coupling
+        ) ||
+        !TrainSequence(
+            model.Model,
+            fitting_data,
+            fitting_steps,
+            batch,
+            learning,
+            true
+        )
+    )
+    {
+        return {};
+    }
+
+    return Evaluate(
+        model.Model,
+        testing,
+        test_steps,
+        batch,
+        true
+    );
+}
+
+inline bool TestI_ScoreBasedStructureSelection()
+{
+    Banner("TEST I - OFFLINE SCORE-BASED PREDICTIVE-STRUCTURE SELECTION");
+
+    static constexpr std::uint32_t BATCH = 1u;
+    static constexpr std::uint32_t TRAIN_STEPS = 503u;
+    static constexpr std::uint32_t VALIDATION_STEPS = 251u;
+    static constexpr std::uint32_t TEST_STEPS = 257u;
+    static constexpr std::uint32_t FITTING_STEPS =
+        TRAIN_STEPS + VALIDATION_STEPS;
+    static constexpr std::uint32_t TOTAL_STEPS =
+        FITTING_STEPS + TEST_STEPS;
+    static constexpr std::uint32_t BLOCK_LENGTH = 16u;
+
+    static constexpr float INITIAL_HIDDEN_COUPLING = 2.0f;
+    static constexpr float INITIAL_OBSERVATION_COUPLING = 1.0f;
+    static constexpr float H_LEARNING_RATE = 0.02f;
+    static constexpr float DRIFT_LEARNING_RATE = 0.02f;
+    static constexpr float TEMPORAL_LEARNING_RATE = 0.005f;
+    static constexpr float GRADIENT_CLIP = 5.0f;
+    static constexpr double MINIMUM_VALIDATION_MARGIN = 1.0e-3;
+    static constexpr double MINIMUM_TEST_IMPROVEMENT = 1.0e-3;
+
+    const std::vector<float> data = BlockDataset(
+        TOTAL_STEPS,
+        BATCH,
+        BLOCK_LENGTH
+    );
+
+    const std::span<const float> all{data};
+    const std::span<const float> training =
+        all.first(static_cast<std::size_t>(TRAIN_STEPS) * BATCH);
+    const std::span<const float> validation =
+        all.subspan(
+            static_cast<std::size_t>(TRAIN_STEPS) * BATCH,
+            static_cast<std::size_t>(VALIDATION_STEPS) * BATCH
+        );
+    const std::span<const float> fitting_data =
+        all.first(static_cast<std::size_t>(FITTING_STEPS) * BATCH);
+    const std::span<const float> testing =
+        all.subspan(
+            static_cast<std::size_t>(FITTING_STEPS) * BATCH,
+            static_cast<std::size_t>(TEST_STEPS) * BATCH
+        );
+
+    GHGFLearningConfig learning = ZeroLearning();
+    learning.HCouplingLearningRate = H_LEARNING_RATE;
+    learning.DriftLearningRate = DRIFT_LEARNING_RATE;
+    learning.AutoConnectionLearningRate = TEMPORAL_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
+
+    const StructureScore shallow = TrainAndScoreStructure(
+        PredictiveStructure::SHALLOW,
+        training,
+        TRAIN_STEPS,
+        validation,
+        VALIDATION_STEPS,
+        BATCH,
+        INITIAL_HIDDEN_COUPLING,
+        INITIAL_OBSERVATION_COUPLING,
+        learning
+    );
+
+    const StructureScore hierarchical = TrainAndScoreStructure(
+        PredictiveStructure::HIERARCHICAL,
+        training,
+        TRAIN_STEPS,
+        validation,
+        VALIDATION_STEPS,
+        BATCH,
+        INITIAL_HIDDEN_COUPLING,
+        INITIAL_OBSERVATION_COUPLING,
+        learning
+    );
+
+    if (!shallow.Valid || !hierarchical.Valid)
+    {
+        Report("candidate training and validation", false);
+        return false;
+    }
+
+    const PredictiveStructure selected =
+        hierarchical.PenalizedScore < shallow.PenalizedScore
+            ? PredictiveStructure::HIERARCHICAL
+            : PredictiveStructure::SHALLOW;
+
+    const PredictiveStructure rejected =
+        selected == PredictiveStructure::HIERARCHICAL
+            ? PredictiveStructure::SHALLOW
+            : PredictiveStructure::HIERARCHICAL;
+
+    const double validation_margin =
+        std::abs(shallow.PenalizedScore - hierarchical.PenalizedScore);
+
+    const Evaluation selected_test = RefitAndTestStructure(
+        selected,
+        fitting_data,
+        FITTING_STEPS,
+        testing,
+        TEST_STEPS,
+        BATCH,
+        INITIAL_HIDDEN_COUPLING,
+        INITIAL_OBSERVATION_COUPLING,
+        learning
+    );
+
+    const Evaluation rejected_test = RefitAndTestStructure(
+        rejected,
+        fitting_data,
+        FITTING_STEPS,
+        testing,
+        TEST_STEPS,
+        BATCH,
+        INITIAL_HIDDEN_COUPLING,
+        INITIAL_OBSERVATION_COUPLING,
+        learning
+    );
+
+    const bool selected_expected_structure =
+        selected == PredictiveStructure::HIERARCHICAL;
+    const bool decisive_validation_score =
+        validation_margin > MINIMUM_VALIDATION_MARGIN;
+    const bool held_out_improvement =
+        selected_test.Valid &&
+        rejected_test.Valid &&
+        selected_test.Loss + MINIMUM_TEST_IMPROVEMENT < rejected_test.Loss;
+
+    std::cout
+        << std::fixed
+        << std::setprecision(TestConst::LONG_PRECISION)
+        << "  shallow validation loss                       "
+        << shallow.ValidationLoss << '\n'
+        << "  shallow penalized score                       "
+        << shallow.PenalizedScore << '\n'
+        << "  hierarchical validation loss                  "
+        << hierarchical.ValidationLoss << '\n'
+        << "  hierarchical penalized score                  "
+        << hierarchical.PenalizedScore << '\n'
+        << "  validation decision margin                    "
+        << validation_margin << '\n'
+        << "  selected topology                             "
+        << (selected_expected_structure ? "HIERARCHICAL" : "SHALLOW") << '\n'
+        << "  selected held-out test loss                   "
+        << selected_test.Loss << '\n'
+        << "  rejected held-out test loss                   "
+        << rejected_test.Loss << '\n';
+
+    Report("validation selects hierarchical candidate", selected_expected_structure);
+    Report("validation decision exceeds minimum margin", decisive_validation_score);
+    Report("selected topology generalizes on untouched test", held_out_improvement);
+
+    return
+        selected_expected_structure &&
+        decisive_validation_score &&
+        held_out_improvement;
+}
+
+// ----------------------------------------------------------------------------
+// TEST J - timing and independent-model parallel throughput
+//
+// Reported ns/step values are amortized wall-clock throughput measurements, not
+// single-call latency. Each parallel worker owns a separate model; this measures
+// independent-model parallelism and does not claim same-model thread safety.
+// ----------------------------------------------------------------------------
+
+using BenchmarkClock = std::chrono::steady_clock;
+static_assert(BenchmarkClock::is_steady);
+
+struct WorkloadMeasurement final
+{
+    bool Valid = false;
+    double Seconds = 0.0;
+    std::uint64_t Steps = 0u;
+    std::uint64_t Samples = 0u;
+    double Checksum = 0.0;
+};
+
+inline bool RunModelWorkload(
+    GHGFModelConstructor& model,
+    std::span<const float> observations,
+    std::uint32_t steps,
+    std::uint32_t batch,
+    const GHGFLearningConfig& learning,
+    bool train,
+    double& checksum
+)
+{
+    if (
+        steps == 0u ||
+        batch == 0u ||
+        observations.size() != static_cast<std::size_t>(steps) * batch
+    )
+    {
+        return false;
+    }
+
+    std::vector<float> prediction(batch);
+    checksum = 0.0;
+
+    for (std::uint32_t time = 0u; time < steps; ++time)
+    {
+        const std::size_t begin = static_cast<std::size_t>(time) * batch;
+        const std::span<const float> observation =
+            observations.subspan(begin, batch);
+
+        if (!model.PredictModelNONVectorized(batch, prediction))
+            return false;
+
+        checksum += static_cast<double>(prediction.front());
+        checksum += static_cast<double>(prediction.back());
+
+        const bool advanced = train
+            ? model.TrainModelNONVectorized(batch, observation, learning)
+            : model.UpdateModelNONVectorized(batch, observation);
+
+        if (!advanced)
+            return false;
+    }
+
+    return std::isfinite(checksum) && checksum > 0.0;
+}
+
+inline WorkloadMeasurement MeasureOneSequentialWorkload(
+    std::span<const float> observations,
+    std::uint32_t steps,
+    std::uint32_t batch,
+    const GHGFLearningConfig& learning,
+    bool train
+)
+{
+    static constexpr float BENCHMARK_H_COUPLING = 1.0f;
+
+    ScopedModel model{};
+    WorkloadMeasurement measurement{};
+
+    if (!ConstructValueObservationModel(
+        model.Model,
+        batch,
+        BENCHMARK_H_COUPLING
+    ))
+    {
+        return measurement;
+    }
+
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    const auto begin = BenchmarkClock::now();
+
+    const bool ran = RunModelWorkload(
+        model.Model,
+        observations,
+        steps,
+        batch,
+        learning,
+        train,
+        measurement.Checksum
+    );
+
+    const auto end = BenchmarkClock::now();
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+
+    measurement.Seconds = std::chrono::duration<double>(end - begin).count();
+    measurement.Steps = steps;
+    measurement.Samples = static_cast<std::uint64_t>(steps) * batch;
+    measurement.Valid =
+        ran &&
+        measurement.Seconds > 0.0 &&
+        std::isfinite(measurement.Seconds);
+
+    return measurement;
+}
+
+inline WorkloadMeasurement MedianSequentialWorkload(
+    std::span<const float> observations,
+    std::uint32_t steps,
+    std::uint32_t batch,
+    const GHGFLearningConfig& learning,
+    bool train,
+    std::uint32_t repetitions
+)
+{
+    WorkloadMeasurement invalid{};
+    if (repetitions == 0u)
+        return invalid;
+
+    std::vector<WorkloadMeasurement> samples;
+    samples.reserve(repetitions);
+
+    for (std::uint32_t repetition = 0u; repetition < repetitions; ++repetition)
+    {
+        WorkloadMeasurement sample = MeasureOneSequentialWorkload(
+            observations,
+            steps,
+            batch,
+            learning,
+            train
+        );
+
+        if (!sample.Valid)
+            return invalid;
+
+        samples.push_back(sample);
+    }
+
+    std::sort(
+        samples.begin(),
+        samples.end(),
+        [](const WorkloadMeasurement& left, const WorkloadMeasurement& right)
+        {
+            return left.Seconds < right.Seconds;
+        }
+    );
+
+    return samples[samples.size() / 2u];
+}
+
+inline WorkloadMeasurement MeasureConstruction(
+    std::uint32_t constructions,
+    std::uint32_t batch
+)
+{
+    static constexpr float CONSTRUCTION_H_COUPLING = 1.0f;
+
+    WorkloadMeasurement measurement{};
+    if (constructions == 0u || batch == 0u)
+        return measurement;
+
+    const auto begin = BenchmarkClock::now();
+
+    for (std::uint32_t index = 0u; index < constructions; ++index)
+    {
+        ScopedModel model{};
+        if (!ConstructValueObservationModel(
+            model.Model,
+            batch,
+            CONSTRUCTION_H_COUPLING
+        ))
+        {
+            return {};
+        }
+
+        measurement.Checksum += model.Model.IsFabricActive() ? 1.0 : 0.0;
+    }
+
+    const auto end = BenchmarkClock::now();
+    measurement.Seconds = std::chrono::duration<double>(end - begin).count();
+    measurement.Steps = constructions;
+    measurement.Samples = constructions;
+    measurement.Valid =
+        measurement.Seconds > 0.0 &&
+        measurement.Checksum == static_cast<double>(constructions);
+    return measurement;
+}
+
+inline WorkloadMeasurement MeasureParallelTrial(
+    std::uint32_t thread_count,
+    std::span<const float> observations,
+    std::uint32_t steps,
+    std::uint32_t batch,
+    const GHGFLearningConfig& learning
+)
+{
+    static constexpr float PARALLEL_H_COUPLING = 1.0f;
+
+    WorkloadMeasurement measurement{};
+    if (thread_count == 0u)
+        return measurement;
+
+    std::vector<unsigned char> worker_ok(thread_count, 0u);
+    std::vector<double> worker_checksum(thread_count, 0.0);
+    std::vector<std::thread> workers;
+    workers.reserve(thread_count);
+
+    BenchmarkClock::time_point begin{};
+    BenchmarkClock::time_point end{};
+
+    std::barrier start_gate(
+        static_cast<std::ptrdiff_t>(thread_count + 1u),
+        [&begin]() noexcept { begin = BenchmarkClock::now(); }
+    );
+
+    std::barrier finish_gate(
+        static_cast<std::ptrdiff_t>(thread_count + 1u),
+        [&end]() noexcept { end = BenchmarkClock::now(); }
+    );
+
+    for (std::uint32_t worker = 0u; worker < thread_count; ++worker)
+    {
+        workers.emplace_back([&, worker]()
+        {
+            ScopedModel model{};
+            const bool constructed = ConstructValueObservationModel(
+                model.Model,
+                batch,
+                PARALLEL_H_COUPLING
+            );
+
+            start_gate.arrive_and_wait();
+
+            const bool ran =
+                constructed &&
+                RunModelWorkload(
+                    model.Model,
+                    observations,
+                    steps,
+                    batch,
+                    learning,
+                    true,
+                    worker_checksum[worker]
+                );
+
+            worker_ok[worker] = ran ? 1u : 0u;
+            finish_gate.arrive_and_wait();
+        });
+    }
+
+    start_gate.arrive_and_wait();
+    finish_gate.arrive_and_wait();
+
+    for (std::thread& worker : workers)
+        worker.join();
+
+    const bool all_workers_ok = std::all_of(
+        worker_ok.begin(),
+        worker_ok.end(),
+        [](unsigned char value) noexcept { return value != 0u; }
+    );
+
+    for (double checksum : worker_checksum)
+        measurement.Checksum += checksum;
+
+    measurement.Seconds = std::chrono::duration<double>(end - begin).count();
+    measurement.Steps =
+        static_cast<std::uint64_t>(steps) * thread_count;
+    measurement.Samples = measurement.Steps * batch;
+    measurement.Valid =
+        all_workers_ok &&
+        measurement.Seconds > 0.0 &&
+        std::isfinite(measurement.Seconds) &&
+        std::isfinite(measurement.Checksum) &&
+        measurement.Checksum > 0.0;
+
+    return measurement;
+}
+
+inline WorkloadMeasurement MedianParallelWorkload(
+    std::uint32_t thread_count,
+    std::span<const float> observations,
+    std::uint32_t steps,
+    std::uint32_t batch,
+    const GHGFLearningConfig& learning,
+    std::uint32_t repetitions
+)
+{
+    WorkloadMeasurement invalid{};
+    if (repetitions == 0u)
+        return invalid;
+
+    std::vector<WorkloadMeasurement> samples;
+    samples.reserve(repetitions);
+
+    for (std::uint32_t repetition = 0u; repetition < repetitions; ++repetition)
+    {
+        WorkloadMeasurement sample = MeasureParallelTrial(
+            thread_count,
+            observations,
+            steps,
+            batch,
+            learning
+        );
+
+        if (!sample.Valid)
+            return invalid;
+
+        samples.push_back(sample);
+    }
+
+    std::sort(
+        samples.begin(),
+        samples.end(),
+        [](const WorkloadMeasurement& left, const WorkloadMeasurement& right)
+        {
+            return left.Seconds < right.Seconds;
+        }
+    );
+
+    return samples[samples.size() / 2u];
+}
+
+inline double NanosecondsPerStep(const WorkloadMeasurement& value) noexcept
+{
+    static constexpr double NANOSECONDS_PER_SECOND = 1.0e9;
+    return value.Valid
+        ? value.Seconds * NANOSECONDS_PER_SECOND /
+            static_cast<double>(value.Steps)
+        : std::numeric_limits<double>::infinity();
+}
+
+inline double MillionSamplesPerSecond(const WorkloadMeasurement& value) noexcept
+{
+    static constexpr double SAMPLES_PER_MILLION = 1.0e6;
+    return value.Valid
+        ? static_cast<double>(value.Samples) /
+            value.Seconds /
+            SAMPLES_PER_MILLION
+        : 0.0;
+}
+
+inline void ReportBuildEnvironment()
+{
+    std::cout << "  compiler                                       ";
+
+#if defined(__clang__)
+    std::cout << "Clang " << __clang_version__;
+#elif defined(_MSC_VER)
+    std::cout << "MSVC " << _MSC_VER;
+#elif defined(__GNUC__)
+    std::cout
+        << "GCC "
+        << __GNUC__ << '.' << __GNUC_MINOR__ << '.' << __GNUC_PATCHLEVEL__;
+#else
+    std::cout << "unknown";
+#endif
+
+    std::cout << "\n  __cplusplus                                    "
+              << __cplusplus << '\n';
+}
+
+inline bool TestJ_TimingAndIndependentParallelism()
+{
+    Banner("TEST J - TIMING AND INDEPENDENT-MODEL PARALLELISM");
+
+    static constexpr std::uint32_t BATCH = 16u;
+    static constexpr std::uint32_t STEPS = 32768u;
+    static constexpr std::uint32_t BLOCK_LENGTH = 16u;
+    static constexpr std::uint32_t SEQUENTIAL_REPETITIONS = 9u;
+    static constexpr std::uint32_t PARALLEL_REPETITIONS = 7u;
+    static constexpr std::uint32_t CONSTRUCTION_REPETITIONS = 8192u;
+    static constexpr std::uint32_t UNKNOWN_HARDWARE_THREADS_FALLBACK = 1u;
+    static constexpr std::size_t REQUESTED_THREAD_COUNT = 4u;
+    static constexpr std::array<std::uint32_t, REQUESTED_THREAD_COUNT>
+        REQUESTED_THREADS{
+        1u, 2u, 4u, 8u
+    };
+    static constexpr float H_LEARNING_RATE = 0.01f;
+    static constexpr float DRIFT_LEARNING_RATE = 0.01f;
+    static constexpr float GRADIENT_CLIP = 5.0f;
+
+    const std::vector<float> observations = BlockDataset(
+        STEPS,
+        BATCH,
+        BLOCK_LENGTH
+    );
+
+    GHGFLearningConfig learning = ZeroLearning();
+    learning.HCouplingLearningRate = H_LEARNING_RATE;
+    learning.DriftLearningRate = DRIFT_LEARNING_RATE;
+    learning.GradientClip = GRADIENT_CLIP;
+
+    // One untimed pass warms code and allocator paths without contaminating
+    // any recorded model state.
+    const WorkloadMeasurement warmup = MeasureOneSequentialWorkload(
+        observations,
+        STEPS,
+        BATCH,
+        learning,
+        false
+    );
+
+    const WorkloadMeasurement construction = MeasureConstruction(
+        CONSTRUCTION_REPETITIONS,
+        BATCH
+    );
+
+    const WorkloadMeasurement update = MedianSequentialWorkload(
+        observations,
+        STEPS,
+        BATCH,
+        learning,
+        false,
+        SEQUENTIAL_REPETITIONS
+    );
+
+    const WorkloadMeasurement train = MedianSequentialWorkload(
+        observations,
+        STEPS,
+        BATCH,
+        learning,
+        true,
+        SEQUENTIAL_REPETITIONS
+    );
+
+    bool parallel_valid = true;
+    const std::uint32_t reported_hardware_threads =
+        std::thread::hardware_concurrency();
+    const std::uint32_t usable_hardware_threads =
+        reported_hardware_threads == 0u
+            ? UNKNOWN_HARDWARE_THREADS_FALLBACK
+            : reported_hardware_threads;
+
+    std::optional<double> one_thread_throughput{};
+
+    ReportBuildEnvironment();
+
+    std::cout
+        << std::fixed
+        << std::setprecision(TestConst::SHORT_PRECISION)
+        << "  timed steps per worker                         "
+        << STEPS << '\n'
+        << "  batch samples per time-step                    "
+        << BATCH << '\n'
+        << "  sequential median repetitions                 "
+        << SEQUENTIAL_REPETITIONS << '\n'
+        << "  parallel median repetitions                   "
+        << PARALLEL_REPETITIONS << '\n'
+        << "  hardware_concurrency reported                 "
+        << reported_hardware_threads << '\n'
+        << "  construction amortized ns/model               "
+        << NanosecondsPerStep(construction) << '\n'
+        << "  predict+update median ns/time-step             "
+        << NanosecondsPerStep(update) << '\n'
+        << "  predict+update median M samples/s              "
+        << MillionSamplesPerSecond(update) << '\n'
+        << "  predict+train median ns/time-step              "
+        << NanosecondsPerStep(train) << '\n'
+        << "  predict+train median M samples/s               "
+        << MillionSamplesPerSecond(train) << '\n'
+        << "\n  Independent models; predict+train aggregate throughput:\n";
+
+    for (const std::uint32_t thread_count : REQUESTED_THREADS)
+    {
+        if (thread_count > usable_hardware_threads)
+            continue;
+
+        const WorkloadMeasurement parallel = MedianParallelWorkload(
+            thread_count,
+            observations,
+            STEPS,
+            BATCH,
+            learning,
+            PARALLEL_REPETITIONS
+        );
+
+        parallel_valid = parallel_valid && parallel.Valid;
+        const double throughput = MillionSamplesPerSecond(parallel);
+
+        if (thread_count == REQUESTED_THREADS.front())
+            one_thread_throughput = throughput;
+
+        const double speedup =
+            one_thread_throughput.has_value() &&
+            one_thread_throughput.value() > 0.0
+                ? throughput / one_thread_throughput.value()
+                : 0.0;
+
+        const double efficiency = speedup / thread_count;
+
+        std::cout
+            << "    threads="
+            << std::setw(TestConst::THREAD_COLUMN_WIDTH) << thread_count
+            << "  M samples/s="
+            << std::setw(TestConst::THROUGHPUT_COLUMN_WIDTH) << throughput
+            << "  speedup="
+            << std::setw(TestConst::SPEEDUP_COLUMN_WIDTH) << speedup
+            << "  efficiency=" << efficiency << '\n';
+    }
+
+    const bool sequential_valid =
+        warmup.Valid &&
+        construction.Valid &&
+        update.Valid &&
+        train.Valid;
+
+    Report("sequential timing samples are valid", sequential_valid);
+    Report("parallel workers completed valid workloads", parallel_valid);
+
+    std::cout
+        << "  NOTE: parallel rows use separate model instances; no same-model\n"
+        << "        thread-safety or latency claim is implied.\n";
+
+    return sequential_valid && parallel_valid;
+}
+
+struct TimedTest final
+{
+    bool Passed = false;
+    double Milliseconds = 0.0;
+};
+
+template<class TestFunction>
+inline TimedTest RunTimedTest(TestFunction&& test)
+{
+    const auto begin = BenchmarkClock::now();
+    const bool passed = std::forward<TestFunction>(test)();
+    const auto end = BenchmarkClock::now();
+
+    return {
+        passed,
+        std::chrono::duration<double, std::milli>(end - begin).count()
+    };
+}
+
+// ----------------------------------------------------------------------------
+// Run all A-J
 // ----------------------------------------------------------------------------
 
 inline int RunAll()
 {
     std::cout
         << "\n================================================================================\n"
-        << "GHGF INTERNAL-LEARNING TEST KIT - TESTS A-H\n"
+        << "GHGF PAPER VALIDATION TEST KIT - TESTS A-J\n"
         << "================================================================================\n";
 
-    const bool a = TestA_ZeroRateIdentity();
-    const bool b = TestB_ObservationBias();
-    const bool c = TestC_HCouplingLearning();
-    const bool d = TestD_HCouplingFiniteDifference();
-    const bool e = TestE_DriftOracleAgreement();
-    const bool f = TestF_TemporalParameter();
-    const bool g = TestG_TonicVolatility();
-    const bool h = TestH_VCoupling();
+    const TimedTest a = RunTimedTest(TestA_ZeroRateIdentity);
+    const TimedTest b = RunTimedTest(TestB_ObservationBias);
+    const TimedTest c = RunTimedTest(TestC_HCouplingLearning);
+    const TimedTest d = RunTimedTest(TestD_HCouplingFiniteDifference);
+    const TimedTest e = RunTimedTest(TestE_DriftOracleAgreement);
+    const TimedTest f = RunTimedTest(TestF_TemporalParameter);
+    const TimedTest g = RunTimedTest(TestG_TonicVolatility);
+    const TimedTest h = RunTimedTest(TestH_VCoupling);
+    const TimedTest i = RunTimedTest(TestI_ScoreBasedStructureSelection);
+    const TimedTest j = RunTimedTest(TestJ_TimingAndIndependentParallelism);
 
     const int failures =
-        static_cast<int>(!a) +
-        static_cast<int>(!b) +
-        static_cast<int>(!c) +
-        static_cast<int>(!d) +
-        static_cast<int>(!e) +
-        static_cast<int>(!f) +
-        static_cast<int>(!g) +
-        static_cast<int>(!h);
+        static_cast<int>(!a.Passed) +
+        static_cast<int>(!b.Passed) +
+        static_cast<int>(!c.Passed) +
+        static_cast<int>(!d.Passed) +
+        static_cast<int>(!e.Passed) +
+        static_cast<int>(!f.Passed) +
+        static_cast<int>(!g.Passed) +
+        static_cast<int>(!h.Passed) +
+        static_cast<int>(!i.Passed) +
+        static_cast<int>(!j.Passed);
+
+    const auto SummaryLine___ = [](
+        const char* label,
+        const TimedTest& result
+    )
+    {
+        std::cout
+            << "  " << std::left << std::setw(TestConst::REPORT_WIDTH)
+            << label
+            << (result.Passed ? "PASS" : "FAIL")
+            << "  " << std::right << std::fixed
+            << std::setprecision(TestConst::SUMMARY_PRECISION)
+            << result.Milliseconds << " ms\n";
+    };
 
     std::cout
         << "\n================================================================================\n"
-        << "GHGF INTERNAL-LEARNING TEST SUMMARY\n"
-        << "================================================================================\n"
-        << "  Test A - zero-rate identity                  " << (a ? "PASS" : "FAIL") << '\n'
-        << "  Test B - observation bias                    " << (b ? "PASS" : "FAIL") << '\n'
-        << "  Test C - H coupling learning                 " << (c ? "PASS" : "FAIL") << '\n'
-        << "  Test D - H finite-difference direction       " << (d ? "PASS" : "FAIL") << '\n'
-        << "  Test E - drift/global-oracle agreement       " << (e ? "PASS" : "FAIL") << '\n'
-        << "  Test F - temporal parameter                  " << (f ? "PASS" : "FAIL") << '\n'
-        << "  Test G - tonic volatility                    " << (g ? "PASS" : "FAIL") << '\n'
-        << "  Test H - V coupling                          " << (h ? "PASS" : "FAIL") << '\n'
+        << "GHGF PAPER VALIDATION TEST SUMMARY\n"
+        << "================================================================================\n";
+
+    SummaryLine___("Test A - zero-rate identity", a);
+    SummaryLine___("Test B - observation bias", b);
+    SummaryLine___("Test C - H coupling learning", c);
+    SummaryLine___("Test D - H finite-difference direction", d);
+    SummaryLine___("Test E - drift/global-oracle agreement", e);
+    SummaryLine___("Test F - temporal parameter", f);
+    SummaryLine___("Test G - tonic-volatility efficacy", g);
+    SummaryLine___("Test H - V-coupling efficacy", h);
+    SummaryLine___("Test I - predictive-structure selection", i);
+    SummaryLine___("Test J - timing/independent parallelism", j);
+
+    std::cout
         << "\n  failures: " << failures << '\n'
         << "================================================================================\n";
 
