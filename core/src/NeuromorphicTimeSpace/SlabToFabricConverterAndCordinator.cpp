@@ -31,6 +31,7 @@ namespace BidirectionalInMemGraph
 
     void SlabToFabricConverterAndCordinator::ResetScalarsofTheFabric_() noexcept
     {
+        TrackDAGRevision_.store(false, std::memory_order_release);
         BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;

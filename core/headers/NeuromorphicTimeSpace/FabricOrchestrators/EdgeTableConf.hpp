@@ -42,15 +42,6 @@ namespace BidirectionalInMemGraph
             bool IsValid = false;
         };
 
-        static constexpr uint16_t RawEdgeTableRecordWidth(
-            uint8_t max_direct_parents
-        ) noexcept
-        {
-            return 1u +
-                static_cast<size_t>(max_direct_parents) *
-                (sizeof(ParentRelation) / sizeof(uint64_t));
-        }
-
         static constexpr uint16_t EdgeTableRecordWidth(
             uint8_t max_direct_parents
         ) noexcept
@@ -263,6 +254,42 @@ namespace BidirectionalInMemGraph
         ) noexcept
         {
             return uint64_t{1u} << ordinal;
+        }
+
+        enum class EdgeDomain : uint8_t
+        {
+            PARENT_RELATIONS = 0u,
+            CHILD_LIST = 1u
+        };
+
+        static constexpr uint16_t CHILD_LIST_CONTROL_OFFSET = 0u;
+        static constexpr uint16_t PARENT_RELATION_CONTROL_OFFSET = 1u;
+        static constexpr uint16_t PARENT_RELATION_ARRAY_OFFSET = 2u;
+
+        static constexpr uint16_t ControlOffset(EdgeDomain domain) noexcept
+        {
+            return domain == EdgeDomain::PARENT_RELATIONS
+                ? PARENT_RELATION_CONTROL_OFFSET
+                : CHILD_LIST_CONTROL_OFFSET;
+        }
+
+        static constexpr uint16_t RawEdgeTableRecordWidth(
+            uint8_t max_direct_parents
+        ) noexcept
+        {
+            return PARENT_RELATION_ARRAY_OFFSET +
+                static_cast<uint16_t>(max_direct_parents) *
+                static_cast<uint16_t>(sizeof(ParentRelation) / sizeof(uint64_t));
+        }
+
+        static constexpr bool IsParentEmpty(const ParentRelation& relation) noexcept
+        {
+            return relation.ParentHandle == FABRIC_CELL_SENTINAL;
+        }
+
+        static constexpr bool AreSiblingsEmpty(const ParentRelation& relation) noexcept
+        {
+            return relation.SiblingLocators == FABRIC_CELL_SENTINAL;
         }
     };
 

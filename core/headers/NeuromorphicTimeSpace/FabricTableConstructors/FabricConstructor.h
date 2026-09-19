@@ -142,6 +142,18 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> ReadFirstFreeAPCIdx_() noexcept;
 
         void UpdateFirstFreeIdx_(uint32_t& expected_value, uint32_t desired_value) noexcept;
+
+        bool IsOpenAPCGeneration_(
+            uint32_t slot,
+            uint32_t expected_generation
+        ) noexcept
+        {
+            uint64_t* const cell = GetAPCGenerationPtr_(slot);
+            return cell && HandleOfAPCStatic::IsOpenGeneration(
+                std::atomic_ref<const uint64_t>(*cell).load(std::memory_order_acquire),
+                expected_generation
+            );
+        }
     };
 
 

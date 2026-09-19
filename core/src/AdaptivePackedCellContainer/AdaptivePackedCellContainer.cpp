@@ -13,19 +13,15 @@ namespace BidirectionalInMemGraph
         );
     }
 
-
     bool AdaptivePackedCellContainer::AddParent(
         AdaptivePackedCellContainer& parent,
         FabricSegments edge_table,
         uint32_t max_tries
     ) noexcept
     {
-        APCUseScope child_use = AcquireAPCUse_();
-        APCUseScope parent_use = parent.AcquireAPCUse_();
-
-        return 
-            child_use &&
-            parent_use &&
+        return
+            IsFabricBound_() &&
+            parent.IsFabricBound_() &&
             APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
             APCCache_.FabricOwnerPtr_->AddParentRelation_(
                 parent.APCCache_.APCSlotIdx_,
@@ -43,12 +39,9 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
-        APCUseScope child_use = AcquireAPCUse_();
-        APCUseScope parent_use = parent.AcquireAPCUse_();
-
         return
-            child_use &&
-            parent_use &&
+            IsFabricBound_() &&
+            parent.IsFabricBound_() &&
             APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
             APCCache_.FabricOwnerPtr_->RemoveParentRelation_(
                 parent.APCCache_.APCSlotIdx_,
@@ -67,19 +60,11 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
-        if (&old_parent == &new_parent)
-        {
-            return false;
-        }
-
-        APCUseScope child_use = AcquireAPCUse_();
-        APCUseScope old_parent_use = old_parent.AcquireAPCUse_();
-        APCUseScope new_parent_use = new_parent.AcquireAPCUse_();
-
         return
-            child_use &&
-            old_parent_use &&
-            new_parent_use &&
+            &old_parent != &new_parent &&
+            IsFabricBound_() &&
+            old_parent.IsFabricBound_() &&
+            new_parent.IsFabricBound_() &&
             APCCache_.FabricOwnerPtr_ == old_parent.APCCache_.FabricOwnerPtr_ &&
             APCCache_.FabricOwnerPtr_ == new_parent.APCCache_.FabricOwnerPtr_ &&
             APCCache_.FabricOwnerPtr_->ReplaceParentRelation_(
@@ -111,31 +96,24 @@ namespace BidirectionalInMemGraph
     {
         return child.RemoveParent(*this, edge_table, max_tries);
     }
-
-
+    
     AdaptivePackedCellContainer AdaptivePackedCellContainer::FindParent(
         FabricSegments edge_table,
         uint8_t relation_ordinal,
         RelationOparation* parent_relation,
-        uint32_t max_tries 
+        uint32_t max_tries
     ) noexcept
     {
-        APCUseScope use = AcquireAPCUse_();
-
-        if (!use)
-        {
-            return AdaptivePackedCellContainer{};
-        }
-
-        return 
-            APCCache_.FabricOwnerPtr_->FindParent_(
+        return IsFabricBound_()
+            ? APCCache_.FabricOwnerPtr_->FindParent_(
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 relation_ordinal,
                 parent_relation,
                 max_tries
-            );
+            )
+            : AdaptivePackedCellContainer{};
     }
 
     AdaptivePackedCellContainer AdaptivePackedCellContainer::FindFirstChild(
@@ -144,21 +122,15 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
-        APCUseScope use = AcquireAPCUse_();
-
-        if (!use)
-        {
-            return AdaptivePackedCellContainer{};
-        }
-
-        return 
-            APCCache_.FabricOwnerPtr_->FindFirstChild_(
+        return IsFabricBound_()
+            ? APCCache_.FabricOwnerPtr_->FindFirstChild_(
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 child_relation,
                 max_tries
-            );
+            )
+            : AdaptivePackedCellContainer{};
     }
 
     AdaptivePackedCellContainer AdaptivePackedCellContainer::FindLastChild(
@@ -167,21 +139,15 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
-        APCUseScope use = AcquireAPCUse_();
-
-        if (!use)
-        {
-            return AdaptivePackedCellContainer{};
-        }
-
-        return 
-            APCCache_.FabricOwnerPtr_->FindLastChild_(
+        return IsFabricBound_()
+            ? APCCache_.FabricOwnerPtr_->FindLastChild_(
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 child_relation,
                 max_tries
-            );
+            )
+            : AdaptivePackedCellContainer{};
     }
 
     AdaptivePackedCellContainer AdaptivePackedCellContainer::FindNextChild(
@@ -191,24 +157,17 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
-        APCUseScope use = AcquireAPCUse_();
-
-        if (!use)
-        {
-            return AdaptivePackedCellContainer{};
-        }
-
-        return 
-            APCCache_.FabricOwnerPtr_->FindNextChild_(
+        return IsFabricBound_()
+            ? APCCache_.FabricOwnerPtr_->FindNextChild_(
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 current_relation_locator,
                 child_relation,
                 max_tries
-            );
+            )
+            : AdaptivePackedCellContainer{};
     }
-
 
     AdaptivePackedCellContainer AdaptivePackedCellContainer::FindPreviousChild(
         FabricSegments edge_table,
@@ -217,22 +176,16 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
-        APCUseScope use = AcquireAPCUse_();
-
-        if (!use)
-        {
-            return AdaptivePackedCellContainer{};
-        }
-
-        return 
-            APCCache_.FabricOwnerPtr_->FindPreviousChild_(
+        return IsFabricBound_()
+            ? APCCache_.FabricOwnerPtr_->FindPreviousChild_(
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 current_relation_locator,
                 child_relation,
                 max_tries
-            );
+            )
+            : AdaptivePackedCellContainer{};
     }
 
     bool AdaptivePackedCellContainer::Retire(
