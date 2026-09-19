@@ -4,16 +4,18 @@
 
 namespace BidirectionalInMemGraph
 {
+    class GHGFModel;
     class GHGFModelConstructor;
 
     class GHGFNode : protected AdaptivePackedCellContainer
     {
+        friend class GHGFModel;
         friend class GHGFModelConstructor;
     private:
         using GM = GHGFLayerModel;
 
 
-        GHGFModelConstructor* GHGFFabric_{nullptr};
+        GHGFModel* GHGFFabric_{nullptr};
 
         std::optional<GM::GHGFNodeRole> GHGFRole_() noexcept;
 

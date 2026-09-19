@@ -23,8 +23,7 @@ namespace BidirectionalInMemGraph
 
     class GHGFLayerModel final
     {
-        friend class GHGFModelConstructor;
-        friend class GHGFNode;
+
     public:
         using SD = SchemaDefinition;
         static constexpr uint32_t DEFAULT_BATCH_CAPACITY = 32u;
@@ -323,7 +322,6 @@ namespace BidirectionalInMemGraph
                 index >= FIRST_COUPLING_INDEX && index < end;
         }
 
-    private:
         
         struct GHGFCache final
         {
