@@ -719,6 +719,14 @@ namespace BidirectionalInMemGraph
                     self
                 );
                 parent_list->WorkTail = self;
+
+                PrepareConditionalParentPublication_(
+                    transaction,
+                    child_slot,
+                    scan.EmptyOrdinal,
+                    publication
+                );
+
                 CommitRowTransaction_(transaction);
                 return true;
             }
