@@ -11,6 +11,7 @@ namespace BidirectionalInMemGraph
         friend class GHGFNode;
     public:
         using GM = GHGFLayerModel;
+        using ED = EdgeBuilder;
         using FCSpan = std::span<const float>;
         struct GHGFModelConstructionValues
         {
@@ -22,7 +23,7 @@ namespace BidirectionalInMemGraph
     protected:
         GM::GHGFCache GHGFCache_{};
         GM::GHGFStorageProfile Profile_{};
-        bool IsGHGFPlanCurrent_() noexcept;
+        bool IsGHGFModelReady_() noexcept;
         float* GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept;
         float* GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept;
         float* GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept;
@@ -34,6 +35,17 @@ namespace BidirectionalInMemGraph
         uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept;
         std::optional<float> GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
         bool SetGHGFParameter_(uint32_t slot, uint32_t index, float value) noexcept;
+        FabricToAPCLinker::SeqLockedOperation ReadGHGFParentExecutionSnapshot_(
+            uint32_t child,
+            FabricSegments edge,
+            GM::GHGFParentExecutionSnapshot& snapshot,
+            uint32_t max_tries
+        ) noexcept;
+        bool ReadGHGFNodeIdentity_(
+            uint32_t slot,
+            GM::GHGFNodeRole& role,
+            uint32_t& generation
+        ) noexcept;
     public:
         using APCFinilizer::ShutDownFabric;
         using APCFinilizer::IsFabricActive;
@@ -50,9 +62,37 @@ namespace BidirectionalInMemGraph
             GM::GHGFNodeRole role
         ) noexcept;
 
+
     };
 
-    class GHGFModelConstructor : public GHGFModel
+    class GHGFStructralLearningModel : public GHGFModel
+    {
+    private:
+        struct CouplingPublicationContext final
+        {
+            GHGFStructralLearningModel* Model = nullptr;
+            uint32_t Child = GM::StorageConst::INVALID_SLOT;
+            FabricSegments Edge = FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+            float Coupling = GM::StorageConst::ZERO;
+        };
+
+        static void PublishCoupling_(void* context, uint8_t ordinal) noexcept;
+
+    public:
+        GM::GHGFConcurrentOperation ReadStructureSnapshotConcurrently(
+            uint32_t child,
+            FabricSegments edge,
+            GM::GHGFStructureSnapshot& snapshot,
+            uint32_t max_tries = DEFAULT_MAX_TRIES
+        ) noexcept;
+
+        GM::GHGFStructureMutationResult TryApplyGHGFStructureMutation(
+            const GM::GHGFStructureMutation& mutation,
+            uint32_t max_tries = DEFAULT_MAX_TRIES
+        ) noexcept;
+    };
+
+    class GHGFModelConstructor : public GHGFStructralLearningModel
     {
         friend class GHGFNode;
     private:
@@ -96,4 +136,5 @@ namespace BidirectionalInMemGraph
             const GHGFLearningConfig& learning_cong
         ) noexcept;
     };
+
 }

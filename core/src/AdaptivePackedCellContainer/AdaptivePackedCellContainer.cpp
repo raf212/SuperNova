@@ -29,6 +29,7 @@ namespace BidirectionalInMemGraph
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
+                nullptr,
                 max_tries
             );
     }
@@ -49,6 +50,7 @@ namespace BidirectionalInMemGraph
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
+                nullptr,
                 max_tries
             );
     }
@@ -75,6 +77,7 @@ namespace BidirectionalInMemGraph
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
+                nullptr,
                 max_tries
             );
     }

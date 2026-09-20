@@ -4,7 +4,56 @@
 
 namespace BidirectionalInMemGraph
 {
+    bool DAGMutationConf::ValidateConditionalParentPublication_(
+        DAGMutationTransaction& transaction,
+        uint32_t child_slot,
+        ConditionalParentPublication* publication
+    ) noexcept
+    {
+        if (!publication)
+            return true;
 
+        DAGRowParticipant* const row = FindRowParticipant_(
+            transaction,
+            child_slot,
+            EdgeBuilder::EdgeDomain::PARENT_RELATIONS
+        );
+
+        if (!row || !row->Reserved)
+            return false;
+
+        if (row->Before.SeqLock != publication->ExpectedRowSequence)
+        {
+            publication->SequenceMismatch = true;
+            return false;
+        }
+        return true;
+    }
+
+    void DAGMutationConf::PrepareConditionalParentPublication_(
+        DAGMutationTransaction& transaction,
+        uint32_t child_slot,
+        uint8_t relation_ordinal,
+        ConditionalParentPublication* publication
+    ) noexcept
+    {
+        if (!publication)
+            return;
+
+        DAGRowParticipant* const row = FindRowParticipant_(
+            transaction,
+            child_slot,
+            EdgeBuilder::EdgeDomain::PARENT_RELATIONS
+        );
+
+        publication->PublishedOrdinal = relation_ordinal;
+        publication->PublishedRowSequence = EdgeBuilder::NextSequence(
+            EdgeBuilder::NextSequence(row->Before.SeqLock)
+        );
+
+        if (publication->Publish)
+            publication->Publish(publication->Context, relation_ordinal);
+    }
 
     CompiledDAGTableConstructor::CompiledDAGRecord* CompiledDAGTableConstructor::CompiledDAGRow_(uint32_t row_slot) noexcept
     {
@@ -554,6 +603,7 @@ namespace BidirectionalInMemGraph
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
+        ConditionalParentPublication* publication,
         uint32_t max_tries
     ) noexcept
     {
@@ -593,6 +643,15 @@ namespace BidirectionalInMemGraph
             )
             {
                 continue;
+            }
+
+            if (!ValidateConditionalParentPublication_(
+                    transaction,
+                    child_slot,
+                    publication))
+            {
+                AbortRowTransaction_(transaction);
+                return false;
             }
 
             if (
@@ -660,6 +719,14 @@ namespace BidirectionalInMemGraph
                     self
                 );
                 parent_list->WorkTail = self;
+
+                PrepareConditionalParentPublication_(
+                    transaction,
+                    child_slot,
+                    scan.EmptyOrdinal,
+                    publication
+                );
+
                 CommitRowTransaction_(transaction);
                 return true;
             }
@@ -730,6 +797,12 @@ namespace BidirectionalInMemGraph
                 EdgeBuilder::NextLocator(first_delta->Work)
             );
             parent_list->WorkTail = self;
+            PrepareConditionalParentPublication_(
+                transaction,
+                child_slot,
+                scan.EmptyOrdinal,
+                publication
+            );
             CommitRowTransaction_(transaction);
             return true;
         }
@@ -742,6 +815,7 @@ namespace BidirectionalInMemGraph
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
+        ConditionalParentPublication* publication,
         uint32_t max_tries
     ) noexcept
     {
@@ -781,6 +855,15 @@ namespace BidirectionalInMemGraph
             {
                 continue;
             }
+            if (!ValidateConditionalParentPublication_(
+                    transaction,
+                    child_slot,
+                    publication))
+            {
+                AbortRowTransaction_(transaction);
+                return false;
+            }
+
             if (
                 !IsOpenAPCGeneration_(parent_slot, parent_generation) ||
                 !IsOpenAPCGeneration_(child_slot, child_generation)
@@ -914,6 +997,12 @@ namespace BidirectionalInMemGraph
 
             moving_parent->Work.ParentHandle = FABRIC_CELL_SENTINAL;
             moving_parent->Work.SiblingLocators = FABRIC_CELL_SENTINAL;
+            PrepareConditionalParentPublication_(
+                transaction,
+                child_slot,
+                scan.MatchOrdinal,
+                publication
+            );
             CommitRowTransaction_(transaction);
             return true;
         }
@@ -928,6 +1017,7 @@ namespace BidirectionalInMemGraph
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
+        ConditionalParentPublication* publication,
         uint32_t max_tries
     ) noexcept
     {
@@ -983,6 +1073,16 @@ namespace BidirectionalInMemGraph
             {
                 continue;
             }
+
+            if (!ValidateConditionalParentPublication_(
+                    transaction,
+                    child_slot,
+                    publication))
+            {
+                AbortRowTransaction_(transaction);
+                return false;
+            }
+
             if (
                 !IsOpenAPCGeneration_(old_parent_slot, old_parent_generation) ||
                 !IsOpenAPCGeneration_(new_parent_slot, new_parent_generation) ||
@@ -1215,7 +1315,13 @@ namespace BidirectionalInMemGraph
 
             moving_parent->Work.ParentHandle = new_parent_handle;
             new_list->WorkTail = self;
-            CommitRowTransaction_(transaction);
+            PrepareConditionalParentPublication_(
+                transaction,
+                child_slot,
+                scan.MatchOrdinal,
+                publication
+            );
+            CommitRowTransaction_(transaction);            
             return true;
         }
         return false;

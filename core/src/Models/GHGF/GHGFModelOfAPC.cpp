@@ -15,7 +15,6 @@ namespace BidirectionalInMemGraph
         }
 
         const uint64_t revision = SealedDAGRevision_.load(std::memory_order_acquire);
-        const bool same_topology = GHGFCache_.ModelPrepared_ && GHGFCache_.PreparedRevision_ == revision;
         GHGFCache_.ModelPrepared_ = false;
         GHGFCache_.NodeCount_ = GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         const uint64_t allowed_mask = MaskLowBitsForU64(FabCache_->MaxDirectParentsPerAxis_);
@@ -206,13 +205,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
         
-        GHGFCache_.PreparedRevision_ = revision;
         GHGFCache_.ModelPrepared_ = true;
-        if (!same_topology)
-        {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
-            GHGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
-        }
         return true;
     }
 
@@ -318,9 +311,8 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::PredictModelNONVectorized(uint32_t batch, std::span<float> predictions) noexcept
     {
-        if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::READY ||
+        if (!IsGHGFModelReady_() ||
             batch == UNSIGNED_ZERO || batch > Profile_.BatchCapacity ||
-            (GHGFCache_.ActiveBatch_ != UNSIGNED_ZERO && GHGFCache_.ActiveBatch_ != batch) ||
             predictions.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
             IsInternalBuffer(predictions.data(), predictions.size()))
         {
@@ -328,14 +320,10 @@ namespace BidirectionalInMemGraph
         }
         if (!PredictGHGFBatchNONVectorized_(batch))
         {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
             return false;
         }
-        GHGFCache_.ActiveBatch_ = batch;
-        GHGFCache_.Phase_ = GM::GHGFPhase::PREDICTED;
         if (!CopyGHGFPredictionNONVectorized_(predictions, batch))
         {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
             return false;
         }
         return true;
@@ -343,8 +331,8 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::UpdateModelNONVectorized(uint32_t batch, FCSpan observations) noexcept
     {
-        if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::PREDICTED ||
-            batch != GHGFCache_.ActiveBatch_ || observations.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
+        if (!IsGHGFModelReady_() ||
+            observations.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
             IsInternalBuffer(observations.data(), observations.size()))
         {
             return false;
@@ -358,10 +346,8 @@ namespace BidirectionalInMemGraph
         }
         if (!UpdateGHGFBatchNONVectorized_(observations, batch))
         {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
             return false;
         }
-        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
         return true;
     }
 
@@ -388,7 +374,7 @@ namespace BidirectionalInMemGraph
         bool reset_state
     ) noexcept
     {
-        if (!IsGHGFPlanCurrent_() || time_count == UNSIGNED_ZERO ||
+        if (!IsGHGFModelReady_() || time_count == UNSIGNED_ZERO ||
             batch_count == UNSIGNED_ZERO || batch_count > Profile_.BatchCapacity)
         {
             return std::nullopt;
@@ -426,17 +412,12 @@ namespace BidirectionalInMemGraph
         {
             return std::nullopt;
         }
-        if (GHGFCache_.Phase_ != GM::GHGFPhase::READY || (GHGFCache_.ActiveBatch_ != UNSIGNED_ZERO && GHGFCache_.ActiveBatch_ != batch_count))
-        {
-            return std::nullopt;
-        }
-        GHGFCache_.ActiveBatch_ = batch_count;
+
         double loss = 0.0;
         for (uint32_t time = 0; time < time_count; ++time)
         {
             if (!PredictGHGFBatchNONVectorized_(batch_count))
             {
-                GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
                 return std::nullopt;
             }
             const size_t step_begin = static_cast<size_t>(time) * step_size;
@@ -465,11 +446,9 @@ namespace BidirectionalInMemGraph
             // Score before the current observation changes any belief.
             if (!UpdateGHGFBatchNONVectorized_(observations.subspan(step_begin, step_size), batch_count))
             {
-                GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
                 return std::nullopt;
             }
         }
-        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
         return loss / static_cast<double>(count);
     }
 
@@ -484,8 +463,11 @@ namespace BidirectionalInMemGraph
     {
         using SC = GM::StorageConst;
 
-        if (!IsGHGFPlanCurrent_() || parameters.empty() || passes == UNSIGNED_ZERO ||
-            IsInternalBuffer(parameters.data(), parameters.size()))
+        if (
+            !IsGHGFModelReady_() || parameters.empty() || passes == UNSIGNED_ZERO ||
+            IsInternalBuffer(parameters.data(), parameters.size()) ||
+            GHGFCache_.StructuralLearningActive_
+        )
         {
             return std::nullopt;
         }
@@ -584,7 +566,7 @@ namespace BidirectionalInMemGraph
             return std::isfinite(value) && value >= 0.0f;
         };
 
-        if (!IsGHGFPlanCurrent_() ||
+        if (!IsGHGFModelReady_() ||
             batch == UNSIGNED_ZERO ||
             batch > Profile_.BatchCapacity ||
             !ValidRate___(learning.HCouplingLearningRate) ||
@@ -597,6 +579,15 @@ namespace BidirectionalInMemGraph
             !std::isfinite(learning.MinTonicLogVolatility) ||
             !std::isfinite(learning.MaxTonicLogVolatility) ||
             learning.MinTonicLogVolatility >= learning.MaxTonicLogVolatility)
+        {
+            return false;
+        }
+
+        if (
+            GHGFCache_.StructuralLearningActive_ &&
+            (learning.HCouplingLearningRate != GM::StorageConst::ZERO ||
+            learning.VCouplingLearningRate != GM::StorageConst::ZERO)
+        )
         {
             return false;
         }
@@ -745,42 +736,66 @@ namespace BidirectionalInMemGraph
             // -----------------------------------------------------
             // 4. H COUPLING LEARNING
             // -----------------------------------------------------
-
-            const auto h_axis =
-                FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
-
-            const auto h_relations = ParentRelations_(h_axis, child);
-
-            for (uint64_t mask = GHGFParentMask_(child, h_axis);
-                mask;
-                mask &= mask - 1u)
+            if (learning.HCouplingLearningRate != SC::ZERO)
             {
-                const uint8_t ordinal =
-                    static_cast<uint8_t>(std::countr_zero(mask));
+                const auto h_axis =
+                    FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
 
-                const uint32_t parent =
-                    EdgeBuilder::ParentSlot(h_relations[ordinal]);
+                const auto h_relations =
+                    ParentRelations_(h_axis, child);
 
-                const uint32_t parameter_index = GM::CouplingIndex(
-                    h_axis,
-                    ordinal,
-                    Profile_.MaxDirectParentPerAxis);
-
-                const float* parent_feature =
-                    FBRowGHGF_(parent, FB::EXPECTED_MEAN);
-
-                float coupling_direction = 0.0f;
-
-                for (uint32_t lane = 0; lane < batch; ++lane)
-                    coupling_direction +=
-                        value_signal[lane] * parent_feature[lane];
-
-                if (!ApplyUpdate___(
-                        parameter_index,
-                        learning.HCouplingLearningRate,
-                        coupling_direction))
+                for (
+                    uint64_t mask = GHGFParentMask_(child, h_axis);
+                    mask;
+                    mask &= mask - 1u
+                )
                 {
-                    return false;
+                    const uint8_t ordinal =
+                        static_cast<uint8_t>(
+                            std::countr_zero(mask)
+                        );
+
+                    const uint32_t parent =
+                        EdgeBuilder::ParentSlot(
+                            h_relations[ordinal]
+                        );
+
+                    const uint32_t parameter_index =
+                        GM::CouplingIndex(
+                            h_axis,
+                            ordinal,
+                            Profile_.MaxDirectParentPerAxis
+                        );
+
+                    const float* parent_feature =
+                        FBRowGHGF_(
+                            parent,
+                            FB::EXPECTED_MEAN
+                        );
+
+                    float coupling_direction = 0.0f;
+
+                    for (
+                        uint32_t lane = 0;
+                        lane < batch;
+                        ++lane
+                    )
+                    {
+                        coupling_direction +=
+                            value_signal[lane] *
+                            parent_feature[lane];
+                    }
+
+                    if (
+                        !ApplyUpdate___(
+                            parameter_index,
+                            learning.HCouplingLearningRate,
+                            coupling_direction
+                        )
+                    )
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -791,66 +806,101 @@ namespace BidirectionalInMemGraph
             // 5. V COUPLING LEARNING
             // -----------------------------------------------------
 
-            const auto v_axis =
-                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
-
-            const auto v_relations = ParentRelations_(v_axis, child);
-
-            for (uint64_t mask = GHGFParentMask_(child, v_axis);
-                mask;
-                mask &= mask - 1u)
+            if (learning.VCouplingLearningRate != SC::ZERO)
             {
-                const uint8_t ordinal =
-                    static_cast<uint8_t>(std::countr_zero(mask));
+                const auto v_axis =
+                    FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
 
-                const uint32_t parent =
-                    EdgeBuilder::ParentSlot(v_relations[ordinal]);
+                const auto v_relations =
+                    ParentRelations_(v_axis, child);
 
-                const uint32_t parameter_index = GM::CouplingIndex(
-                    v_axis,
-                    ordinal,
-                    Profile_.MaxDirectParentPerAxis);
-
-                const float coupling = weight[parameter_index];
-
-                const float* parent_mean =
-                    FBRowGHGF_(parent, FB::MEAN);
-
-                const float* parent_precision =
-                    FBRowGHGF_(parent, FB::EXPECTED_PRECISION);
-
-                float coupling_direction = 0.0f;
-
-                for (uint32_t lane = 0; lane < batch; ++lane)
+                for (
+                    uint64_t mask = GHGFParentMask_(child, v_axis);
+                    mask;
+                    mask &= mask - 1u
+                )
                 {
-                    if (!std::isfinite(parent_precision[lane]) ||
-                        parent_precision[lane] <= SC::ZERO)
+                    const uint8_t ordinal =
+                        static_cast<uint8_t>(
+                            std::countr_zero(mask)
+                        );
+
+                    const uint32_t parent =
+                        EdgeBuilder::ParentSlot(
+                            v_relations[ordinal]
+                        );
+
+                    const uint32_t parameter_index =
+                        GM::CouplingIndex(
+                            v_axis,
+                            ordinal,
+                            Profile_.MaxDirectParentPerAxis
+                        );
+
+                    const float coupling =
+                        weight[parameter_index];
+
+                    const float* parent_mean =
+                        FBRowGHGF_(
+                            parent,
+                            FB::MEAN
+                        );
+
+                    const float* parent_precision =
+                        FBRowGHGF_(
+                            parent,
+                            FB::EXPECTED_PRECISION
+                        );
+
+                    float coupling_direction = 0.0f;
+
+                    for (
+                        uint32_t lane = 0;
+                        lane < batch;
+                        ++lane
+                    )
+                    {
+                        if (
+                            !std::isfinite(
+                                parent_precision[lane]
+                            ) ||
+                            parent_precision[lane] <= SC::ZERO
+                        )
+                        {
+                            return false;
+                        }
+
+                        const float gate =
+                            observed[lane] != SC::ZERO
+                                ? SC::ONE
+                                : SC::ZERO;
+
+                        const float volatility_signal =
+                            SC::HALF *
+                            effective_precision[lane] *
+                            volatile_error[lane];
+
+                        const float feature =
+                            parent_mean[lane] +
+                            coupling /
+                            parent_precision[lane];
+
+                        coupling_direction +=
+                            gate *
+                            volatility_signal *
+                            feature;
+                    }
+
+                    if (
+                        !ApplyUpdate___(
+                            parameter_index,
+                            learning.VCouplingLearningRate,
+                            coupling_direction
+                        )
+                    )
                     {
                         return false;
                     }
-
-                    const float gate =
-                        observed[lane] != SC::ZERO ? SC::ONE : SC::ZERO;
-
-                    const float volatility_signal =
-                        SC::HALF *
-                        effective_precision[lane] *
-                        volatile_error[lane];
-
-                    const float feature =
-                        parent_mean[lane] +
-                        coupling / parent_precision[lane];
-
-                    coupling_direction +=
-                        gate * volatility_signal * feature;
-                }
-
-                if (!ApplyUpdate___(
-                        parameter_index,
-                        learning.VCouplingLearningRate,
-                        coupling_direction))
-                {
-                    return false;
                 }
             }
         }
@@ -866,9 +916,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         if (
-            !IsGHGFPlanCurrent_() ||
-            GHGFCache_.Phase_ != GM::GHGFPhase::PREDICTED ||
-            batch != GHGFCache_.ActiveBatch_ ||
+            !IsGHGFModelReady_() ||
             observations.size() !=
                 static_cast<size_t>(
                     GHGFCache_.ObservationCount_
@@ -898,9 +946,6 @@ namespace BidirectionalInMemGraph
             batch
         ))
         {
-            GHGFCache_.Phase_ =
-                GM::GHGFPhase::NEEDS_RESET;
-
             return false;
         }
 
@@ -909,18 +954,11 @@ namespace BidirectionalInMemGraph
             learning
         ))
         {
-            GHGFCache_.Phase_ =
-                GM::GHGFPhase::NEEDS_RESET;
-
             return false;
         }
-
-        GHGFCache_.Phase_ =
-            GM::GHGFPhase::READY;
-
         return true;
     }
-    
+
     bool GHGFModelConstructor::ConstructGHGFModel(
         GHGFModelConstructionValues& model_values,
         const GHGFLayerModel::GHGFStorageProfile& profile

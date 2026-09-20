@@ -252,7 +252,7 @@ namespace BidirectionalInMemGraph
         return static_cast<GM::GHGFNodeRole>(value);
     }
 
-    bool GHGFNode::PredictGHGFNodenNONVectorized_(uint32_t batch) noexcept
+    bool GHGFNode::PredictGHGFNodenNONVectorized_(uint32_t batch, uint32_t max_tries) noexcept
     {
         using SR = GM::GHGFStateRow;
         using ER = GM::GHGFErrorRow;
@@ -268,34 +268,34 @@ namespace BidirectionalInMemGraph
         float* marginal = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_PRECISION);
         const float* weight = GHGFFabric_->GHGFWeight_(slot);
 
-        const auto value_relations = GHGFFabric_->ParentRelations_(value_axis, slot);
-
         // Observation node: Bernoulli prediction from value parents.
         if (GHGFRole_() == GM::GHGFNodeRole::OBSERVATION)
         {
             const float bias = weight[static_cast<size_t>(EI::TONIC_DRIFT)];
 
             std::fill_n(predicted, batch, bias);
+            GM::GHGFParentExecutionSnapshot parents{};
+            if (
+                GHGFFabric_->ReadGHGFParentExecutionSnapshot_(
+                    slot,
+                    value_axis,
+                    parents,
+                    max_tries
+                ) != FabricToAPCLinker::SeqLockedOperation::FOUND
+            )
+            {
+                return false;
+            }
 
             for (
-                uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, value_axis);
+                uint64_t mask = parents.ParentMask;
                 mask;
                 mask &= mask - 1u
             )
             {
                 const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-
-                const uint32_t parent = EdgeBuilder::ParentSlot(
-                        value_relations[ordinal]
-                );
-                const uint32_t coupling_index =
-                    GM::CouplingIndex(
-                        value_axis,
-                        ordinal,
-                        GHGFFabric_->Profile_.MaxDirectParentPerAxis
-                    );
-
-                const float coupling = weight[coupling_index];
+                const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+                const float coupling = parents.Couplings[ordinal];
                 const float* parent_mean =
                     GHGFFabric_->FBRowGHGF_(
                         parent,
@@ -364,20 +364,29 @@ namespace BidirectionalInMemGraph
             log_volatility[lane] = tonic_volatility;
         }
 
+        GM::GHGFParentExecutionSnapshot parents{};
+        if (
+            GHGFFabric_->ReadGHGFParentExecutionSnapshot_(
+                slot,
+                value_axis,
+                parents,
+                max_tries
+            ) != FabricToAPCLinker::SeqLockedOperation::FOUND
+        )
+        {
+            return false;
+        }
+
         // H/value-parent contribution.
         for (
-            uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, value_axis);
+            uint64_t mask = parents.ParentMask;
             mask;
             mask &= mask - 1u
         )
         {
             const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-            const uint32_t parent = EdgeBuilder::ParentSlot(value_relations[ordinal]);
-            const float coupling = weight[
-                GM::CouplingIndex(
-                    value_axis,
-                    ordinal,
-                    GHGFFabric_->Profile_.MaxDirectParentPerAxis)];
+            const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+            const float coupling = parents.Couplings[ordinal];
 
             const float* parent_mean =
                 GHGFFabric_->FBRowGHGF_(parent, FR::EXPECTED_MEAN);
@@ -393,21 +402,28 @@ namespace BidirectionalInMemGraph
             }
         }
 
-        // V/volatility-parent contribution.
-        const auto volatile_relations =
-            GHGFFabric_->ParentRelations_(volatile_axis, slot);
+        parents = GM::GHGFParentExecutionSnapshot{};
+        if (
+            GHGFFabric_->ReadGHGFParentExecutionSnapshot_(
+                slot,
+                volatile_axis,
+                parents,
+                max_tries
+            ) != FabricToAPCLinker::SeqLockedOperation::FOUND
+        )
+        {
+            return false;
+        }
 
-        for (uint64_t mask = GHGFFabric_->GHGFParentMask_(slot, volatile_axis);
+        // V/volatility-parent contribution.
+
+        for (uint64_t mask = parents.ParentMask;
             mask;
             mask &= mask - 1u)
         {
             const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-            const uint32_t parent = EdgeBuilder::ParentSlot(volatile_relations[ordinal]);
-            const float coupling = weight[
-                GM::CouplingIndex(
-                    volatile_axis,
-                    ordinal,
-                    GHGFFabric_->Profile_.MaxDirectParentPerAxis)];
+            const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+            const float coupling = parents.Couplings[ordinal];
 
             const float* parent_mean =
                 GHGFFabric_->FBRowGHGF_(parent, FR::MEAN);
@@ -453,7 +469,7 @@ namespace BidirectionalInMemGraph
     }
 
 
-    bool GHGFNode::UpdateGHGFNodeNONVectorized_(uint32_t batch) noexcept
+    bool GHGFNode::UpdateGHGFNodeNONVectorized_(uint32_t batch, uint32_t max_tries) noexcept
     {
         using SR = GM::GHGFStateRow;
         using SC = GM::StorageConst;
@@ -465,8 +481,20 @@ namespace BidirectionalInMemGraph
         const float* marginal = GHGFFabric_->GHGFStateRow_(slot, SR::EXPECTED_PRECISION);
         float* value_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VALUE_PREDICTION_ERROR);
         float* volatile_error = GHGFFabric_->GHGFErrorRow_(slot, GM::GHGFErrorRow::VOLATILE_PREDICTION_ERROR);
-        const unsigned volatile_parents = std::popcount(
-            GHGFFabric_->GHGFParentMask_(slot, FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V));
+
+        GM::GHGFParentExecutionSnapshot parents{};
+        if (
+            GHGFFabric_->ReadGHGFParentExecutionSnapshot_(
+                slot,
+                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
+                parents,
+                max_tries
+            ) != FabricToAPCLinker::SeqLockedOperation::FOUND
+        )
+        {
+            return false;
+        }
+        const unsigned volatile_parents = std::popcount(parents.ParentMask);
         const float divisor = static_cast<float>(std::max(1u, volatile_parents));
         for (uint32_t lane = 0; lane < batch; ++lane)
         {
@@ -489,7 +517,8 @@ namespace BidirectionalInMemGraph
     
     bool GHGFNode::PropogateGHGFErrorNONVectorized_(
         uint32_t child,
-        uint32_t batch
+        uint32_t batch,
+        uint32_t max_tries
     ) noexcept
     {
         using SR = GM::GHGFStateRow;
@@ -499,10 +528,6 @@ namespace BidirectionalInMemGraph
         if (child != APCCache_.APCSlotIdx_)
             return false;
 
-        const float* weight = GHGFFabric_->GHGFRegion_(
-            child,
-            GHGFFabric_->GHGFCache_.WeightCellOffset_
-        );
         const float* value_factor = GHGFFabric_->FFRowGHGF_(child, FR::VALUE_FACTOR);
         const float* value_gain = GHGFFabric_->FFRowGHGF_(child, FR::VALUE_GAIN);
         const float* value_error = GHGFFabric_->FFRowGHGF_(child, FR::VALUE_ERROR);
@@ -516,22 +541,28 @@ namespace BidirectionalInMemGraph
             })
         {
 
-            const auto relations = GHGFFabric_->ParentRelations_(edge, child);
+            GM::GHGFParentExecutionSnapshot parents{};
+            if (
+                GHGFFabric_->ReadGHGFParentExecutionSnapshot_(
+                    child,
+                    edge,
+                    parents,
+                    max_tries
+                ) != FabricToAPCLinker::SeqLockedOperation::FOUND
+            )
+            {
+                return false;
+            }
 
             for (
-                uint64_t mask = GHGFFabric_->GHGFParentMask_(child, edge);
+                uint64_t mask = parents.ParentMask;
                 mask;
                 mask &= mask - 1u
             )
             {
                 const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-                const uint32_t parent = EdgeBuilder::ParentSlot(relations[ordinal]);
-
-                const float coupling = weight[GM::CouplingIndex(
-                    edge,
-                    ordinal,
-                    GHGFFabric_->Profile_.MaxDirectParentPerAxis
-                )];
+                const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+                const float coupling = parents.Couplings[ordinal];
 
                 const float coupling_squared = coupling * coupling;
                 

@@ -79,6 +79,17 @@ namespace BidirectionalInMemGraph
         static constexpr uint8_t DAG_MAX_RELATION_DELTAS = 5u;
         static constexpr uint8_t INVALID_RELATION_ORDINAL = UINT8_MAX;
 
+        struct ConditionalParentPublication final
+        {
+            using PublishFunction = void(*) (void*, uint8_t) noexcept;
+            uint32_t ExpectedRowSequence = UINT32_MAX;
+            uint32_t PublishedRowSequence = UINT32_MAX;
+            uint8_t PublishedOrdinal = UINT8_MAX;
+            bool SequenceMismatch = false;
+            void* Context = nullptr;
+            PublishFunction Publish = nullptr;
+        };
+
         struct DAGRowParticipant
         {
             uint32_t Slot = ADS::APC_INDEX_BOUND_SENTINAL;
@@ -150,13 +161,28 @@ namespace BidirectionalInMemGraph
         void CommitRowTransaction_(
             DAGMutationTransaction& transaction
         ) noexcept;
+
+        bool ValidateConditionalParentPublication_(
+            DAGMutationTransaction& transaction,
+            uint32_t child_slot,
+            ConditionalParentPublication* publication
+        ) noexcept;
+
+        void PrepareConditionalParentPublication_(
+            DAGMutationTransaction& transaction,
+            uint32_t child_slot,
+            uint8_t relation_ordinal,
+            ConditionalParentPublication* publication
+        ) noexcept;
     };
 
 
+    class GHGFStructralLearningModel;
     class ConstructDAGOnEachAxis : public DAGMutationConf
     {
         friend class AdaptivePackedCellContainer;
         friend class FabricToAPCLinker;
+        friend class GHGFStructralLearningModel;
 
     protected:
         static constexpr bool SameHeader_(
@@ -172,7 +198,6 @@ namespace BidirectionalInMemGraph
                 left.Status == right.Status;
         }
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
-    private:
 
         struct ParentRowScan
         {
@@ -206,6 +231,7 @@ namespace BidirectionalInMemGraph
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
+            ConditionalParentPublication* publication = nullptr,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
@@ -215,6 +241,7 @@ namespace BidirectionalInMemGraph
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
+            ConditionalParentPublication* publication = nullptr,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
@@ -226,6 +253,7 @@ namespace BidirectionalInMemGraph
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
+            ConditionalParentPublication* publication = nullptr,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
