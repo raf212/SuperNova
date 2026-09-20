@@ -6,8 +6,7 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModel::IsGHGFPlanCurrent_() noexcept
     {
-        return IsFabricActive() && GHGFCache_.ModelPrepared_ &&
-            GHGFCache_.PreparedRevision_ == SealedDAGRevision_.load(std::memory_order_acquire);
+        return IsFabricActive() && GHGFCache_.ModelPrepared_;
     }
 
     float* GHGFModel::GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept
@@ -47,8 +46,6 @@ namespace BidirectionalInMemGraph
     void GHGFModel::InvalidateGHGFModel_() noexcept
     {
         GHGFCache_.ModelPrepared_ = false;
-        GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
-        GHGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
     }
 
     uint64_t GHGFModel::GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept
@@ -208,7 +205,6 @@ namespace BidirectionalInMemGraph
         }
 
         GHGFWeight_(slot)[index] = value;
-        GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
         return true;
     }
 
@@ -276,8 +272,6 @@ namespace BidirectionalInMemGraph
                 node.ResetAPCGHGFStateRegion_();
             }
         }
-        GHGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
-        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
         return true;
     }
 

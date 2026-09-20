@@ -15,7 +15,6 @@ namespace BidirectionalInMemGraph
         }
 
         const uint64_t revision = SealedDAGRevision_.load(std::memory_order_acquire);
-        const bool same_topology = GHGFCache_.ModelPrepared_ && GHGFCache_.PreparedRevision_ == revision;
         GHGFCache_.ModelPrepared_ = false;
         GHGFCache_.NodeCount_ = GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         const uint64_t allowed_mask = MaskLowBitsForU64(FabCache_->MaxDirectParentsPerAxis_);
@@ -206,13 +205,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
         
-        GHGFCache_.PreparedRevision_ = revision;
         GHGFCache_.ModelPrepared_ = true;
-        if (!same_topology)
-        {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
-            GHGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
-        }
         return true;
     }
 
@@ -318,9 +311,8 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::PredictModelNONVectorized(uint32_t batch, std::span<float> predictions) noexcept
     {
-        if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::READY ||
+        if (!IsGHGFPlanCurrent_() ||
             batch == UNSIGNED_ZERO || batch > Profile_.BatchCapacity ||
-            (GHGFCache_.ActiveBatch_ != UNSIGNED_ZERO && GHGFCache_.ActiveBatch_ != batch) ||
             predictions.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
             IsInternalBuffer(predictions.data(), predictions.size()))
         {
@@ -328,14 +320,10 @@ namespace BidirectionalInMemGraph
         }
         if (!PredictGHGFBatchNONVectorized_(batch))
         {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
             return false;
         }
-        GHGFCache_.ActiveBatch_ = batch;
-        GHGFCache_.Phase_ = GM::GHGFPhase::PREDICTED;
         if (!CopyGHGFPredictionNONVectorized_(predictions, batch))
         {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
             return false;
         }
         return true;
@@ -343,8 +331,8 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::UpdateModelNONVectorized(uint32_t batch, FCSpan observations) noexcept
     {
-        if (!IsGHGFPlanCurrent_() || GHGFCache_.Phase_ != GM::GHGFPhase::PREDICTED ||
-            batch != GHGFCache_.ActiveBatch_ || observations.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
+        if (!IsGHGFPlanCurrent_() ||
+            observations.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
             IsInternalBuffer(observations.data(), observations.size()))
         {
             return false;
@@ -358,10 +346,8 @@ namespace BidirectionalInMemGraph
         }
         if (!UpdateGHGFBatchNONVectorized_(observations, batch))
         {
-            GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
             return false;
         }
-        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
         return true;
     }
 
@@ -426,17 +412,12 @@ namespace BidirectionalInMemGraph
         {
             return std::nullopt;
         }
-        if (GHGFCache_.Phase_ != GM::GHGFPhase::READY || (GHGFCache_.ActiveBatch_ != UNSIGNED_ZERO && GHGFCache_.ActiveBatch_ != batch_count))
-        {
-            return std::nullopt;
-        }
-        GHGFCache_.ActiveBatch_ = batch_count;
+
         double loss = 0.0;
         for (uint32_t time = 0; time < time_count; ++time)
         {
             if (!PredictGHGFBatchNONVectorized_(batch_count))
             {
-                GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
                 return std::nullopt;
             }
             const size_t step_begin = static_cast<size_t>(time) * step_size;
@@ -465,11 +446,9 @@ namespace BidirectionalInMemGraph
             // Score before the current observation changes any belief.
             if (!UpdateGHGFBatchNONVectorized_(observations.subspan(step_begin, step_size), batch_count))
             {
-                GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
                 return std::nullopt;
             }
         }
-        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
         return loss / static_cast<double>(count);
     }
 
@@ -867,8 +846,6 @@ namespace BidirectionalInMemGraph
     {
         if (
             !IsGHGFPlanCurrent_() ||
-            GHGFCache_.Phase_ != GM::GHGFPhase::PREDICTED ||
-            batch != GHGFCache_.ActiveBatch_ ||
             observations.size() !=
                 static_cast<size_t>(
                     GHGFCache_.ObservationCount_
@@ -898,9 +875,6 @@ namespace BidirectionalInMemGraph
             batch
         ))
         {
-            GHGFCache_.Phase_ =
-                GM::GHGFPhase::NEEDS_RESET;
-
             return false;
         }
 
@@ -909,18 +883,11 @@ namespace BidirectionalInMemGraph
             learning
         ))
         {
-            GHGFCache_.Phase_ =
-                GM::GHGFPhase::NEEDS_RESET;
-
             return false;
         }
-
-        GHGFCache_.Phase_ =
-            GM::GHGFPhase::READY;
-
         return true;
     }
-    
+
     bool GHGFModelConstructor::ConstructGHGFModel(
         GHGFModelConstructionValues& model_values,
         const GHGFLayerModel::GHGFStorageProfile& profile

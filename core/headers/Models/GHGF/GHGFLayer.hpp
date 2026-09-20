@@ -332,11 +332,8 @@ namespace BidirectionalInMemGraph
             uint32_t WeightCellOffset_ = UNSIGNED_ZERO;
             uint32_t NodeCount_ = UNSIGNED_ZERO;
             uint32_t ObservationCount_ = UNSIGNED_ZERO;
-            uint32_t ActiveBatch_ = UNSIGNED_ZERO;
-            uint64_t PreparedRevision_ = UNSIGNED_ZERO;
             bool ModelPrepared_ = false;
             bool StructuralLearningActive_ = false;
-            GHGFLayerModel::GHGFPhase Phase_ = GHGFLayerModel::GHGFPhase::NEEDS_RESET;
         };
 
         struct StorageConst
