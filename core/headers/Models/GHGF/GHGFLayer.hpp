@@ -335,6 +335,7 @@ namespace BidirectionalInMemGraph
             uint32_t ActiveBatch_ = UNSIGNED_ZERO;
             uint64_t PreparedRevision_ = UNSIGNED_ZERO;
             bool ModelPrepared_ = false;
+            bool StructuralLearningActive_ = false;
             GHGFLayerModel::GHGFPhase Phase_ = GHGFLayerModel::GHGFPhase::NEEDS_RESET;
         };
 

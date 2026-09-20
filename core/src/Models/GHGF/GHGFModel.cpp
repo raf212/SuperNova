@@ -211,4 +211,103 @@ namespace BidirectionalInMemGraph
         GHGFCache_.Phase_ = GM::GHGFPhase::NEEDS_RESET;
         return true;
     }
+
+    bool GHGFModel::InitializeGHGFFabric(
+        uint32_t slot_count,
+        const GHGFLayerModel::GHGFStorageProfile& profile
+    ) noexcept
+    {
+        if (
+            IsFabricActive() || 
+            slot_count == UNSIGNED_ZERO || 
+            !GM::IsValidStoregeProfile(profile)
+        )
+        {
+            return false;
+        }
+        
+        InvalidateGHGFModel_();
+        GHGFCache_.NodeCount_ = UNSIGNED_ZERO;
+        GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
+        DefaultRegionTable_ = profile.DefaultSchemaTable;
+        if (
+            !InitializeFabric(
+                slot_count,
+                profile.RequiredAPCCells,
+                profile.FabricConfig,
+                profile.MaxDirectParentPerAxis
+            )
+        )
+        {
+            return false;
+        }
+
+        Profile_ = profile;
+
+        for (const SD::RegionSchemaRecord& record : MetrixViewRow_(0u))
+        {   
+            switch (record.Region)
+            {
+            case MacroColumnOfAPC::BOTTOM_UP_SLOT: GHGFCache_.FFCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::TOP_DOWN_SLOT: GHGFCache_.FBCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::STATE_SLOT: GHGFCache_.StateCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::ERROR_SLOT: GHGFCache_.ErrorCellOffset_ = record.CellOffset; break;
+            case MacroColumnOfAPC::WEIGHT_SLOT: GHGFCache_.WeightCellOffset_ = record.CellOffset; break;
+            default: 
+                break;
+            }
+        }
+        return true;
+    }
+
+    bool GHGFModel::ResetGHGFState() noexcept
+    {
+        if (!IsGHGFPlanCurrent_())
+        {
+            return false;
+        }
+        
+        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; ++slot)
+        {
+            GHGFNode node;
+            APCUseScope use;
+            if (GetGHGFNode_(slot, node, use))
+            {
+                node.ResetAPCGHGFStateRegion_();
+            }
+        }
+        GHGFCache_.ActiveBatch_ = UNSIGNED_ZERO;
+        GHGFCache_.Phase_ = GM::GHGFPhase::READY;
+        return true;
+    }
+
+    bool GHGFModel::CreateNodeOfGHGF(
+        GHGFNode& desired_apc,
+        GM::GHGFNodeRole role
+    ) noexcept
+    {
+        if (
+            !IsFabricActive() ||
+            !FabCache_->HasDefaultRegionTable_ ||
+            !CreateAPC(desired_apc, DefaultRegionTable_)
+        )
+        {
+            return false;
+        }
+
+        desired_apc.GHGFFabric_ = this;
+        if (desired_apc.InitializeGHGFNode(role))
+        {
+            return true;
+        }
+        
+        InvalidateGHGFModel_();
+        if (desired_apc.Retire())
+        {
+            desired_apc.GHGFFabric_ = nullptr;
+        }
+        return false;
+    }
+
+
 }

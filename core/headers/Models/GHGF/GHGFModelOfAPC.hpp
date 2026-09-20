@@ -16,7 +16,8 @@ namespace BidirectionalInMemGraph
         {
             std::span<GHGFNode> APCNodes{};
             std::span<const GM::GHGFNodeRole> RoleSpan{};
-            std::span<const GM::GHGFConnection> ConnectionSpan{};            
+            std::span<const GM::GHGFConnection> ConnectionSpan{};           
+            bool StructuralLearningActive = false;
         };
     protected:
         GM::GHGFCache GHGFCache_{};
@@ -39,6 +40,15 @@ namespace BidirectionalInMemGraph
 
         bool ConnectGHGFParent(const GM::GHGFConnection& connection) noexcept;
         bool RemoveParent(const GM::GHGFConnection& connection) noexcept;
+        bool InitializeGHGFFabric(
+            uint32_t slot_count,
+            const GHGFLayerModel::GHGFStorageProfile& profile
+        ) noexcept;
+        bool ResetGHGFState() noexcept;
+        bool CreateNodeOfGHGF(
+            GHGFNode& desired_apc,
+            GM::GHGFNodeRole role
+        ) noexcept;
 
     };
 
@@ -58,21 +68,6 @@ namespace BidirectionalInMemGraph
     public :
         bool PredictModelNONVectorized(uint32_t batch, std::span<float> prediction)noexcept;
         bool UpdateModelNONVectorized(uint32_t batch, FCSpan observations)noexcept;
-        bool ResetGHGFState() noexcept;
-        bool InitializeGHGFFabric(
-            uint32_t slot_count,
-            const GHGFLayerModel::GHGFStorageProfile& profile
-        ) noexcept;
-
-        bool CreateNodeOfGHGF(
-            GHGFNode& desired_apc,
-            GM::GHGFNodeRole role
-        ) noexcept;
-        
-        bool ConstructGHGFModel(
-            GHGFModelConstructionValues& model_values,
-            const GHGFLayerModel::GHGFStorageProfile& profile
-        ) noexcept;
 
         std::optional<double> RunGHGFSequence(
             FCSpan observations,
@@ -80,6 +75,11 @@ namespace BidirectionalInMemGraph
             uint32_t batch_count,
             std::span<float> predictios,
             bool reset_state = true
+        ) noexcept;
+
+        bool ConstructGHGFModel(
+            GHGFModelConstructionValues& model_values,
+            const GHGFLayerModel::GHGFStorageProfile& profile
         ) noexcept;
 
         std::optional<double> FitGHGFParameters(
