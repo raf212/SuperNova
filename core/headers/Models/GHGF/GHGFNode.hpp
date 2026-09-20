@@ -25,9 +25,9 @@ namespace BidirectionalInMemGraph
             return apc_use ?  GHGFRole_() : std::nullopt;
         }
 
-        bool PredictGHGFNodenNONVectorized_(uint32_t batch) noexcept;
-        bool UpdateGHGFNodeNONVectorized_(uint32_t batch) noexcept;
-        bool PropogateGHGFErrorNONVectorized_(uint32_t child, uint32_t batch) noexcept;
+        bool PredictGHGFNodenNONVectorized_(uint32_t batch, uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept;
+        bool UpdateGHGFNodeNONVectorized_(uint32_t batch, uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept;
+        bool PropogateGHGFErrorNONVectorized_(uint32_t child, uint32_t batch, uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept;
 
         bool PublishFForwardMessageGHGF_(uint32_t batch) noexcept;
         void PublishFBackwardMessageGHGF_(uint32_t batch) noexcept;

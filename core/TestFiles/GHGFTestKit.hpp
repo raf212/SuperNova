@@ -18,8 +18,9 @@
 //   * compile with the same C++20 release flags on every compared platform;
 //   * report the compiler, CPU, OS, flags, and repeated-run distribution;
 //   * call concurrent results aggregate throughput, not per-call latency;
-//   * Test J uses independent model instances and does not establish that one
-//     GHGFModelConstructor is safe for simultaneous public method calls.
+//   * Test I overlaps one numeric worker with structural mutation and snapshot
+//     reads; it does not claim that multiple numeric writers are safe;
+//   * Test J measures independent-model throughput, not same-model latency.
 // ============================================================================
 
 #ifndef APC_DAG_TEST_EXTERNAL_TYPES
@@ -72,6 +73,7 @@ struct TestConst final
     static constexpr int THREAD_COLUMN_WIDTH = 2;
     static constexpr int THROUGHPUT_COLUMN_WIDTH = 12;
     static constexpr int SPEEDUP_COLUMN_WIDTH = 10;
+    static constexpr int SINGLE_CANDIDATE_PARENT_COUNT = 1;
 
     static constexpr std::uint32_t VALUE_SLOT = 0u;
     static constexpr std::uint32_t SECOND_VALUE_SLOT = 1u;
@@ -255,7 +257,8 @@ inline bool ConstructPredictiveStructure(
     std::uint32_t batch,
     PredictiveStructure structure,
     float hidden_coupling,
-    float observation_coupling
+    float observation_coupling,
+    bool structural_learning_active = false
 ) noexcept
 {
     if (
@@ -305,7 +308,8 @@ inline bool ConstructPredictiveStructure(
     GHGFModelConstructor::GHGFModelConstructionValues values{
         nodes,
         roles,
-        edges
+        edges,
+        structural_learning_active
     };
 
     return model.ConstructGHGFModel(values, profile);
@@ -2032,31 +2036,21 @@ inline bool TestH_VCoupling()
 }
 
 // ----------------------------------------------------------------------------
-// TEST I - offline score-based predictive-structure selection
+// TEST I (current) - online concurrent predictive-structure learning
 //
-// This is deliberately not described as causal discovery or online rewiring.
-// The current public API can construct candidate DAGs, but a post-construction
-// ConnectGHGFParent()/RemoveParent() invalidates the private compiled plan and
-// cannot publicly reseal it. We therefore train two freshly constructed legal
-// candidate DAGs, select only from validation score, refit the selected DAG on
-// train+validation data, and touch the test split exactly once for reporting.
+// Three claims are kept separate: optimistic mutation semantics, a
+// validation-only structural decision on one live model, and concurrent
+// progress/integrity. This is predictive structure selection, not causal
+// discovery. Only one worker writes numeric state; the public API does not
+// promise that multiple numeric writers can share a model.
 // ----------------------------------------------------------------------------
-
-struct StructureScore final
-{
-    bool Valid = false;
-    PredictiveStructure Structure = PredictiveStructure::SHALLOW;
-    std::uint32_t EdgeCount = 0u;
-    double ValidationLoss = std::numeric_limits<double>::infinity();
-    double PenalizedScore = std::numeric_limits<double>::infinity();
-};
 
 inline double BICStylePerSamplePenalty(
     std::uint32_t edge_count,
     std::size_t sample_count
 ) noexcept
 {
-    static constexpr double HALF_BIC_SCALE = 0.5;
+    static constexpr double HALF_BIC_SCALE = TestConst::HALF;
 
     if (edge_count == 0u || sample_count < 2u)
         return 0.0;
@@ -2068,135 +2062,239 @@ inline double BICStylePerSamplePenalty(
         static_cast<double>(sample_count);
 }
 
-inline StructureScore TrainAndScoreStructure(
-    PredictiveStructure structure,
-    std::span<const float> training,
-    std::uint32_t train_steps,
-    std::span<const float> validation,
-    std::uint32_t validation_steps,
-    std::uint32_t batch,
-    float hidden_coupling,
-    float observation_coupling,
-    const GHGFLearningConfig& learning
-)
+inline GM::GHGFStructureMutation MakeHiddenEdgeMutation(
+    EdgeBuilder::StructureOperation operation,
+    std::uint32_t expected_sequence,
+    float coupling
+) noexcept
 {
-    static constexpr std::uint32_t SHALLOW_EDGE_COUNT = 1u;
-    static constexpr std::uint32_t HIERARCHICAL_EDGE_COUNT = 2u;
-
-    StructureScore score{};
-    score.Structure = structure;
-    score.EdgeCount =
-        structure == PredictiveStructure::HIERARCHICAL
-            ? HIERARCHICAL_EDGE_COUNT
-            : SHALLOW_EDGE_COUNT;
-
-    ScopedModel candidate{};
-
-    if (
-        !ConstructPredictiveStructure(
-            candidate.Model,
-            batch,
-            structure,
-            hidden_coupling,
-            observation_coupling
-        ) ||
-        !TrainSequence(
-            candidate.Model,
-            training,
-            train_steps,
-            batch,
-            learning,
-            true
-        )
-    )
-    {
-        return score;
-    }
-
-    const Evaluation evaluation = Evaluate(
-        candidate.Model,
-        validation,
-        validation_steps,
-        batch,
-        true
-    );
-
-    if (!evaluation.Valid)
-        return score;
-
-    score.ValidationLoss = evaluation.Loss;
-    score.PenalizedScore =
-        evaluation.Loss +
-        BICStylePerSamplePenalty(
-            score.EdgeCount,
-            validation.size()
-        );
-
-    score.Valid = std::isfinite(score.PenalizedScore);
-    return score;
+    GM::GHGFStructureMutation mutation{};
+    mutation.Operation = operation;
+    mutation.Child = TestConst::SECOND_VALUE_SLOT;
+    mutation.OldParent = TestConst::VALUE_SLOT;
+    mutation.NewParent = TestConst::VALUE_SLOT;
+    mutation.Edge = FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+    mutation.Coupling = coupling;
+    mutation.ExpectedRowSequence = expected_sequence;
+    return mutation;
 }
 
-inline Evaluation RefitAndTestStructure(
-    PredictiveStructure structure,
-    std::span<const float> fitting_data,
-    std::uint32_t fitting_steps,
-    std::span<const float> testing,
-    std::uint32_t test_steps,
+struct ConcurrentStructureMeasurement final
+{
+    std::uint64_t NumericSuccesses = 0u;
+    std::uint64_t NumericFailedAttempts = 0u;
+    std::uint64_t SnapshotSuccesses = 0u;
+    std::uint64_t SnapshotRetries = 0u;
+    std::uint64_t SnapshotRejected = 0u;
+    std::uint64_t SnapshotInvariantFailures = 0u;
+    std::uint64_t MutationSuccesses = 0u;
+    std::uint64_t MutationRetries = 0u;
+    std::uint64_t MutationStale = 0u;
+    std::uint64_t MutationRejected = 0u;
+    std::uint64_t MutationPublicationFailures = 0u;
+    double Seconds = 0.0;
+};
+
+inline ConcurrentStructureMeasurement MeasureConcurrentStructureLearning(
+    GHGFModelConstructor& model,
+    std::span<const float> observations,
     std::uint32_t batch,
-    float hidden_coupling,
-    float observation_coupling,
-    const GHGFLearningConfig& learning
+    float hidden_coupling
 )
 {
-    ScopedModel model{};
+    using Concurrent = GM::GHGFConcurrentOperation;
 
-    if (
-        !ConstructPredictiveStructure(
-            model.Model,
-            batch,
-            structure,
-            hidden_coupling,
-            observation_coupling
-        ) ||
-        !TrainSequence(
-            model.Model,
-            fitting_data,
-            fitting_steps,
-            batch,
-            learning,
-            true
-        )
-    )
-    {
-        return {};
-    }
+    static constexpr std::uint32_t NUMERIC_ATTEMPTS = 32768u;
+    static constexpr std::uint32_t MUTATION_ATTEMPTS = 32768u;
+    static constexpr std::uint32_t SNAPSHOT_ATTEMPTS = 65536u;
+    static constexpr std::uint32_t CONCURRENT_MAX_TRIES = 32u;
+    static constexpr std::uint32_t SEQUENCE_WRITE_BIT_MASK = 1u;
+    static constexpr std::ptrdiff_t WORKER_COUNT = 3;
+    static constexpr std::ptrdiff_t MAIN_PARTICIPANT_COUNT = 1;
+    static constexpr std::ptrdiff_t BARRIER_PARTICIPANTS =
+        WORKER_COUNT + MAIN_PARTICIPANT_COUNT;
 
-    return Evaluate(
-        model.Model,
-        testing,
-        test_steps,
-        batch,
-        true
+    ConcurrentStructureMeasurement measurement{};
+    if (batch == 0u || observations.size() < batch)
+        return measurement;
+
+    const GHGFLearningConfig zero_learning = ZeroLearning();
+    const std::size_t observation_step_count = observations.size() / batch;
+    std::vector<float> prediction(batch);
+    std::chrono::steady_clock::time_point begin{};
+
+    std::barrier start_gate(
+        BARRIER_PARTICIPANTS,
+        [&begin]() noexcept { begin = std::chrono::steady_clock::now(); }
     );
+
+    std::thread numeric_worker([&]()
+    {
+        start_gate.arrive_and_wait();
+        for (std::uint32_t attempt = 0u; attempt < NUMERIC_ATTEMPTS; ++attempt)
+        {
+            const std::size_t step = attempt % observation_step_count;
+            const std::span<const float> observation = observations.subspan(
+                step * batch,
+                batch
+            );
+            const bool predicted =
+                model.PredictModelNONVectorized(batch, prediction);
+            const bool valid_prediction =
+                predicted && ValidPredictions(prediction);
+            const bool trained =
+                valid_prediction &&
+                model.TrainModelNONVectorized(
+                    batch,
+                    observation,
+                    zero_learning
+                );
+
+            if (trained)
+                ++measurement.NumericSuccesses;
+            else
+                ++measurement.NumericFailedAttempts;
+        }
+    });
+
+    std::thread mutation_worker([&]()
+    {
+        start_gate.arrive_and_wait();
+        for (std::uint32_t attempt = 0u; attempt < MUTATION_ATTEMPTS; ++attempt)
+        {
+            GM::GHGFStructureSnapshot snapshot{};
+            const Concurrent read = model.ReadStructureSnapshotConcurrently(
+                TestConst::SECOND_VALUE_SLOT,
+                FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+                snapshot,
+                CONCURRENT_MAX_TRIES
+            );
+
+            if (read == Concurrent::RETRY)
+            {
+                ++measurement.MutationRetries;
+                continue;
+            }
+            if (read != Concurrent::SUCCESS || !snapshot.IsValid)
+            {
+                ++measurement.MutationRejected;
+                continue;
+            }
+
+            const EdgeBuilder::StructureOperation operation =
+                snapshot.ParentMask == 0u
+                    ? EdgeBuilder::StructureOperation::ADD_PARENT
+                    : EdgeBuilder::StructureOperation::REMOVE_PARENT;
+            const GM::GHGFStructureMutation mutation = MakeHiddenEdgeMutation(
+                operation,
+                snapshot.RowSequence,
+                hidden_coupling
+            );
+            const GM::GHGFStructureMutationResult result =
+                model.TryApplyGHGFStructureMutation(
+                    mutation,
+                    CONCURRENT_MAX_TRIES
+                );
+
+            switch (result.Result)
+            {
+            case Concurrent::SUCCESS:
+                ++measurement.MutationSuccesses;
+                if (
+                    result.PublishedRowSequence == UINT32_MAX ||
+                    result.PublishedOrdinal == UINT8_MAX
+                )
+                {
+                    ++measurement.MutationPublicationFailures;
+                }
+                break;
+            case Concurrent::RETRY:
+                ++measurement.MutationRetries;
+                break;
+            case Concurrent::STALE:
+                ++measurement.MutationStale;
+                break;
+            case Concurrent::REJECTED:
+                ++measurement.MutationRejected;
+                break;
+            }
+        }
+    });
+
+    std::thread snapshot_worker([&]()
+    {
+        std::uint32_t last_sequence = 0u;
+        start_gate.arrive_and_wait();
+        for (std::uint32_t attempt = 0u; attempt < SNAPSHOT_ATTEMPTS; ++attempt)
+        {
+            GM::GHGFStructureSnapshot snapshot{};
+            const Concurrent read = model.ReadStructureSnapshotConcurrently(
+                TestConst::SECOND_VALUE_SLOT,
+                FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+                snapshot,
+                CONCURRENT_MAX_TRIES
+            );
+
+            if (read == Concurrent::SUCCESS)
+            {
+                ++measurement.SnapshotSuccesses;
+                const bool valid_mask =
+                    std::popcount(snapshot.ParentMask) <=
+                    TestConst::SINGLE_CANDIDATE_PARENT_COUNT;
+                const bool published_sequence =
+                    (snapshot.RowSequence & SEQUENCE_WRITE_BIT_MASK) == 0u;
+                const bool monotonic_sequence =
+                    snapshot.RowSequence >= last_sequence;
+                if (
+                    !snapshot.IsValid ||
+                    snapshot.Child != TestConst::SECOND_VALUE_SLOT ||
+                    snapshot.Edge != FabricSegments::VALUE_PARENT_EDGE_TABLE_H ||
+                    !valid_mask ||
+                    !published_sequence ||
+                    !monotonic_sequence
+                )
+                {
+                    ++measurement.SnapshotInvariantFailures;
+                }
+                last_sequence = snapshot.RowSequence;
+            }
+            else if (read == Concurrent::RETRY)
+            {
+                ++measurement.SnapshotRetries;
+            }
+            else
+            {
+                ++measurement.SnapshotRejected;
+            }
+        }
+    });
+
+    start_gate.arrive_and_wait();
+    numeric_worker.join();
+    mutation_worker.join();
+    snapshot_worker.join();
+
+    const auto end = std::chrono::steady_clock::now();
+    measurement.Seconds = std::chrono::duration<double>(end - begin).count();
+    return measurement;
 }
 
-inline bool TestI_ScoreBasedStructureSelection()
+inline bool TestI_OnlineConcurrentStructuralLearning()
 {
-    Banner("TEST I - OFFLINE SCORE-BASED PREDICTIVE-STRUCTURE SELECTION");
+    Banner("TEST I - ONLINE CONCURRENT PREDICTIVE-STRUCTURE LEARNING");
 
     static constexpr std::uint32_t BATCH = 1u;
     static constexpr std::uint32_t TRAIN_STEPS = 503u;
     static constexpr std::uint32_t VALIDATION_STEPS = 251u;
     static constexpr std::uint32_t TEST_STEPS = 257u;
-    static constexpr std::uint32_t FITTING_STEPS =
-        TRAIN_STEPS + VALIDATION_STEPS;
     static constexpr std::uint32_t TOTAL_STEPS =
-        FITTING_STEPS + TEST_STEPS;
+        TRAIN_STEPS + VALIDATION_STEPS + TEST_STEPS;
     static constexpr std::uint32_t BLOCK_LENGTH = 16u;
-
-    static constexpr float INITIAL_HIDDEN_COUPLING = 2.0f;
+    static constexpr std::uint32_t SHALLOW_EDGE_COUNT = 1u;
+    static constexpr std::uint32_t HIERARCHICAL_EDGE_COUNT = 2u;
+    static constexpr std::uint32_t API_MAX_TRIES = 128u;
+    static constexpr float CANDIDATE_HIDDEN_COUPLING = 0.5f;
     static constexpr float INITIAL_OBSERVATION_COUPLING = 1.0f;
-    static constexpr float H_LEARNING_RATE = 0.02f;
     static constexpr float DRIFT_LEARNING_RATE = 0.02f;
     static constexpr float TEMPORAL_LEARNING_RATE = 0.005f;
     static constexpr float GRADIENT_CLIP = 5.0f;
@@ -2208,133 +2306,232 @@ inline bool TestI_ScoreBasedStructureSelection()
         BATCH,
         BLOCK_LENGTH
     );
-
     const std::span<const float> all{data};
     const std::span<const float> training =
         all.first(static_cast<std::size_t>(TRAIN_STEPS) * BATCH);
-    const std::span<const float> validation =
-        all.subspan(
-            static_cast<std::size_t>(TRAIN_STEPS) * BATCH,
-            static_cast<std::size_t>(VALIDATION_STEPS) * BATCH
-        );
-    const std::span<const float> fitting_data =
-        all.first(static_cast<std::size_t>(FITTING_STEPS) * BATCH);
-    const std::span<const float> testing =
-        all.subspan(
-            static_cast<std::size_t>(FITTING_STEPS) * BATCH,
-            static_cast<std::size_t>(TEST_STEPS) * BATCH
-        );
+    const std::span<const float> validation = all.subspan(
+        static_cast<std::size_t>(TRAIN_STEPS) * BATCH,
+        static_cast<std::size_t>(VALIDATION_STEPS) * BATCH
+    );
+    const std::span<const float> testing = all.subspan(
+        static_cast<std::size_t>(TRAIN_STEPS + VALIDATION_STEPS) * BATCH,
+        static_cast<std::size_t>(TEST_STEPS) * BATCH
+    );
 
     GHGFLearningConfig learning = ZeroLearning();
-    learning.HCouplingLearningRate = H_LEARNING_RATE;
     learning.DriftLearningRate = DRIFT_LEARNING_RATE;
     learning.AutoConnectionLearningRate = TEMPORAL_LEARNING_RATE;
     learning.GradientClip = GRADIENT_CLIP;
 
-    const StructureScore shallow = TrainAndScoreStructure(
-        PredictiveStructure::SHALLOW,
-        training,
-        TRAIN_STEPS,
-        validation,
-        VALIDATION_STEPS,
-        BATCH,
-        INITIAL_HIDDEN_COUPLING,
-        INITIAL_OBSERVATION_COUPLING,
-        learning
-    );
-
-    const StructureScore hierarchical = TrainAndScoreStructure(
-        PredictiveStructure::HIERARCHICAL,
-        training,
-        TRAIN_STEPS,
-        validation,
-        VALIDATION_STEPS,
-        BATCH,
-        INITIAL_HIDDEN_COUPLING,
-        INITIAL_OBSERVATION_COUPLING,
-        learning
-    );
-
-    if (!shallow.Valid || !hierarchical.Valid)
+    ScopedModel model{};
+    if (
+        !ConstructPredictiveStructure(
+            model.Model,
+            BATCH,
+            PredictiveStructure::SHALLOW,
+            CANDIDATE_HIDDEN_COUPLING,
+            INITIAL_OBSERVATION_COUPLING,
+            true
+        ) ||
+        !TrainSequence(
+            model.Model,
+            training,
+            TRAIN_STEPS,
+            BATCH,
+            learning,
+            true
+        )
+    )
     {
-        Report("candidate training and validation", false);
+        Report("structural model construction and training", false);
         return false;
     }
 
-    const PredictiveStructure selected =
-        hierarchical.PenalizedScore < shallow.PenalizedScore
-            ? PredictiveStructure::HIERARCHICAL
-            : PredictiveStructure::SHALLOW;
+    const Evaluation shallow_validation = Evaluate(
+        model.Model, validation, VALIDATION_STEPS, BATCH, true);
+    const double shallow_score = shallow_validation.Loss +
+        BICStylePerSamplePenalty(SHALLOW_EDGE_COUNT, validation.size());
 
-    const PredictiveStructure rejected =
-        selected == PredictiveStructure::HIERARCHICAL
-            ? PredictiveStructure::SHALLOW
-            : PredictiveStructure::HIERARCHICAL;
-
-    const double validation_margin =
-        std::abs(shallow.PenalizedScore - hierarchical.PenalizedScore);
-
-    const Evaluation selected_test = RefitAndTestStructure(
-        selected,
-        fitting_data,
-        FITTING_STEPS,
-        testing,
-        TEST_STEPS,
-        BATCH,
-        INITIAL_HIDDEN_COUPLING,
-        INITIAL_OBSERVATION_COUPLING,
-        learning
+    GM::GHGFStructureSnapshot initial_snapshot{};
+    const GM::GHGFConcurrentOperation initial_read =
+        model.Model.ReadStructureSnapshotConcurrently(
+            TestConst::SECOND_VALUE_SLOT,
+            FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+            initial_snapshot,
+            API_MAX_TRIES
+        );
+    const GM::GHGFStructureMutation add_mutation = MakeHiddenEdgeMutation(
+        EdgeBuilder::StructureOperation::ADD_PARENT,
+        initial_snapshot.RowSequence,
+        CANDIDATE_HIDDEN_COUPLING
     );
+    const GM::GHGFStructureMutationResult add_result =
+        model.Model.TryApplyGHGFStructureMutation(add_mutation, API_MAX_TRIES);
 
-    const Evaluation rejected_test = RefitAndTestStructure(
-        rejected,
-        fitting_data,
-        FITTING_STEPS,
-        testing,
-        TEST_STEPS,
-        BATCH,
-        INITIAL_HIDDEN_COUPLING,
-        INITIAL_OBSERVATION_COUPLING,
-        learning
-    );
+    GM::GHGFStructureSnapshot added_snapshot{};
+    const GM::GHGFConcurrentOperation added_read =
+        model.Model.ReadStructureSnapshotConcurrently(
+            TestConst::SECOND_VALUE_SLOT,
+            FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+            added_snapshot,
+            API_MAX_TRIES
+        );
+    const GM::GHGFStructureMutationResult stale_replay =
+        model.Model.TryApplyGHGFStructureMutation(add_mutation, API_MAX_TRIES);
 
-    const bool selected_expected_structure =
-        selected == PredictiveStructure::HIERARCHICAL;
-    const bool decisive_validation_score =
+    const Evaluation hierarchical_validation = Evaluate(
+        model.Model, validation, VALIDATION_STEPS, BATCH, true);
+    const double hierarchical_score = hierarchical_validation.Loss +
+        BICStylePerSamplePenalty(HIERARCHICAL_EDGE_COUNT, validation.size());
+    const double validation_margin = shallow_score - hierarchical_score;
+    const bool selected_hierarchical =
+        shallow_validation.Valid &&
+        hierarchical_validation.Valid &&
         validation_margin > MINIMUM_VALIDATION_MARGIN;
+
+    // The test split is read only after the validation decision is fixed.
+    const Evaluation hierarchical_test = Evaluate(
+        model.Model, testing, TEST_STEPS, BATCH, true);
+
+    const GM::GHGFStructureMutation remove_mutation = MakeHiddenEdgeMutation(
+        EdgeBuilder::StructureOperation::REMOVE_PARENT,
+        added_snapshot.RowSequence,
+        CANDIDATE_HIDDEN_COUPLING
+    );
+    const GM::GHGFStructureMutationResult remove_result =
+        model.Model.TryApplyGHGFStructureMutation(remove_mutation, API_MAX_TRIES);
+    const Evaluation shallow_test = Evaluate(
+        model.Model, testing, TEST_STEPS, BATCH, true);
+
+    GM::GHGFStructureSnapshot removed_snapshot{};
+    const GM::GHGFConcurrentOperation removed_read =
+        model.Model.ReadStructureSnapshotConcurrently(
+            TestConst::SECOND_VALUE_SLOT,
+            FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
+            removed_snapshot,
+            API_MAX_TRIES
+        );
+    const GM::GHGFStructureMutation restore_mutation = MakeHiddenEdgeMutation(
+        EdgeBuilder::StructureOperation::ADD_PARENT,
+        removed_snapshot.RowSequence,
+        CANDIDATE_HIDDEN_COUPLING
+    );
+    const GM::GHGFStructureMutationResult restore_result =
+        model.Model.TryApplyGHGFStructureMutation(
+            restore_mutation,
+            API_MAX_TRIES
+        );
+
+    const bool transaction_contract =
+        initial_read == GM::GHGFConcurrentOperation::SUCCESS &&
+        initial_snapshot.IsValid &&
+        initial_snapshot.ParentMask == 0u &&
+        add_result.Result == GM::GHGFConcurrentOperation::SUCCESS &&
+        add_result.PublishedRowSequence != UINT32_MAX &&
+        add_result.PublishedOrdinal != UINT8_MAX &&
+        added_read == GM::GHGFConcurrentOperation::SUCCESS &&
+        added_snapshot.IsValid &&
+        std::popcount(added_snapshot.ParentMask) ==
+            TestConst::SINGLE_CANDIDATE_PARENT_COUNT &&
+        added_snapshot.RowSequence == add_result.PublishedRowSequence &&
+        stale_replay.Result == GM::GHGFConcurrentOperation::STALE &&
+        remove_result.Result == GM::GHGFConcurrentOperation::SUCCESS &&
+        removed_read == GM::GHGFConcurrentOperation::SUCCESS &&
+        removed_snapshot.IsValid &&
+        removed_snapshot.ParentMask == 0u &&
+        restore_result.Result == GM::GHGFConcurrentOperation::SUCCESS;
     const bool held_out_improvement =
-        selected_test.Valid &&
-        rejected_test.Valid &&
-        selected_test.Loss + MINIMUM_TEST_IMPROVEMENT < rejected_test.Loss;
+        hierarchical_test.Valid &&
+        shallow_test.Valid &&
+        hierarchical_test.Loss + MINIMUM_TEST_IMPROVEMENT < shallow_test.Loss;
+
+    const ConcurrentStructureMeasurement concurrent =
+        MeasureConcurrentStructureLearning(
+            model.Model,
+            testing,
+            BATCH,
+            CANDIDATE_HIDDEN_COUPLING
+        );
+
+    std::vector<float> recovery_prediction(BATCH);
+    const bool recovered_after_contention =
+        model.Model.ResetGHGFState() &&
+        model.Model.PredictModelNONVectorized(BATCH, recovery_prediction) &&
+        ValidPredictions(recovery_prediction) &&
+        model.Model.UpdateModelNONVectorized(BATCH, testing.first(BATCH));
+    const bool concurrent_integrity =
+        concurrent.Seconds > 0.0 &&
+        concurrent.NumericSuccesses > 0u &&
+        concurrent.SnapshotSuccesses > 0u &&
+        concurrent.MutationSuccesses > 0u &&
+        concurrent.SnapshotInvariantFailures == 0u &&
+        concurrent.SnapshotRejected == 0u &&
+        concurrent.MutationRejected == 0u &&
+        concurrent.MutationPublicationFailures == 0u &&
+        recovered_after_contention;
+
+    const double numeric_attempts_per_second =
+        static_cast<double>(
+            concurrent.NumericSuccesses + concurrent.NumericFailedAttempts) /
+        concurrent.Seconds;
+    const double mutation_attempts_per_second =
+        static_cast<double>(
+            concurrent.MutationSuccesses +
+            concurrent.MutationRetries +
+            concurrent.MutationStale +
+            concurrent.MutationRejected) /
+        concurrent.Seconds;
 
     std::cout
         << std::fixed
         << std::setprecision(TestConst::LONG_PRECISION)
         << "  shallow validation loss                       "
-        << shallow.ValidationLoss << '\n'
+        << shallow_validation.Loss << '\n'
         << "  shallow penalized score                       "
-        << shallow.PenalizedScore << '\n'
+        << shallow_score << '\n'
         << "  hierarchical validation loss                  "
-        << hierarchical.ValidationLoss << '\n'
+        << hierarchical_validation.Loss << '\n'
         << "  hierarchical penalized score                  "
-        << hierarchical.PenalizedScore << '\n'
+        << hierarchical_score << '\n'
         << "  validation decision margin                    "
         << validation_margin << '\n'
-        << "  selected topology                             "
-        << (selected_expected_structure ? "HIERARCHICAL" : "SHALLOW") << '\n'
-        << "  selected held-out test loss                   "
-        << selected_test.Loss << '\n'
-        << "  rejected held-out test loss                   "
-        << rejected_test.Loss << '\n';
+        << "  hierarchical held-out test loss               "
+        << hierarchical_test.Loss << '\n'
+        << "  shallow held-out test loss                    "
+        << shallow_test.Loss << '\n'
+        << "  concurrent elapsed seconds                    "
+        << concurrent.Seconds << '\n'
+        << "  numeric successes / failed attempts           "
+        << concurrent.NumericSuccesses << " / "
+        << concurrent.NumericFailedAttempts << '\n'
+        << "  snapshot success / retry / rejected           "
+        << concurrent.SnapshotSuccesses << " / "
+        << concurrent.SnapshotRetries << " / "
+        << concurrent.SnapshotRejected << '\n'
+        << "  mutation success / retry / stale / rejected   "
+        << concurrent.MutationSuccesses << " / "
+        << concurrent.MutationRetries << " / "
+        << concurrent.MutationStale << " / "
+        << concurrent.MutationRejected << '\n'
+        << "  numeric attempts per second                   "
+        << numeric_attempts_per_second << '\n'
+        << "  mutation attempts per second                  "
+        << mutation_attempts_per_second << '\n';
 
-    Report("validation selects hierarchical candidate", selected_expected_structure);
-    Report("validation decision exceeds minimum margin", decisive_validation_score);
-    Report("selected topology generalizes on untouched test", held_out_improvement);
+    Report("optimistic mutation contract is coherent", transaction_contract);
+    Report("validation accepts live hierarchical edge", selected_hierarchical);
+    Report("accepted edge improves untouched test data", held_out_improvement);
+    Report("same-model concurrent stress preserves invariants", concurrent_integrity);
+
+    std::cout
+        << "  NOTE: failed numeric attempts are reported, not relabeled as retries;\n"
+        << "        the numeric API returns bool and does not expose retry status.\n";
 
     return
-        selected_expected_structure &&
-        decisive_validation_score &&
-        held_out_improvement;
+        transaction_contract &&
+        selected_hierarchical &&
+        held_out_improvement &&
+        concurrent_integrity;
 }
 
 // ----------------------------------------------------------------------------
@@ -2900,7 +3097,7 @@ inline int RunAll()
     const TimedTest f = RunTimedTest(TestF_TemporalParameter);
     const TimedTest g = RunTimedTest(TestG_TonicVolatility);
     const TimedTest h = RunTimedTest(TestH_VCoupling);
-    const TimedTest i = RunTimedTest(TestI_ScoreBasedStructureSelection);
+    const TimedTest i = RunTimedTest(TestI_OnlineConcurrentStructuralLearning);
     const TimedTest j = RunTimedTest(TestJ_TimingAndIndependentParallelism);
 
     const int failures =
@@ -2942,7 +3139,7 @@ inline int RunAll()
     SummaryLine___("Test F - temporal parameter", f);
     SummaryLine___("Test G - tonic-volatility efficacy", g);
     SummaryLine___("Test H - V-coupling efficacy", h);
-    SummaryLine___("Test I - predictive-structure selection", i);
+    SummaryLine___("Test I - online concurrent structural learning", i);
     SummaryLine___("Test J - timing/independent parallelism", j);
 
     std::cout

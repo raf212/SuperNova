@@ -177,6 +177,7 @@ namespace BidirectionalInMemGraph
     };
 
 
+    class GHGFStructralLearningModel;
     class ConstructDAGOnEachAxis : public DAGMutationConf
     {
         friend class AdaptivePackedCellContainer;
@@ -197,7 +198,6 @@ namespace BidirectionalInMemGraph
                 left.Status == right.Status;
         }
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
-    private:
 
         struct ParentRowScan
         {

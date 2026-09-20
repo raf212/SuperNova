@@ -347,8 +347,7 @@ namespace BidirectionalInMemGraph
             return Operation::NONE;
         }
 
-        const std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(edge, child);
+        const std::span<EdgeBuilder::ParentRelation> relations = ParentRelations_(edge, child);
         CompiledDAGRecord* const compiled = CompiledDAGRow_(child);
         float* const weights = GHGFWeight_(child);
 
@@ -377,8 +376,7 @@ namespace BidirectionalInMemGraph
                     continue;
 
                 snapshot.ParentHandles[ordinal] = relations[ordinal].ParentHandle;
-                snapshot.Couplings[ordinal] = weights[GM::CouplingIndex(
-                    edge, ordinal, Profile_.MaxDirectParentPerAxis)];
+                snapshot.Couplings[ordinal] = weights[GM::CouplingIndex(edge, ordinal, Profile_.MaxDirectParentPerAxis)];
             }
             return Operation::FOUND;
         }
@@ -438,10 +436,12 @@ namespace BidirectionalInMemGraph
                     std::isfinite(local.Couplings[ordinal]);
             }
 
+            const uint64_t after_raw = control.load(std::memory_order_acquire);
+            if (before_raw != after_raw)
+                continue;
+
             if (!valid)
                 return Operation::NONE;
-            if (before_raw != control.load(std::memory_order_acquire))
-                continue;
 
             snapshot = local;
             return Operation::FOUND;

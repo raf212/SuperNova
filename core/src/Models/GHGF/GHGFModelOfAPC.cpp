@@ -463,8 +463,11 @@ namespace BidirectionalInMemGraph
     {
         using SC = GM::StorageConst;
 
-        if (!IsGHGFModelReady_() || parameters.empty() || passes == UNSIGNED_ZERO ||
-            IsInternalBuffer(parameters.data(), parameters.size()))
+        if (
+            !IsGHGFModelReady_() || parameters.empty() || passes == UNSIGNED_ZERO ||
+            IsInternalBuffer(parameters.data(), parameters.size()) ||
+            GHGFCache_.StructuralLearningActive_
+        )
         {
             return std::nullopt;
         }
@@ -576,6 +579,15 @@ namespace BidirectionalInMemGraph
             !std::isfinite(learning.MinTonicLogVolatility) ||
             !std::isfinite(learning.MaxTonicLogVolatility) ||
             learning.MinTonicLogVolatility >= learning.MaxTonicLogVolatility)
+        {
+            return false;
+        }
+
+        if (
+            GHGFCache_.StructuralLearningActive_ &&
+            (learning.HCouplingLearningRate != GM::StorageConst::ZERO ||
+            learning.VCouplingLearningRate != GM::StorageConst::ZERO)
+        )
         {
             return false;
         }
@@ -724,42 +736,66 @@ namespace BidirectionalInMemGraph
             // -----------------------------------------------------
             // 4. H COUPLING LEARNING
             // -----------------------------------------------------
-
-            const auto h_axis =
-                FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
-
-            const auto h_relations = ParentRelations_(h_axis, child);
-
-            for (uint64_t mask = GHGFParentMask_(child, h_axis);
-                mask;
-                mask &= mask - 1u)
+            if (learning.HCouplingLearningRate != SC::ZERO)
             {
-                const uint8_t ordinal =
-                    static_cast<uint8_t>(std::countr_zero(mask));
+                const auto h_axis =
+                    FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
 
-                const uint32_t parent =
-                    EdgeBuilder::ParentSlot(h_relations[ordinal]);
+                const auto h_relations =
+                    ParentRelations_(h_axis, child);
 
-                const uint32_t parameter_index = GM::CouplingIndex(
-                    h_axis,
-                    ordinal,
-                    Profile_.MaxDirectParentPerAxis);
-
-                const float* parent_feature =
-                    FBRowGHGF_(parent, FB::EXPECTED_MEAN);
-
-                float coupling_direction = 0.0f;
-
-                for (uint32_t lane = 0; lane < batch; ++lane)
-                    coupling_direction +=
-                        value_signal[lane] * parent_feature[lane];
-
-                if (!ApplyUpdate___(
-                        parameter_index,
-                        learning.HCouplingLearningRate,
-                        coupling_direction))
+                for (
+                    uint64_t mask = GHGFParentMask_(child, h_axis);
+                    mask;
+                    mask &= mask - 1u
+                )
                 {
-                    return false;
+                    const uint8_t ordinal =
+                        static_cast<uint8_t>(
+                            std::countr_zero(mask)
+                        );
+
+                    const uint32_t parent =
+                        EdgeBuilder::ParentSlot(
+                            h_relations[ordinal]
+                        );
+
+                    const uint32_t parameter_index =
+                        GM::CouplingIndex(
+                            h_axis,
+                            ordinal,
+                            Profile_.MaxDirectParentPerAxis
+                        );
+
+                    const float* parent_feature =
+                        FBRowGHGF_(
+                            parent,
+                            FB::EXPECTED_MEAN
+                        );
+
+                    float coupling_direction = 0.0f;
+
+                    for (
+                        uint32_t lane = 0;
+                        lane < batch;
+                        ++lane
+                    )
+                    {
+                        coupling_direction +=
+                            value_signal[lane] *
+                            parent_feature[lane];
+                    }
+
+                    if (
+                        !ApplyUpdate___(
+                            parameter_index,
+                            learning.HCouplingLearningRate,
+                            coupling_direction
+                        )
+                    )
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -770,66 +806,101 @@ namespace BidirectionalInMemGraph
             // 5. V COUPLING LEARNING
             // -----------------------------------------------------
 
-            const auto v_axis =
-                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
-
-            const auto v_relations = ParentRelations_(v_axis, child);
-
-            for (uint64_t mask = GHGFParentMask_(child, v_axis);
-                mask;
-                mask &= mask - 1u)
+            if (learning.VCouplingLearningRate != SC::ZERO)
             {
-                const uint8_t ordinal =
-                    static_cast<uint8_t>(std::countr_zero(mask));
+                const auto v_axis =
+                    FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
 
-                const uint32_t parent =
-                    EdgeBuilder::ParentSlot(v_relations[ordinal]);
+                const auto v_relations =
+                    ParentRelations_(v_axis, child);
 
-                const uint32_t parameter_index = GM::CouplingIndex(
-                    v_axis,
-                    ordinal,
-                    Profile_.MaxDirectParentPerAxis);
-
-                const float coupling = weight[parameter_index];
-
-                const float* parent_mean =
-                    FBRowGHGF_(parent, FB::MEAN);
-
-                const float* parent_precision =
-                    FBRowGHGF_(parent, FB::EXPECTED_PRECISION);
-
-                float coupling_direction = 0.0f;
-
-                for (uint32_t lane = 0; lane < batch; ++lane)
+                for (
+                    uint64_t mask = GHGFParentMask_(child, v_axis);
+                    mask;
+                    mask &= mask - 1u
+                )
                 {
-                    if (!std::isfinite(parent_precision[lane]) ||
-                        parent_precision[lane] <= SC::ZERO)
+                    const uint8_t ordinal =
+                        static_cast<uint8_t>(
+                            std::countr_zero(mask)
+                        );
+
+                    const uint32_t parent =
+                        EdgeBuilder::ParentSlot(
+                            v_relations[ordinal]
+                        );
+
+                    const uint32_t parameter_index =
+                        GM::CouplingIndex(
+                            v_axis,
+                            ordinal,
+                            Profile_.MaxDirectParentPerAxis
+                        );
+
+                    const float coupling =
+                        weight[parameter_index];
+
+                    const float* parent_mean =
+                        FBRowGHGF_(
+                            parent,
+                            FB::MEAN
+                        );
+
+                    const float* parent_precision =
+                        FBRowGHGF_(
+                            parent,
+                            FB::EXPECTED_PRECISION
+                        );
+
+                    float coupling_direction = 0.0f;
+
+                    for (
+                        uint32_t lane = 0;
+                        lane < batch;
+                        ++lane
+                    )
+                    {
+                        if (
+                            !std::isfinite(
+                                parent_precision[lane]
+                            ) ||
+                            parent_precision[lane] <= SC::ZERO
+                        )
+                        {
+                            return false;
+                        }
+
+                        const float gate =
+                            observed[lane] != SC::ZERO
+                                ? SC::ONE
+                                : SC::ZERO;
+
+                        const float volatility_signal =
+                            SC::HALF *
+                            effective_precision[lane] *
+                            volatile_error[lane];
+
+                        const float feature =
+                            parent_mean[lane] +
+                            coupling /
+                            parent_precision[lane];
+
+                        coupling_direction +=
+                            gate *
+                            volatility_signal *
+                            feature;
+                    }
+
+                    if (
+                        !ApplyUpdate___(
+                            parameter_index,
+                            learning.VCouplingLearningRate,
+                            coupling_direction
+                        )
+                    )
                     {
                         return false;
                     }
-
-                    const float gate =
-                        observed[lane] != SC::ZERO ? SC::ONE : SC::ZERO;
-
-                    const float volatility_signal =
-                        SC::HALF *
-                        effective_precision[lane] *
-                        volatile_error[lane];
-
-                    const float feature =
-                        parent_mean[lane] +
-                        coupling / parent_precision[lane];
-
-                    coupling_direction +=
-                        gate * volatility_signal * feature;
-                }
-
-                if (!ApplyUpdate___(
-                        parameter_index,
-                        learning.VCouplingLearningRate,
-                        coupling_direction))
-                {
-                    return false;
                 }
             }
         }
