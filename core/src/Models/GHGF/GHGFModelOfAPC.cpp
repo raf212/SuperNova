@@ -311,7 +311,7 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::PredictModelNONVectorized(uint32_t batch, std::span<float> predictions) noexcept
     {
-        if (!IsGHGFPlanCurrent_() ||
+        if (!IsGHGFModelReady_() ||
             batch == UNSIGNED_ZERO || batch > Profile_.BatchCapacity ||
             predictions.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
             IsInternalBuffer(predictions.data(), predictions.size()))
@@ -331,7 +331,7 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModelConstructor::UpdateModelNONVectorized(uint32_t batch, FCSpan observations) noexcept
     {
-        if (!IsGHGFPlanCurrent_() ||
+        if (!IsGHGFModelReady_() ||
             observations.size() != static_cast<size_t>(GHGFCache_.ObservationCount_) * batch ||
             IsInternalBuffer(observations.data(), observations.size()))
         {
@@ -374,7 +374,7 @@ namespace BidirectionalInMemGraph
         bool reset_state
     ) noexcept
     {
-        if (!IsGHGFPlanCurrent_() || time_count == UNSIGNED_ZERO ||
+        if (!IsGHGFModelReady_() || time_count == UNSIGNED_ZERO ||
             batch_count == UNSIGNED_ZERO || batch_count > Profile_.BatchCapacity)
         {
             return std::nullopt;
@@ -463,7 +463,7 @@ namespace BidirectionalInMemGraph
     {
         using SC = GM::StorageConst;
 
-        if (!IsGHGFPlanCurrent_() || parameters.empty() || passes == UNSIGNED_ZERO ||
+        if (!IsGHGFModelReady_() || parameters.empty() || passes == UNSIGNED_ZERO ||
             IsInternalBuffer(parameters.data(), parameters.size()))
         {
             return std::nullopt;
@@ -563,7 +563,7 @@ namespace BidirectionalInMemGraph
             return std::isfinite(value) && value >= 0.0f;
         };
 
-        if (!IsGHGFPlanCurrent_() ||
+        if (!IsGHGFModelReady_() ||
             batch == UNSIGNED_ZERO ||
             batch > Profile_.BatchCapacity ||
             !ValidRate___(learning.HCouplingLearningRate) ||
@@ -845,7 +845,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         if (
-            !IsGHGFPlanCurrent_() ||
+            !IsGHGFModelReady_() ||
             observations.size() !=
                 static_cast<size_t>(
                     GHGFCache_.ObservationCount_

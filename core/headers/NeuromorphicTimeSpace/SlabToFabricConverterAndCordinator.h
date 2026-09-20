@@ -79,6 +79,16 @@ namespace BidirectionalInMemGraph
         static constexpr uint8_t DAG_MAX_RELATION_DELTAS = 5u;
         static constexpr uint8_t INVALID_RELATION_ORDINAL = UINT8_MAX;
 
+        struct ConditionalParentPublication final{
+            using PublishFunction = void(*) (void*, uint8_t) noexcept;
+            uint32_t ExpectedRowSequence = UINT32_MAX;
+            uint32_t PublishedRowSequence = UINT32_MAX;
+            uint8_t PublishedOrdinal = UINT8_MAX;
+            bool SequenceMismatch = false;
+            void* Context = nullptr;
+            PublishFunction Publish = nullptr;
+        };
+
         struct DAGRowParticipant
         {
             uint32_t Slot = ADS::APC_INDEX_BOUND_SENTINAL;
@@ -150,6 +160,19 @@ namespace BidirectionalInMemGraph
         void CommitRowTransaction_(
             DAGMutationTransaction& transaction
         ) noexcept;
+
+        bool ValidateConditionalParentPublication_(
+            DAGMutationTransaction& transaction,
+            uint32_t child_slot,
+            ConditionalParentPublication* publication
+        ) noexcept;
+
+        void PrepareConditionalParentPublication_(
+            DAGMutationTransaction& transaction,
+            uint32_t child_slot,
+            uint8_t relation_ordinal,
+            ConditionalParentPublication* publication
+        ) noexcept;
     };
 
 
@@ -206,6 +229,7 @@ namespace BidirectionalInMemGraph
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
+            ConditionalParentPublication* publication = nullptr,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
@@ -215,6 +239,7 @@ namespace BidirectionalInMemGraph
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
+            ConditionalParentPublication* publication = nullptr,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
@@ -226,6 +251,7 @@ namespace BidirectionalInMemGraph
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
+            ConditionalParentPublication* publication = nullptr,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 

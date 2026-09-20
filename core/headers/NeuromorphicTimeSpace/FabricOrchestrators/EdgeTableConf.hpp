@@ -12,6 +12,13 @@ namespace BidirectionalInMemGraph
             LIVE = 2
         };
 
+        enum class StructureOperation : uint8_t
+        {
+            ADD_PARENT = 0,
+            REMOVE_PARENT = 1,
+            REPLACE_PARENT = 2
+        };
+        
         using DirtyRelationMask = uint64_t;
 
         static constexpr uint8_t RELATION_SLOT_BITS = 24u;

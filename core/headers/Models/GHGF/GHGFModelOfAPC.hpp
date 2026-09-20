@@ -11,6 +11,7 @@ namespace BidirectionalInMemGraph
         friend class GHGFNode;
     public:
         using GM = GHGFLayerModel;
+        using ED = EdgeBuilder;
         using FCSpan = std::span<const float>;
         struct GHGFModelConstructionValues
         {
@@ -22,7 +23,7 @@ namespace BidirectionalInMemGraph
     protected:
         GM::GHGFCache GHGFCache_{};
         GM::GHGFStorageProfile Profile_{};
-        bool IsGHGFPlanCurrent_() noexcept;
+        bool IsGHGFModelReady_() noexcept;
         float* GHGFRegion_(uint32_t slot, uint32_t cell_offset) noexcept;
         float* GHGFStateRow_(uint32_t slot, GM::GHGFStateRow row) noexcept;
         float* GHGFErrorRow_(uint32_t slot, GM::GHGFErrorRow row) noexcept;
@@ -50,6 +51,32 @@ namespace BidirectionalInMemGraph
             GM::GHGFNodeRole role
         ) noexcept;
 
+
+    };
+
+    class GHGFStructralLearningModel : public GHGFModel
+    {
+    private:
+        FabricToAPCLinker::SeqLockedOperation ReadGHGFParenExecutionSnapshot_(
+            uint32_t child,
+            FabricSegments edge,
+            GM::GHGFParentExecutionSnapshot& snapshot,
+            uint32_t max_tries
+        ) noexcept;
+
+    public:
+        GM::GHGFConcurrentOperation ReadStructureSnapshotConcurrently(
+            uint32_t child,
+            FabricSegments edge,
+            GM::GHGFStructureSnapshot& snapshot,
+            uint32_t max_tries = DEFAULT_INTERNAL_TRIES__
+        ) noexcept;
+
+        GM::GHGFStructureMutationResult TryApplyGHGFStructureMutation(
+            const GM::GHGFStructureMutation& mutation,
+            uint32_t max_tries = 1u
+        ) noexcept;
+        
     };
 
     class GHGFModelConstructor : public GHGFModel
@@ -96,4 +123,5 @@ namespace BidirectionalInMemGraph
             const GHGFLearningConfig& learning_cong
         ) noexcept;
     };
+
 }

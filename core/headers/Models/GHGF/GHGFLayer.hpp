@@ -21,7 +21,56 @@ namespace BidirectionalInMemGraph
         float MaxTonicLogVolatility = 10.0f;
     };
 
-    class GHGFLayerModel final
+
+    struct StructuralLearningGHGF
+    {        
+        using EB = EdgeBuilder;
+
+        enum class GHGFConcurrentOperation : uint8_t
+        {
+            SUCCESS = 0,
+            RETRY = 1,
+            STALE = 2,
+            REJECTED = 3
+        };
+
+        struct GHGFStructureMutation final
+        {
+            EB::StructureOperation Operation = EB::StructureOperation::ADD_PARENT;
+            uint32_t Child = ADS::APC_INDEX_BOUND_SENTINAL;
+            uint32_t OldParent = ADS::APC_INDEX_BOUND_SENTINAL;
+            uint32_t NewParent = ADS::APC_INDEX_BOUND_SENTINAL;
+            FabricSegments Edge = FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+            float Coupling = 1.0f;
+            uint32_t ExpectedRowSequence = UINT32_MAX;
+        };
+
+        struct GHGFStructureSnapshot final
+        {
+            uint32_t Child = ADS::APC_INDEX_BOUND_SENTINAL;
+            FabricSegments Edge = FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+            uint32_t RowSequence = UINT32_MAX;
+            uint64_t ParentMask = UNSIGNED_ZERO;
+            bool IsValid = false;
+        };
+
+        struct GHGFStructureMutationResult final
+        {
+            GHGFConcurrentOperation Result = GHGFConcurrentOperation::REJECTED;
+            uint32_t PublishedRowSequence = UINT32_MAX;
+            uint8_t PublishedOrdinal = UINT8_MAX;
+        };
+
+        struct GHGFParentExecutionSnapshot final
+        {
+            uint64_t ParentMask = UNSIGNED_ZERO;
+            uint32_t RowSequence = UINT32_MAX;
+            std::array<uint64_t, ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS> ParentHandles{};
+            std::array<float, ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS> Couplings{};
+        };
+    };
+
+    class GHGFLayerModel : public StructuralLearningGHGF
     {
 
     public:
@@ -114,13 +163,6 @@ namespace BidirectionalInMemGraph
             uint32_t Index;
             float Lower;
             float Upper;
-        };
-
-        enum class GHGFPhase : uint8_t
-        {
-            NEEDS_RESET = 0,
-            READY = 1,
-            PREDICTED = 2
         };
 
         static constexpr uint32_t CouplingIndex(
@@ -363,5 +405,6 @@ namespace BidirectionalInMemGraph
             static constexpr uint32_t INVALID_SLOT = ADS::APC_INDEX_BOUND_SENTINAL;
         };
     };
+
     
 }

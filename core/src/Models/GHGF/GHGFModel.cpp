@@ -4,7 +4,7 @@
 namespace BidirectionalInMemGraph
 { 
 
-    bool GHGFModel::IsGHGFPlanCurrent_() noexcept
+    bool GHGFModel::IsGHGFModelReady_() noexcept
     {
         return IsFabricActive() && GHGFCache_.ModelPrepared_;
     }
@@ -258,7 +258,7 @@ namespace BidirectionalInMemGraph
 
     bool GHGFModel::ResetGHGFState() noexcept
     {
-        if (!IsGHGFPlanCurrent_())
+        if (!IsGHGFModelReady_())
         {
             return false;
         }
@@ -304,4 +304,46 @@ namespace BidirectionalInMemGraph
     }
 
 
+    // GHGFLayerModel::GHGFConcurrentOperation GHGFModel::ReadStructureSnapshotConcurrently(
+    //     uint32_t child,
+    //     FabricSegments edge,
+    //     GM::GHGFStructureSnapshot& snapshot,
+    //     uint32_t max_tries
+    // ) noexcept
+    // {
+    //     snapshot = {};
+
+    //     if (
+    //         !IsGHGFModelReady_() ||
+    //         child >= FabCache_->CountOfAPC_ ||
+    //         !CoreOfFabricCoordinator::IsValidEdgeTable(edge) ||
+    //         max_tries == 0u
+    //     )
+    //     {
+    //         return GM::GHGFConcurrentOperation::REJECTED;
+    //     }
+
+    //     GHGFParentExecutionSnapshot local{};
+
+    //     const auto read = ReadGHGFParentExecutionSnapshot_(
+    //         child,
+    //         edge,
+    //         local,
+    //         max_tries
+    //     );
+
+    //     if (read == FabricToAPCLinker::SeqLockedOperation::RETRY)
+    //         return GM::GHGFConcurrentOperation::RETRY;
+
+    //     if (read != FabricToAPCLinker::SeqLockedOperation::FOUND)
+    //         return GM::GHGFConcurrentOperation::REJECTED;
+
+    //     snapshot.Child = child;
+    //     snapshot.Edge = edge;
+    //     snapshot.RowSequence = local.RowSequence;
+    //     snapshot.ParentMask = local.ParentMask;
+    //     snapshot.IsValid = true;
+
+    //     return GM::GHGFConcurrentOperation::SUCCESS;
+    // }
 }
