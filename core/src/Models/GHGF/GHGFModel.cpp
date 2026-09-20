@@ -78,7 +78,8 @@ namespace BidirectionalInMemGraph
     {
         GHGFNode parent, child;
         APCUseScope parent_use, child_use;
-
+        if (IsGHGFModelReady_() && GHGFCache_.StructuralLearningActive_)
+            return false;
         if (
             !GetGHGFNode_(connection.Parent, parent, parent_use) ||
             !GetGHGFNode_(connection.Child, child, child_use) ||
@@ -126,6 +127,8 @@ namespace BidirectionalInMemGraph
     {
         GHGFNode parent, child;
         APCUseScope parent_use, child_use;
+        if (IsGHGFModelReady_() && GHGFCache_.StructuralLearningActive_)
+            return false;
         if (
             !GetGHGFNode_(connection.Parent, parent, parent_use) ||
             !GetGHGFNode_(connection.Child, child, child_use) ||
@@ -303,47 +306,147 @@ namespace BidirectionalInMemGraph
         return false;
     }
 
+    bool GHGFModel::ReadGHGFNodeIdentity_(
+        uint32_t slot,
+        GM::GHGFNodeRole& role,
+        uint32_t& generation
+    ) noexcept
+    {
+        GHGFNode node{};
+        APCUseScope use{};
+        if (!GetGHGFNode_(slot, node, use))
+            return false;
 
-    // GHGFLayerModel::GHGFConcurrentOperation GHGFModel::ReadStructureSnapshotConcurrently(
-    //     uint32_t child,
-    //     FabricSegments edge,
-    //     GM::GHGFStructureSnapshot& snapshot,
-    //     uint32_t max_tries
-    // ) noexcept
-    // {
-    //     snapshot = {};
+        const std::optional<GM::GHGFNodeRole> maybe_role = node.GHGFRole_();
+        if (!maybe_role.has_value())
+            return false;
 
-    //     if (
-    //         !IsGHGFModelReady_() ||
-    //         child >= FabCache_->CountOfAPC_ ||
-    //         !CoreOfFabricCoordinator::IsValidEdgeTable(edge) ||
-    //         max_tries == 0u
-    //     )
-    //     {
-    //         return GM::GHGFConcurrentOperation::REJECTED;
-    //     }
+        role = maybe_role.value();
+        generation = node.APCCache_.CurrentGeneration_;
+        return HandleOfAPCStatic::IsGenerationValid(generation);
+    }
 
-    //     GHGFParentExecutionSnapshot local{};
+    FabricToAPCLinker::SeqLockedOperation GHGFModel::ReadGHGFParentExecutionSnapshot_(
+        uint32_t child,
+        FabricSegments edge,
+        GM::GHGFParentExecutionSnapshot& snapshot,
+        uint32_t max_tries
+    ) noexcept
+    {
+        using Operation = FabricToAPCLinker::SeqLockedOperation;
+        using Domain = EdgeBuilder::EdgeDomain;
 
-    //     const auto read = ReadGHGFParentExecutionSnapshot_(
-    //         child,
-    //         edge,
-    //         local,
-    //         max_tries
-    //     );
+        snapshot = {};
+        if (
+            !IsGHGFModelReady_() ||
+            child >= FabCache_->CountOfAPC_ ||
+            !CoreOfFabricCoordinator::IsValidEdgeTable(edge) ||
+            max_tries == UNSIGNED_ZERO
+        )
+        {
+            return Operation::NONE;
+        }
 
-    //     if (read == FabricToAPCLinker::SeqLockedOperation::RETRY)
-    //         return GM::GHGFConcurrentOperation::RETRY;
+        const std::span<EdgeBuilder::ParentRelation> relations =
+            ParentRelations_(edge, child);
+        CompiledDAGRecord* const compiled = CompiledDAGRow_(child);
+        float* const weights = GHGFWeight_(child);
 
-    //     if (read != FabricToAPCLinker::SeqLockedOperation::FOUND)
-    //         return GM::GHGFConcurrentOperation::REJECTED;
+        if (
+            !compiled || !weights ||
+            relations.size() != FabCache_->MaxDirectParentsPerAxis_
+        )
+        {
+            return Operation::NONE;
+        }
 
-    //     snapshot.Child = child;
-    //     snapshot.Edge = edge;
-    //     snapshot.RowSequence = local.RowSequence;
-    //     snapshot.ParentMask = local.ParentMask;
-    //     snapshot.IsValid = true;
+        uint64_t& stored_mask =
+            edge == FabricSegments::VALUE_PARENT_EDGE_TABLE_H
+                ? compiled->ValueParentMask
+                : compiled->VolatileParentMask;
 
-    //     return GM::GHGFConcurrentOperation::SUCCESS;
-    // }
+        // Construction-time static model: preserve the direct compiled-table path.
+        if (!GHGFCache_.StructuralLearningActive_)
+        {
+            snapshot.ParentMask = stored_mask;
+            for (uint8_t ordinal = 0;
+                ordinal < FabCache_->MaxDirectParentsPerAxis_;
+                ++ordinal)
+            {
+                if ((snapshot.ParentMask & EdgeBuilder::DirtyBit(ordinal)) == 0u)
+                    continue;
+
+                snapshot.ParentHandles[ordinal] = relations[ordinal].ParentHandle;
+                snapshot.Couplings[ordinal] = weights[GM::CouplingIndex(
+                    edge, ordinal, Profile_.MaxDirectParentPerAxis)];
+            }
+            return Operation::FOUND;
+        }
+
+        const size_t control_index = EdgeControlCellIndex_(
+            edge,
+            child,
+            Domain::PARENT_RELATIONS
+        );
+        if (control_index == SIZE_MAX)
+            return Operation::NONE;
+
+        std::atomic_ref<const uint64_t> control(SlabBasePtr_[control_index]);
+        const uint64_t allowed_mask = MaskLowBitsForU64(FabCache_->MaxDirectParentsPerAxis_);
+
+        for (uint32_t attempt = 0; attempt < max_tries; ++attempt)
+        {
+            const uint64_t before_raw = control.load(std::memory_order_acquire);
+            const EdgeBuilder::EdgeData before =
+                EdgeBuilder::UnpackEdgeHeader(before_raw);
+
+            if (!before.IsValid)
+                return Operation::NONE;
+            if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
+                continue;
+            if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
+                return Operation::NONE;
+
+            GM::GHGFParentExecutionSnapshot local{};
+            local.RowSequence = before.SeqLock;
+            local.ParentMask = std::atomic_ref<const uint64_t>(stored_mask).load(
+                std::memory_order_relaxed);
+
+            if ((local.ParentMask & ~allowed_mask) != 0u)
+                return Operation::NONE;
+
+            bool valid = true;
+            for (uint8_t ordinal = 0;
+                ordinal < FabCache_->MaxDirectParentsPerAxis_;
+                ++ordinal)
+            {
+                if ((local.ParentMask & EdgeBuilder::DirtyBit(ordinal)) == 0u)
+                    continue;
+
+                local.ParentHandles[ordinal] =
+                    std::atomic_ref<const uint64_t>(
+                        relations[ordinal].ParentHandle).load(
+                            std::memory_order_relaxed);
+
+                const uint32_t parameter = GM::CouplingIndex(edge, ordinal, Profile_.MaxDirectParentPerAxis);
+                local.Couplings[ordinal] = std::atomic_ref<const float>(weights[parameter]).load(std::memory_order_relaxed);
+
+                const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(local.ParentHandles[ordinal]);
+                valid = valid &&
+                    local.ParentHandles[ordinal] != FABRIC_CELL_SENTINAL &&
+                    parent < child &&
+                    std::isfinite(local.Couplings[ordinal]);
+            }
+
+            if (!valid)
+                return Operation::NONE;
+            if (before_raw != control.load(std::memory_order_acquire))
+                continue;
+
+            snapshot = local;
+            return Operation::FOUND;
+        }
+        return Operation::RETRY;
+    }
+
 }

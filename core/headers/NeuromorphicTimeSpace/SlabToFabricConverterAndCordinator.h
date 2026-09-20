@@ -79,7 +79,8 @@ namespace BidirectionalInMemGraph
         static constexpr uint8_t DAG_MAX_RELATION_DELTAS = 5u;
         static constexpr uint8_t INVALID_RELATION_ORDINAL = UINT8_MAX;
 
-        struct ConditionalParentPublication final{
+        struct ConditionalParentPublication final
+        {
             using PublishFunction = void(*) (void*, uint8_t) noexcept;
             uint32_t ExpectedRowSequence = UINT32_MAX;
             uint32_t PublishedRowSequence = UINT32_MAX;
@@ -180,6 +181,7 @@ namespace BidirectionalInMemGraph
     {
         friend class AdaptivePackedCellContainer;
         friend class FabricToAPCLinker;
+        friend class GHGFStructralLearningModel;
 
     protected:
         static constexpr bool SameHeader_(

@@ -35,6 +35,17 @@ namespace BidirectionalInMemGraph
         uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept;
         std::optional<float> GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
         bool SetGHGFParameter_(uint32_t slot, uint32_t index, float value) noexcept;
+        FabricToAPCLinker::SeqLockedOperation ReadGHGFParentExecutionSnapshot_(
+            uint32_t child,
+            FabricSegments edge,
+            GM::GHGFParentExecutionSnapshot& snapshot,
+            uint32_t max_tries
+        ) noexcept;
+        bool ReadGHGFNodeIdentity_(
+            uint32_t slot,
+            GM::GHGFNodeRole& role,
+            uint32_t& generation
+        ) noexcept;
     public:
         using APCFinilizer::ShutDownFabric;
         using APCFinilizer::IsFabricActive;
@@ -57,29 +68,31 @@ namespace BidirectionalInMemGraph
     class GHGFStructralLearningModel : public GHGFModel
     {
     private:
-        FabricToAPCLinker::SeqLockedOperation ReadGHGFParenExecutionSnapshot_(
-            uint32_t child,
-            FabricSegments edge,
-            GM::GHGFParentExecutionSnapshot& snapshot,
-            uint32_t max_tries
-        ) noexcept;
+        struct CouplingPublicationContext final
+        {
+            GHGFStructralLearningModel* Model = nullptr;
+            uint32_t Child = GM::StorageConst::INVALID_SLOT;
+            FabricSegments Edge = FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
+            float Coupling = GM::StorageConst::ZERO;
+        };
+
+        static void PublishCoupling_(void* context, uint8_t ordinal) noexcept;
 
     public:
         GM::GHGFConcurrentOperation ReadStructureSnapshotConcurrently(
             uint32_t child,
             FabricSegments edge,
             GM::GHGFStructureSnapshot& snapshot,
-            uint32_t max_tries = DEFAULT_INTERNAL_TRIES__
+            uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
         GM::GHGFStructureMutationResult TryApplyGHGFStructureMutation(
             const GM::GHGFStructureMutation& mutation,
-            uint32_t max_tries = 1u
+            uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
-        
     };
 
-    class GHGFModelConstructor : public GHGFModel
+    class GHGFModelConstructor : public GHGFStructralLearningModel
     {
         friend class GHGFNode;
     private:
