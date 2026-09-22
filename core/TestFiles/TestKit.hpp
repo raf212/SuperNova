@@ -3465,8 +3465,17 @@ bool RunMutationComparison(
 
     bool all_ok = true;
 
-    for (const std::size_t writer_count : writer_counts)
+    const std::size_t reported_threads =
+        static_cast<std::size_t>(std::thread::hardware_concurrency());
+    const std::size_t max_writer_count =
+        reported_threads == 0u
+            ? writer_counts.back()
+            : std::min(writer_counts.back(), reported_threads);
+
+    for (const std::size_t configured_writer_count : writer_counts)
     {
+        const std::size_t writer_count =
+            std::min(configured_writer_count, max_writer_count);
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_retry_rate{};
@@ -3580,6 +3589,11 @@ bool RunMutationComparison(
             << std::setprecision(4) << retry_rate
             << "  integrity=" << (row_ok ? "PASS" : "FAIL")
             << '\n';
+
+        if (writer_count == max_writer_count)
+        {
+            break;
+        }
     }
 
     return all_ok;
@@ -3919,11 +3933,30 @@ bool RunReaderComparison(const char* title, const char* description)
     Scenario::BuildSchedule(schedule);
     bool all_ok = true;
 
+    const std::size_t reported_threads =
+        static_cast<std::size_t>(std::thread::hardware_concurrency());
+    const std::size_t max_reader_count =
+        reported_threads == 0u
+            ? ConcurrencyConfig::MAX_READER_THREADS
+            : reported_threads > ConcurrencyConfig::READER_WRITER_COUNT
+                ? std::min(
+                    ConcurrencyConfig::MAX_READER_THREADS,
+                    reported_threads - ConcurrencyConfig::READER_WRITER_COUNT
+                )
+                : 0u;
+
+    if (max_reader_count == 0u)
+    {
+        return false;
+    }
+
     for (
-        const std::size_t reader_count :
+        const std::size_t configured_reader_count :
         ConcurrencyConfig::READER_THREADS
     )
     {
+        const std::size_t reader_count =
+            std::min(configured_reader_count, max_reader_count);
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_retry_rate{};
@@ -4052,6 +4085,11 @@ bool RunReaderComparison(const char* title, const char* description)
             << vector_write_mops << "/" << apc_write_mops
             << "  integrity=" << (row_ok ? "PASS" : "FAIL")
             << '\n';
+
+        if (reader_count == max_reader_count)
+        {
+            break;
+        }
     }
 
     return all_ok;
@@ -6632,3 +6670,4 @@ inline int RunAll()
 }
 
 } // namespace APCDAGTests
+

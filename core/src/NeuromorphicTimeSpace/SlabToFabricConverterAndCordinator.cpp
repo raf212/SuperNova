@@ -71,7 +71,7 @@ namespace BidirectionalInMemGraph
             CheckRecordBookRange_(FabricSegments::MATRIX_VIEW_TABLE, FabCache_->MatrixViewTableBeginIndex_, matrix_end) &&
             CheckRecordBookRange_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H, FabCache_->HorizontalEdgeBeginIdx_, value_edge_end) &&
             CheckRecordBookRange_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, FabCache_->VerticalEdgeBeginIdx_, volatile_edge_end) &&
-            CheckRecordBookRange_(FabricSegments::COMPILED_DAG_TABLE, FabCache_->CompiledDAGTableBeginIdx_, dag_end) &&
+            CheckRecordBookRange_(FabricSegments::EDGE_TOPOLOGY_BITMAP, FabCache_->CompiledDAGTableBeginIdx_, dag_end) &&
             CheckRecordBookRange_(FabricSegments::APC_HANDLE_TABLE, FabCache_->HandleTableBeginIndex_, handle_end) &&
             CheckRecordBookRange_(FabricSegments::SEGMENT_POOL, FabCache_->SegmentPoolBegin_, segment_end);
     }
@@ -320,7 +320,7 @@ namespace BidirectionalInMemGraph
         WriteARecordBookOfTSCEntry_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H, horizontal_edge_begin, horizontal_edge_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, vertical_edge_begin, vertical_edge_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::APC_HANDLE_TABLE, apc_handle_table_begin, apc_handle_table_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::COMPILED_DAG_TABLE, compiled_dag_begin, compiled_dag_end);
+        WriteARecordBookOfTSCEntry_(FabricSegments::EDGE_TOPOLOGY_BITMAP, compiled_dag_begin, compiled_dag_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::DEVICE_PLANNER_TABLE, device_planner_begain, device_planner_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::WORK_QUEUE, work_queue_begin, work_queue_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::MATRIX_VIEW_TABLE, matrix_view_table_begin, matrix_view_table_end);

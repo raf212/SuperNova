@@ -279,7 +279,7 @@ The Fabric owns storage and graph authority. An APC facade is a **runtime view/b
 | `VALUE_PARENT_EDGE_TABLE_H` | H-axis relation rows. |
 | `VOLATILE_PARENT_EDGE_TABLE_V` | V-axis relation rows. |
 | `APC_HANDLE_TABLE` | Generation + active-use + closed control word per APC. |
-| `COMPILED_DAG_TABLE` | Fast parent-occupancy masks for H and V. |
+| `EDGE_TOPOLOGY_BITMAP` | Fast parent-occupancy masks for H and V. |
 | `DEVICE_PLANNER_TABLE` | Reserved in current snapshot; configured record length is zero. |
 | `WORK_QUEUE` | Reserved in current snapshot; configured record width is zero. |
 | `SEGMENT_POOL` | Actual APC slots. |

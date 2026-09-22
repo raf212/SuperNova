@@ -80,7 +80,7 @@ namespace BidirectionalInMemGraph
     bool CompiledDAGTableConstructor::InitializeCompiledDAGTAble_() noexcept
     {
         RecordBookConf::FabricSegmentBounds bounds{};
-        if (!GetRecordMapCarrierRanges_(FabricSegments::COMPILED_DAG_TABLE, bounds))
+        if (!GetRecordMapCarrierRanges_(FabricSegments::EDGE_TOPOLOGY_BITMAP, bounds))
         {
             return false;
         }
