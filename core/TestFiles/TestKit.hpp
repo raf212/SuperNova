@@ -3,16 +3,19 @@
 // SuperNova APC/Fabric paper-quality systems test kit (C++20)
 //
 // The benchmark sections deliberately distinguish:
-//   1) a minimal one-parent vector forest lower bound,
-//   2) a feature-matched fixed-capacity vector DAG with one global mutation mutex
-//      for Test 1's quiescent baseline,
-//   3) a feature-matched row-local-lock vector DAG for Test 2,
-//   4) the same row-local DAG with shared-reader/exclusive-writer locks for Test 3,
-//   5) APC/Fabric with public generation/transaction/read contracts.
+//   1) a compact fixed-capacity bidirectional vector DAG for Test 1,
+//   2) a feature-matched row-local-lock vector DAG for Test 2,
+//   3) the same row-local DAG with shared-reader/exclusive-writer locks for Test 3,
+//   4) APC/Fabric with public generation/transaction/read contracts.
 //
-// Baselines are not claimed to provide APC/Fabric relocation, schema protocols,
-// generation-safe handles, retirement/ABA protection, or concurrent reader semantics.
-// Those properties are tested separately as SuperNova correctness properties.
+// Test 1 is intentionally adversarial to SuperNova: both backends carry exactly one
+// 128 x 8-byte payload region per node, both expose the same bounded bidirectional
+// H/V topology, and the vector baseline stores no redundant child identity or
+// occupancy field when the relation locator already determines that information.
+// APC/Fabric is configured with the minimum aligned APC cell count that can hold
+// the same payload. Baselines are not claimed to provide APC/Fabric relocation,
+// schema protocols, generation-safe handles, retirement/ABA protection, or
+// concurrent reader semantics; those properties are tested separately.
 //
 // Put this file in core/TestFiles and compile a tiny runner:
 //
@@ -658,7 +661,7 @@ private:
 };
 
 // -----------------------------------------------------------------------------
-// Feature-matched fixed-capacity vector DAG baseline.
+// Compact fixed-capacity bidirectional vector DAG baseline for Test 1.
 //
 // This baseline supports the same two relation axes, the same parent<child DAG
 // rule, the same configurable direct-parent capacity, bidirectional traversal,
@@ -685,9 +688,10 @@ class VectorLockedDAG
     static constexpr std::size_t RELATION_COUNT =
         NodeCount * static_cast<std::size_t>(ParentCapacity);
 
+    // Minimal node-side reverse-list anchors. Parent rows live entirely in the
+    // fixed-capacity relation arrays below.
     struct AxisState
     {
-        std::array<std::uint32_t, ParentCapacity> ParentRelations{};
         std::uint32_t FirstChildRelation = NIL;
         std::uint32_t LastChildRelation = NIL;
     };
@@ -699,34 +703,21 @@ class VectorLockedDAG
         std::array<std::uint64_t, PayloadWords> Payload{};
     };
 
+    // Child identity is derived from locator / ParentCapacity.
+    // Parent == NIL is the vacancy bit, so no separate Used field is needed.
     struct Relation
     {
         std::uint32_t Parent = NIL;
-        std::uint32_t Child = NIL;
         std::uint32_t Previous = NIL;
         std::uint32_t Next = NIL;
-        bool Used = false;
     };
 
 public:
-    bool Initialize() noexcept
+    bool Initialize()
     {
-        Nodes_ = {};
-        HRelations_ = {};
-        VRelations_ = {};
-
-        for (Node& node : Nodes_)
-        {
-            node.H.ParentRelations.fill(NIL);
-            node.V.ParentRelations.fill(NIL);
-            node.H.FirstChildRelation = NIL;
-            node.H.LastChildRelation = NIL;
-            node.V.FirstChildRelation = NIL;
-            node.V.LastChildRelation = NIL;
-        }
-
-        for (Relation& relation : HRelations_) relation = Relation{};
-        for (Relation& relation : VRelations_) relation = Relation{};
+        Nodes_.assign(NodeCount, Node{});
+        HRelations_.assign(RELATION_COUNT, Relation{});
+        VRelations_.assign(RELATION_COUNT, Relation{});
         return true;
     }
 
@@ -785,7 +776,6 @@ public:
         }
 
         Relation& relation = Relations_(axis)[locator];
-
         UnlinkFromParent_(locator, axis);
 
         relation.Parent = static_cast<std::uint32_t>(new_parent);
@@ -817,14 +807,10 @@ public:
             return {};
         }
 
-        const std::uint32_t locator =
-            static_cast<std::uint32_t>(
-                child * static_cast<std::size_t>(ParentCapacity) + ordinal
-            );
-
+        const std::uint32_t locator = RelationLocator_(child, ordinal);
         const Relation& relation = Relations_(axis)[locator];
 
-        return relation.Used
+        return relation.Parent != NIL
             ? ReadResult{
                 relation.Parent,
                 locator,
@@ -880,7 +866,7 @@ public:
         }
 
         const Relation& relation = Relations_(axis)[locator];
-        if (!relation.Used || relation.Parent != parent)
+        if (relation.Parent != parent)
         {
             return {};
         }
@@ -901,7 +887,7 @@ public:
         }
 
         const Relation& relation = Relations_(axis)[locator];
-        if (!relation.Used || relation.Parent != parent)
+        if (relation.Parent != parent)
         {
             return {};
         }
@@ -959,16 +945,34 @@ public:
     std::size_t ApproxStorageBytes() const noexcept
     {
         return
-            sizeof(Nodes_) +
-            sizeof(HRelations_) +
-            sizeof(VRelations_);
+            Nodes_.size() * sizeof(Node) +
+            HRelations_.size() * sizeof(Relation) +
+            VRelations_.size() * sizeof(Relation);
     }
 
 private:
-    std::array<Node, NodeCount> Nodes_{};
-    std::array<Relation, RELATION_COUNT> HRelations_{};
-    std::array<Relation, RELATION_COUNT> VRelations_{};
+    std::vector<Node> Nodes_{};
+    std::vector<Relation> HRelations_{};
+    std::vector<Relation> VRelations_{};
     std::mutex GraphMutex_{};
+
+    static constexpr std::uint32_t RelationLocator_(
+        std::size_t child,
+        std::uint8_t ordinal
+    ) noexcept
+    {
+        return static_cast<std::uint32_t>(
+            child * static_cast<std::size_t>(ParentCapacity) + ordinal
+        );
+    }
+
+    static constexpr std::size_t ChildOfLocator_(
+        std::uint32_t locator
+    ) noexcept
+    {
+        return static_cast<std::size_t>(locator) /
+            static_cast<std::size_t>(ParentCapacity);
+    }
 
     AxisState& Axis_(std::size_t node, Axis axis) noexcept
     {
@@ -984,14 +988,14 @@ private:
             : Nodes_[node].V;
     }
 
-    std::array<Relation, RELATION_COUNT>& Relations_(Axis axis) noexcept
+    std::vector<Relation>& Relations_(Axis axis) noexcept
     {
         return axis == Axis::HORIZONTAL
             ? HRelations_
             : VRelations_;
     }
 
-    const std::array<Relation, RELATION_COUNT>& Relations_(Axis axis) const noexcept
+    const std::vector<Relation>& Relations_(Axis axis) const noexcept
     {
         return axis == Axis::HORIZONTAL
             ? HRelations_
@@ -1009,14 +1013,17 @@ private:
         }
 
         const Relation& relation = Relations_(axis)[locator];
-        return relation.Used
-            ? ReadResult{
-                relation.Child,
-                locator,
-                ReadOperation::FOUND,
-                true
-            }
-            : ReadResult{};
+        if (relation.Parent == NIL)
+        {
+            return {};
+        }
+
+        return ReadResult{
+            ChildOfLocator_(locator),
+            locator,
+            ReadOperation::FOUND,
+            true
+        };
     }
 
     std::uint32_t FindParentRelationLocator_(
@@ -1033,17 +1040,10 @@ private:
         for (std::uint8_t ordinal = 0u; ordinal < ParentCapacity; ++ordinal)
         {
             const std::uint32_t locator =
-                static_cast<std::uint32_t>(
-                    child * static_cast<std::size_t>(ParentCapacity) +
-                    ordinal
-                );
+                RelationLocator_(child, ordinal);
 
             const Relation& relation = Relations_(axis)[locator];
-            if (
-                relation.Used &&
-                relation.Parent == parent &&
-                relation.Child == child
-            )
+            if (relation.Parent == parent)
             {
                 return locator;
             }
@@ -1101,11 +1101,8 @@ private:
         std::uint8_t ordinal = ParentCapacity;
         for (std::uint8_t i = 0u; i < ParentCapacity; ++i)
         {
-            const std::uint32_t locator =
-                static_cast<std::uint32_t>(
-                    child * static_cast<std::size_t>(ParentCapacity) + i
-                );
-            if (!Relations_(axis)[locator].Used)
+            const std::uint32_t locator = RelationLocator_(child, i);
+            if (Relations_(axis)[locator].Parent == NIL)
             {
                 ordinal = i;
                 break;
@@ -1117,17 +1114,11 @@ private:
             return false;
         }
 
-        const std::uint32_t locator =
-            static_cast<std::uint32_t>(
-                child * static_cast<std::size_t>(ParentCapacity) + ordinal
-            );
-
+        const std::uint32_t locator = RelationLocator_(child, ordinal);
         Relation& relation = Relations_(axis)[locator];
         AxisState& parent_axis = Axis_(parent, axis);
 
-        relation.Used = true;
         relation.Parent = static_cast<std::uint32_t>(parent);
-        relation.Child = static_cast<std::uint32_t>(child);
         relation.Previous = parent_axis.LastChildRelation;
         relation.Next = NIL;
 
@@ -1140,8 +1131,6 @@ private:
             Relations_(axis)[parent_axis.LastChildRelation].Next = locator;
         }
         parent_axis.LastChildRelation = locator;
-
-        Axis_(child, axis).ParentRelations[ordinal] = locator;
         return true;
     }
 
@@ -1160,13 +1149,6 @@ private:
         }
 
         UnlinkFromParent_(locator, axis);
-
-        const std::uint8_t ordinal =
-            static_cast<std::uint8_t>(
-                locator % static_cast<std::uint32_t>(ParentCapacity)
-            );
-
-        Axis_(child, axis).ParentRelations[ordinal] = NIL;
         Relations_(axis)[locator] = Relation{};
         return true;
     }
@@ -1786,15 +1768,45 @@ public:
     }
 };
 
-template <std::size_t NodeCount, std::size_t PayloadWords, std::uint8_t ParentCapacity>
+template <
+    std::size_t NodeCount,
+    std::size_t PayloadWords,
+    std::uint8_t ParentCapacity,
+    bool SinglePayloadRegion = false
+>
 class APCFabricBackend
 {
 public:
     using SD = SchemaDefinition;
-    static constexpr std::uint32_t SLOT_WORDS = MINIMUM_APC_CELL_COUNT;
+    static_assert(PayloadWords <= UINT32_MAX);
+
     static constexpr std::uint32_t FABRIC_SLOT_COUNT =
         static_cast<std::uint32_t>(NodeCount);
     static constexpr std::uint8_t PARENT_CAPACITY = ParentCapacity;
+
+    static constexpr std::uint32_t MINIMAL_SINGLE_REGION_SLOT_WORDS = []() constexpr
+    {
+        const std::uint32_t payload_words =
+            PayloadWords == 0u ? 1u : static_cast<std::uint32_t>(PayloadWords);
+
+        const std::uint32_t payload_cells =
+            SD::AlignRegionCells(payload_words);
+
+        const std::uint32_t required =
+            SD::AlignRegionCells(
+                SD::AlignRegionCells(ADS::META_CELL_COUNT) +
+                payload_cells
+            );
+
+        return required < MINIMUM_APC_CELL_COUNT
+            ? static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT)
+            : required;
+    }();
+
+    static constexpr std::uint32_t SLOT_WORDS =
+        SinglePayloadRegion
+            ? MINIMAL_SINGLE_REGION_SLOT_WORDS
+            : static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT);
 
     bool Initialize() noexcept
     {
@@ -1803,11 +1815,18 @@ public:
         constexpr std::uint32_t matrix_width =
             PayloadWords == 0u ? 1u : static_cast<std::uint32_t>(PayloadWords);
 
-        const SD::FabricRegionConfig region_config{
+        constexpr std::uint16_t active_region_mask =
             static_cast<std::uint16_t>(
                 ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT) |
-                ADS::RegionBit(MacroColumnOfAPC::TOP_DOWN_SLOT)
-            ),
+                (
+                    SinglePayloadRegion
+                        ? 0u
+                        : ADS::RegionBit(MacroColumnOfAPC::TOP_DOWN_SLOT)
+                )
+            );
+
+        const SD::FabricRegionConfig region_config{
+            active_region_mask,
             0u,
             matrix_width
         };
@@ -1827,8 +1846,9 @@ public:
 
 
 
-        SD::RegionSchemaRecord& ff_schema_prop = schemas[static_cast<std::size_t>(MacroColumnOfAPC::BOTTOM_UP_SLOT)];
-        SD::RegionSchemaRecord& fb_schema = schemas[static_cast<std::size_t>(MacroColumnOfAPC::TOP_DOWN_SLOT)];
+        SD::RegionSchemaRecord& ff_schema_prop =
+            schemas[static_cast<std::size_t>(MacroColumnOfAPC::BOTTOM_UP_SLOT)];
+
         ff_schema_prop.Region = MacroColumnOfAPC::BOTTOM_UP_SLOT;
         ff_schema_prop.Dtype = SD::DataTypeOfMacroColumn::UINT64_T;
         ff_schema_prop.Protocol = SD::SchemaProtocols::PRIVATE_REGION;
@@ -1836,22 +1856,24 @@ public:
         ff_schema_prop.MatrixWidth = matrix_width;
         ff_schema_prop.Flags = SD::SchemaFlags::BATCHED_LAST_DIM;
 
-        fb_schema = ff_schema_prop;
-        fb_schema.Region = MacroColumnOfAPC::TOP_DOWN_SLOT;
-        fb_schema.Protocol = SD::SchemaProtocols::ATOMIC_WORD_ARRAY;
-
-        if (
-            !SD::SealDesiredSchema(
-                ff_schema_prop,
-                0u
-            ) ||
-            !SD::SealDesiredSchema(
-                fb_schema,
-                0u
-            )
-        )
+        if (!SD::SealDesiredSchema(ff_schema_prop, 0u))
         {
             return false;
+        }
+
+        if constexpr (!SinglePayloadRegion)
+        {
+            SD::RegionSchemaRecord& fb_schema =
+                schemas[static_cast<std::size_t>(MacroColumnOfAPC::TOP_DOWN_SLOT)];
+
+            fb_schema = ff_schema_prop;
+            fb_schema.Region = MacroColumnOfAPC::TOP_DOWN_SLOT;
+            fb_schema.Protocol = SD::SchemaProtocols::ATOMIC_WORD_ARRAY;
+
+            if (!SD::SealDesiredSchema(fb_schema, 0u))
+            {
+                return false;
+            }
         }
 
         for (std::size_t i = 0u; i < NodeCount; ++i)
@@ -1876,15 +1898,10 @@ public:
                 auto direct = Nodes_[i].template BuildAViewOverRegion<std::uint64_t>(
                     MacroColumnOfAPC::BOTTOM_UP_SLOT
                 );
-                auto atomic = Nodes_[i].template BuildAViewOverRegion<std::uint64_t>(
-                    MacroColumnOfAPC::TOP_DOWN_SLOT
-                );
 
                 if (
                     !direct.has_value() ||
-                    !atomic.has_value() ||
                     direct->Size() < PayloadWords ||
-                    atomic->Size() < PayloadWords ||
                     !direct->RawMutableSpan().has_value()
                 )
                 {
@@ -1892,7 +1909,23 @@ public:
                 }
 
                 DirectViews_[i] = std::move(direct.value());
-                AtomicViews_[i] = std::move(atomic.value());
+
+                if constexpr (!SinglePayloadRegion)
+                {
+                    auto atomic = Nodes_[i].template BuildAViewOverRegion<std::uint64_t>(
+                        MacroColumnOfAPC::TOP_DOWN_SLOT
+                    );
+
+                    if (
+                        !atomic.has_value() ||
+                        atomic->Size() < PayloadWords
+                    )
+                    {
+                        return false;
+                    }
+
+                    AtomicViews_[i] = std::move(atomic.value());
+                }
             }
         }
         return true;
@@ -2175,14 +2208,33 @@ public:
             {
                 return false;
             }
+
             if (atomic)
             {
-                return AtomicViews_[node].AtomicStore(
-                    word,
-                    value,
-                    std::memory_order_release
-                );
+                if constexpr (SinglePayloadRegion)
+                {
+                    auto span = DirectViews_[node].RawMutableSpan();
+                    if (!span.has_value())
+                    {
+                        return false;
+                    }
+
+                    std::atomic_ref<std::uint64_t>(span.value()[word]).store(
+                        value,
+                        std::memory_order_release
+                    );
+                    return true;
+                }
+                else
+                {
+                    return AtomicViews_[node].AtomicStore(
+                        word,
+                        value,
+                        std::memory_order_release
+                    );
+                }
             }
+
             auto span = DirectViews_[node].RawMutableSpan();
             if (!span.has_value())
             {
@@ -2210,14 +2262,32 @@ public:
             {
                 return false;
             }
+
             if (atomic)
             {
-                value = AtomicViews_[node].AtomicLoad(
-                    word,
-                    std::memory_order_acquire
-                );
-                return true;
+                if constexpr (SinglePayloadRegion)
+                {
+                    auto span = DirectViews_[node].RawMutableSpan();
+                    if (!span.has_value())
+                    {
+                        return false;
+                    }
+
+                    value = std::atomic_ref<std::uint64_t>(span.value()[word]).load(
+                        std::memory_order_acquire
+                    );
+                    return true;
+                }
+                else
+                {
+                    value = AtomicViews_[node].AtomicLoad(
+                        word,
+                        std::memory_order_acquire
+                    );
+                    return true;
+                }
             }
+
             auto span = DirectViews_[node].RawMutableSpan();
             if (!span.has_value())
             {
@@ -2602,132 +2672,181 @@ bool RetryReplace(
 
 namespace Test01_Baseline
 {
-constexpr std::size_t MAIN_V_PARENT = 0u;
-constexpr std::size_t AUX_V_PARENT = 1u;
-constexpr std::size_t CHAIN_BEGIN = 2u;
-constexpr std::size_t CHAIN_LENGTH = 64u;
-constexpr std::size_t CHAIN_END = CHAIN_BEGIN + CHAIN_LENGTH - 1u;
-constexpr std::size_t AUX_ANCHOR = CHAIN_END + 1u;
-constexpr std::size_t NODE_COUNT = AUX_ANCHOR + 1u;
-constexpr std::size_t PAYLOAD_WORDS = 32u;
-constexpr std::uint8_t PARENT_CAPACITY = 4u;
-constexpr std::uint32_t TRAVERSAL_ROUNDS = 4'000u;
-constexpr std::uint32_t PAYLOAD_ROUNDS = 100u;
-constexpr std::uint32_t GRAPH_PAYLOAD_ROUNDS = 1'000u;
-constexpr std::uint32_t MUTATION_ROUNDS = 512u;
-constexpr std::uint32_t MEASURED_RUNS = 9u;
-constexpr std::uint32_t CONSTRUCTION_RUNS = 7u;
+// Test 1 compares only two representations:
+//   A) a compact fixed-capacity bidirectional vector DAG, and
+//   B) SuperNova Fabric configured with one minimal 128 x uint64_t payload region.
+//
+// Four scale/capacity points are run:
+//   N=100,   K=4
+//   N=100,   K=32
+//   N=10000, K=4
+//   N=10000, K=32
+//
+// The topology intentionally fills every legal direct-parent slot once enough
+// lower-numbered nodes exist. H uses a local sliding parent window; V uses a
+// root-band parent set. Both therefore exercise the same number of directed
+// relations but different reverse-child locality.
 
-using LowerBoundBackend =
-    VectorLockedForest<NODE_COUNT, PAYLOAD_WORDS>;
+constexpr std::size_t PAYLOAD_WORDS = 128u;
+constexpr std::size_t PAYLOAD_BYTES =
+    PAYLOAD_WORDS * sizeof(std::uint64_t);
 
-using MatchedBackend =
-    VectorLockedDAG<
-        NODE_COUNT,
-        PAYLOAD_WORDS,
-        PARENT_CAPACITY
-    >;
+constexpr std::uint64_t TARGET_TRAVERSAL_OPERATIONS = 2'000'000u;
+constexpr std::uint64_t TARGET_PAYLOAD_OPERATIONS = 4'000'000u;
+constexpr std::uint64_t TARGET_GRAPH_PAYLOAD_OPERATIONS = 1'500'000u;
+constexpr std::uint32_t MUTATION_ROUNDS = 100'000u;
+constexpr std::uint32_t MEASURED_RUNS = 7u;
+constexpr std::uint32_t CONSTRUCTION_RUNS = 5u;
 
-using APCBackend =
-    APCFabricBackend<
-        NODE_COUNT,
-        PAYLOAD_WORDS,
-        PARENT_CAPACITY
-    >;
+static_assert((MUTATION_ROUNDS & 1u) == 0u);
 
-constexpr std::size_t Reverse6(std::size_t value) noexcept
+template <std::size_t NodeCount, std::uint8_t ParentCapacity>
+constexpr std::size_t ExistingParentCount(
+    std::size_t child
+) noexcept
 {
-    std::size_t result = 0u;
-    for (std::size_t bit = 0u; bit < 6u; ++bit)
-    {
-        result =
-            (result << 1u) |
-            ((value >> bit) & 1u);
-    }
-    return result;
+    const std::size_t capacity =
+        static_cast<std::size_t>(ParentCapacity);
+
+    return child < capacity
+        ? child
+        : capacity;
 }
 
-constexpr std::array<
-    std::size_t,
-    CHAIN_LENGTH
-> MakeVerticalOrder() noexcept
+template <std::size_t NodeCount, std::uint8_t ParentCapacity>
+constexpr std::size_t HorizontalParent(
+    std::size_t child,
+    std::uint8_t ordinal
+) noexcept
 {
-    std::array<
-        std::size_t,
-        CHAIN_LENGTH
-    > order{};
+    return child - 1u - static_cast<std::size_t>(ordinal);
+}
 
-    for (
-        std::size_t i = 0u;
-        i < CHAIN_LENGTH;
-        ++i
+template <std::size_t NodeCount, std::uint8_t ParentCapacity>
+constexpr std::size_t VerticalParent(
+    std::size_t,
+    std::uint8_t ordinal
+) noexcept
+{
+    return static_cast<std::size_t>(ordinal);
+}
+
+template <std::size_t NodeCount, std::uint8_t ParentCapacity>
+constexpr std::uint64_t EdgeCountPerAxis() noexcept
+{
+    constexpr std::uint64_t n =
+        NodeCount > 0u
+            ? static_cast<std::uint64_t>(NodeCount - 1u)
+            : 0u;
+
+    constexpr std::uint64_t k =
+        static_cast<std::uint64_t>(ParentCapacity);
+
+    constexpr std::uint64_t ramp =
+        n < k ? n : k;
+
+    return
+        ramp * (ramp + 1u) / 2u +
+        (n - ramp) * ramp;
+}
+
+template <std::size_t NodeCount, std::uint8_t ParentCapacity>
+constexpr bool ExpectedEdge(
+    std::size_t parent,
+    std::size_t child,
+    Axis axis
+) noexcept
+{
+    if (
+        parent >= child ||
+        child >= NodeCount
     )
     {
-        order[i] =
-            CHAIN_BEGIN +
-            Reverse6(i);
+        return false;
     }
 
-    return order;
+    if (axis == Axis::HORIZONTAL)
+    {
+        return
+            (child - parent) <=
+            static_cast<std::size_t>(ParentCapacity);
+    }
+
+    return
+        parent < static_cast<std::size_t>(ParentCapacity);
 }
 
-constexpr auto VERTICAL_ORDER =
-    MakeVerticalOrder();
+constexpr std::uint32_t RoundsForTarget(
+    std::uint64_t target_operations,
+    std::uint64_t operations_per_round
+) noexcept
+{
+    if (operations_per_round == 0u)
+    {
+        return 1u;
+    }
 
-template <typename Backend>
+    const std::uint64_t rounds =
+        (target_operations + operations_per_round - 1u) /
+        operations_per_round;
+
+    return static_cast<std::uint32_t>(
+        rounds == 0u ? 1u : rounds
+    );
+}
+
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
 bool Build(Backend& backend)
 {
+    static_assert(NodeCount > static_cast<std::size_t>(ParentCapacity) + 1u);
+
     if (!backend.Initialize())
     {
         return false;
     }
 
-    for (
-        std::size_t child =
-            CHAIN_BEGIN + 1u;
-        child <= CHAIN_END;
-        ++child
-    )
+    for (std::size_t child = 1u; child < NodeCount; ++child)
     {
-        if (!backend.AddParent(
-            child - 1u,
-            child,
-            Axis::HORIZONTAL
-        ))
+        const std::size_t parent_count =
+            ExistingParentCount<NodeCount, ParentCapacity>(child);
+
+        for (
+            std::uint8_t ordinal = 0u;
+            ordinal < parent_count;
+            ++ordinal
+        )
         {
-            return false;
+            if (
+                !backend.AddParent(
+                    HorizontalParent<NodeCount, ParentCapacity>(
+                        child,
+                        ordinal
+                    ),
+                    child,
+                    Axis::HORIZONTAL
+                ) ||
+                !backend.AddParent(
+                    VerticalParent<NodeCount, ParentCapacity>(
+                        child,
+                        ordinal
+                    ),
+                    child,
+                    Axis::VERTICAL
+                )
+            )
+            {
+                return false;
+            }
         }
     }
 
-    for (
-        std::size_t child :
-        VERTICAL_ORDER
-    )
-    {
-        if (!backend.AddParent(
-            MAIN_V_PARENT,
-            child,
-            Axis::VERTICAL
-        ))
-        {
-            return false;
-        }
-    }
-
-    if (!backend.AddParent(
-        AUX_V_PARENT,
-        AUX_ANCHOR,
-        Axis::VERTICAL
-    ))
-    {
-        return false;
-    }
-
-    for (
-        std::size_t node = 0u;
-        node < NODE_COUNT;
-        ++node
-    )
+    // Exactly one 128 x 8-byte payload region is initialized in each backend.
+    // The value pattern is identical and no second mirrored payload is created.
+    for (std::size_t node = 0u; node < NodeCount; ++node)
     {
         for (
             std::uint32_t word = 0u;
@@ -2737,26 +2856,16 @@ bool Build(Backend& backend)
         {
             const std::uint64_t value =
                 (
-                    static_cast<std::uint64_t>(
-                        node + 1u
-                    ) << 32u
+                    static_cast<std::uint64_t>(node + 1u) << 32u
                 ) |
                 word;
 
-            if (
-                !backend.StorePayload(
-                    node,
-                    word,
-                    value,
-                    false
-                ) ||
-                !backend.StorePayload(
-                    node,
-                    word,
-                    value,
-                    true
-                )
-            )
+            if (!backend.StorePayload(
+                node,
+                word,
+                value,
+                false
+            ))
             {
                 return false;
             }
@@ -2764,6 +2873,212 @@ bool Build(Backend& backend)
     }
 
     return true;
+}
+
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
+GraphProof ProveScenario(Backend& backend)
+{
+    GraphProof proof{};
+    constexpr std::uint64_t expected_edges =
+        EdgeCountPerAxis<NodeCount, ParentCapacity>();
+
+    std::vector<std::uint32_t> forward_seen(NodeCount, 0u);
+    std::vector<std::uint32_t> backward_seen(NodeCount, 0u);
+
+    for (std::size_t axis_index = 0u; axis_index < 2u; ++axis_index)
+    {
+        const Axis axis =
+            axis_index == 0u
+                ? Axis::HORIZONTAL
+                : Axis::VERTICAL;
+
+        std::uint64_t parent_relation_count = 0u;
+
+        for (std::size_t child = 0u; child < NodeCount; ++child)
+        {
+            const std::size_t parent_count =
+                ExistingParentCount<NodeCount, ParentCapacity>(child);
+
+            for (
+                std::uint8_t ordinal = 0u;
+                ordinal < ParentCapacity;
+                ++ordinal
+            )
+            {
+                const ReadResult read =
+                    backend.FindParent(
+                        child,
+                        axis,
+                        ordinal,
+                        DEFAULT_MAX_TRIES
+                    );
+
+                proof.ReadContracts =
+                    proof.ReadContracts &&
+                    read.ContractValid();
+
+                if (ordinal < parent_count)
+                {
+                    const std::size_t expected_parent =
+                        axis == Axis::HORIZONTAL
+                            ? HorizontalParent<NodeCount, ParentCapacity>(
+                                child,
+                                ordinal
+                            )
+                            : VerticalParent<NodeCount, ParentCapacity>(
+                                child,
+                                ordinal
+                            );
+
+                    if (
+                        !read.IsFound() ||
+                        read.Node != expected_parent
+                    )
+                    {
+                        proof.ParentOrder = false;
+                        proof.NoDuplicates = false;
+                    }
+                    else
+                    {
+                        ++parent_relation_count;
+                    }
+                }
+                else if (!read.IsNone())
+                {
+                    proof.NoDuplicates = false;
+                }
+            }
+        }
+
+        if (parent_relation_count != expected_edges)
+        {
+            proof.NoDuplicates = false;
+        }
+
+        std::uint64_t forward_count = 0u;
+        std::uint64_t backward_count = 0u;
+
+        for (std::size_t parent = 0u; parent < NodeCount; ++parent)
+        {
+            const std::uint32_t stamp =
+                static_cast<std::uint32_t>(
+                    axis_index * NodeCount + parent + 1u
+                );
+
+            ReadResult read =
+                backend.FindFirstChild(
+                    parent,
+                    axis,
+                    DEFAULT_MAX_TRIES
+                );
+
+            proof.ReadContracts =
+                proof.ReadContracts &&
+                read.ContractValid();
+
+            while (read.IsFound())
+            {
+                if (
+                    read.Node >= NodeCount ||
+                    !ExpectedEdge<NodeCount, ParentCapacity>(
+                        parent,
+                        read.Node,
+                        axis
+                    ) ||
+                    forward_seen[read.Node] == stamp
+                )
+                {
+                    proof.ReverseLists = false;
+                    break;
+                }
+
+                forward_seen[read.Node] = stamp;
+                ++forward_count;
+
+                read = backend.FindNextChild(
+                    parent,
+                    axis,
+                    read.Locator,
+                    DEFAULT_MAX_TRIES
+                );
+
+                proof.ReadContracts =
+                    proof.ReadContracts &&
+                    read.ContractValid();
+            }
+
+            if (read.IsRetry())
+            {
+                proof.ReadContracts = false;
+            }
+
+            read = backend.FindLastChild(
+                parent,
+                axis,
+                DEFAULT_MAX_TRIES
+            );
+
+            proof.ReadContracts =
+                proof.ReadContracts &&
+                read.ContractValid();
+
+            while (read.IsFound())
+            {
+                if (
+                    read.Node >= NodeCount ||
+                    !ExpectedEdge<NodeCount, ParentCapacity>(
+                        parent,
+                        read.Node,
+                        axis
+                    ) ||
+                    backward_seen[read.Node] == stamp
+                )
+                {
+                    proof.ReverseLists = false;
+                    break;
+                }
+
+                backward_seen[read.Node] = stamp;
+                ++backward_count;
+
+                read = backend.FindPreviousChild(
+                    parent,
+                    axis,
+                    read.Locator,
+                    DEFAULT_MAX_TRIES
+                );
+
+                proof.ReadContracts =
+                    proof.ReadContracts &&
+                    read.ContractValid();
+            }
+
+            if (read.IsRetry())
+            {
+                proof.ReadContracts = false;
+            }
+        }
+
+        if (
+            forward_count != expected_edges ||
+            backward_count != expected_edges
+        )
+        {
+            proof.ReverseLists = false;
+        }
+    }
+
+    // Every verified edge has parent < child, which is a fixed topological order.
+    proof.CombinedAcyclic =
+        proof.ParentOrder &&
+        proof.NoDuplicates &&
+        proof.ReverseLists;
+
+    return proof;
 }
 
 struct Timing
@@ -2778,336 +3093,213 @@ struct Timing
     {
         return Operations == 0u
             ? 0.0
-            : static_cast<double>(
-                ElapsedNs
-            ) /
-                static_cast<double>(
-                    Operations
-                );
+            : static_cast<double>(ElapsedNs) /
+                static_cast<double>(Operations);
     }
 };
 
-template <typename Backend>
-Timing HorizontalForward(Backend& backend)
-{
-    Timing timing{};
-    const auto begin = Clock::now();
-
-    for (
-        std::uint32_t round = 0u;
-        round < TRAVERSAL_ROUNDS;
-        ++round
-    )
-    {
-        for (
-            std::size_t parent =
-                CHAIN_BEGIN;
-            parent < CHAIN_END;
-            ++parent
-        )
-        {
-            const BenchmarkReadResult read =
-                BenchmarkFindFirstChildCall(
-                    backend,
-                    parent,
-                    Axis::HORIZONTAL
-                );
-
-            timing.Reads.Observe(read);
-
-            if (
-                !read.IsFound() ||
-                (read.HasNodeHint() && read.NodeHint != parent + 1u)
-            )
-            {
-                return {};
-            }
-
-            timing.Checksum +=
-                parent + 2u;
-        }
-    }
-
-    timing.ElapsedNs =
-        std::chrono::duration_cast<
-            std::chrono::nanoseconds
-        >(
-            Clock::now() - begin
-        ).count();
-
-    timing.Operations =
-        static_cast<std::uint64_t>(
-            TRAVERSAL_ROUNDS
-        ) *
-        (CHAIN_LENGTH - 1u);
-
-    timing.Ok = true;
-    return timing;
-}
-
-template <typename Backend>
-Timing HorizontalBackward(Backend& backend)
-{
-    Timing timing{};
-    const auto begin = Clock::now();
-
-    for (
-        std::uint32_t round = 0u;
-        round < TRAVERSAL_ROUNDS;
-        ++round
-    )
-    {
-        for (
-            std::size_t child = CHAIN_END;
-            child > CHAIN_BEGIN;
-            --child
-        )
-        {
-            const BenchmarkReadResult read =
-                BenchmarkFindParentCall(
-                    backend,
-                    child,
-                    Axis::HORIZONTAL,
-                    0u
-                );
-
-            timing.Reads.Observe(read);
-
-            if (
-                !read.IsFound() ||
-                (read.HasNodeHint() && read.NodeHint != child - 1u)
-            )
-            {
-                return {};
-            }
-
-            timing.Checksum +=
-                child;
-        }
-    }
-
-    timing.ElapsedNs =
-        std::chrono::duration_cast<
-            std::chrono::nanoseconds
-        >(
-            Clock::now() - begin
-        ).count();
-
-    timing.Operations =
-        static_cast<std::uint64_t>(
-            TRAVERSAL_ROUNDS
-        ) *
-        (CHAIN_LENGTH - 1u);
-
-    timing.Ok = true;
-    return timing;
-}
-
-template <typename Backend>
-Timing VerticalForward(
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
+Timing ParentScan(
     Backend& backend,
-    bool with_payload
+    Axis axis
 )
 {
     Timing timing{};
 
-    const std::uint32_t rounds =
-        with_payload
-            ? GRAPH_PAYLOAD_ROUNDS
-            : TRAVERSAL_ROUNDS;
+    constexpr std::uint64_t edges =
+        EdgeCountPerAxis<NodeCount, ParentCapacity>();
+
+    constexpr std::uint32_t rounds =
+        RoundsForTarget(
+            TARGET_TRAVERSAL_OPERATIONS,
+            edges
+        );
 
     const auto begin = Clock::now();
 
-    for (
-        std::uint32_t round = 0u;
-        round < rounds;
-        ++round
-    )
+    for (std::uint32_t round = 0u; round < rounds; ++round)
     {
-        BenchmarkReadResult read =
-            BenchmarkFindFirstChildCall(
-                backend,
-                MAIN_V_PARENT,
-                Axis::VERTICAL
-            );
-
-        timing.Reads.Observe(read);
-
-        for (
-            std::size_t i = 0u;
-            i < CHAIN_LENGTH;
-            ++i
-        )
+        for (std::size_t child = 1u; child < NodeCount; ++child)
         {
-            if (
-                !read.IsFound() ||
-                !read.HasNodeHint() ||
-                read.NodeHint !=
-                    VERTICAL_ORDER[i]
+            const std::size_t parent_count =
+                ExistingParentCount<NodeCount, ParentCapacity>(child);
+
+            for (
+                std::uint8_t ordinal = 0u;
+                ordinal < parent_count;
+                ++ordinal
             )
             {
-                return {};
-            }
+                const BenchmarkReadResult read =
+                    BenchmarkFindParentCall(
+                        backend,
+                        child,
+                        axis,
+                        ordinal
+                    );
 
-            if (with_payload)
-            {
-                std::uint64_t value = 0u;
+                timing.Reads.Observe(read);
 
-                if (!backend.LoadPayload(
-                    read.NodeHint,
-                    static_cast<std::uint32_t>(
-                        i % PAYLOAD_WORDS
-                    ),
-                    value,
-                    false
-                ))
+                if (!read.IsFound())
                 {
                     return {};
                 }
 
-                timing.Checksum += value;
-            }
-            else
-            {
+                const std::size_t expected_parent =
+                    axis == Axis::HORIZONTAL
+                        ? HorizontalParent<NodeCount, ParentCapacity>(
+                            child,
+                            ordinal
+                        )
+                        : VerticalParent<NodeCount, ParentCapacity>(
+                            child,
+                            ordinal
+                        );
+
+                if (
+                    read.HasNodeHint() &&
+                    read.NodeHint != expected_parent
+                )
+                {
+                    return {};
+                }
+
                 timing.Checksum +=
-                    VERTICAL_ORDER[i] + 1u;
+                    static_cast<std::uint64_t>(expected_parent + 1u);
             }
-
-            const std::uint32_t cursor =
-                read.Locator;
-
-            read =
-                BenchmarkFindNextChildCall(
-                    backend,
-                    MAIN_V_PARENT,
-                    Axis::VERTICAL,
-                    cursor
-                );
-
-            timing.Reads.Observe(read);
-        }
-
-        if (!read.IsNone())
-        {
-            return {};
         }
     }
 
     timing.ElapsedNs =
-        std::chrono::duration_cast<
-            std::chrono::nanoseconds
-        >(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
             Clock::now() - begin
         ).count();
 
     timing.Operations =
-        static_cast<std::uint64_t>(
-            rounds
-        ) *
-        CHAIN_LENGTH;
+        static_cast<std::uint64_t>(rounds) * edges;
 
     timing.Ok = true;
     return timing;
 }
 
-template <typename Backend>
-Timing VerticalBackward(
-    Backend& backend
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
+Timing ReverseChildScan(
+    Backend& backend,
+    Axis axis
 )
 {
     Timing timing{};
+
+    constexpr std::uint64_t edges =
+        EdgeCountPerAxis<NodeCount, ParentCapacity>();
+
+    constexpr std::uint32_t rounds =
+        RoundsForTarget(
+            TARGET_TRAVERSAL_OPERATIONS,
+            edges
+        );
+
     const auto begin = Clock::now();
 
-    for (
-        std::uint32_t round = 0u;
-        round < TRAVERSAL_ROUNDS;
-        ++round
-    )
+    for (std::uint32_t round = 0u; round < rounds; ++round)
     {
-        BenchmarkReadResult read =
-            BenchmarkFindLastChildCall(
-                backend,
-                MAIN_V_PARENT,
-                Axis::VERTICAL
-            );
-
-        timing.Reads.Observe(read);
-
-        for (
-            std::size_t i = CHAIN_LENGTH;
-            i-- > 0u;
-        )
+        for (std::size_t parent = 0u; parent < NodeCount; ++parent)
         {
-            if (
-                !read.IsFound() ||
-                !read.HasNodeHint() ||
-                read.NodeHint !=
-                    VERTICAL_ORDER[i]
-            )
-            {
-                return {};
-            }
-
-            timing.Checksum +=
-                VERTICAL_ORDER[i] + 1u;
-
-            const std::uint32_t cursor =
-                read.Locator;
-
-            read =
-                BenchmarkFindPreviousChildCall(
+            BenchmarkReadResult read =
+                BenchmarkFindFirstChildCall(
                     backend,
-                    MAIN_V_PARENT,
-                    Axis::VERTICAL,
-                    cursor
+                    parent,
+                    axis
                 );
 
             timing.Reads.Observe(read);
-        }
 
-        if (!read.IsNone())
-        {
-            return {};
+            while (read.IsFound())
+            {
+                if (
+                    !read.HasNodeHint() ||
+                    read.NodeHint >= NodeCount ||
+                    !ExpectedEdge<NodeCount, ParentCapacity>(
+                        parent,
+                        read.NodeHint,
+                        axis
+                    )
+                )
+                {
+                    return {};
+                }
+
+                timing.Checksum +=
+                    static_cast<std::uint64_t>(read.NodeHint + 1u);
+                ++timing.Operations;
+
+                const std::uint32_t locator =
+                    read.Locator;
+
+                read = BenchmarkFindNextChildCall(
+                    backend,
+                    parent,
+                    axis,
+                    locator
+                );
+
+                timing.Reads.Observe(read);
+            }
+
+            if (!read.IsNone())
+            {
+                return {};
+            }
         }
     }
 
     timing.ElapsedNs =
-        std::chrono::duration_cast<
-            std::chrono::nanoseconds
-        >(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
             Clock::now() - begin
         ).count();
 
-    timing.Operations =
-        static_cast<std::uint64_t>(
-            TRAVERSAL_ROUNDS
-        ) *
-        CHAIN_LENGTH;
+    timing.Ok =
+        timing.Operations ==
+        static_cast<std::uint64_t>(rounds) * edges;
 
-    timing.Ok = true;
     return timing;
 }
 
-template <typename Backend>
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
 Timing PayloadRead(
     Backend& backend,
     bool atomic
 )
 {
     Timing timing{};
+
+    constexpr std::uint64_t operations_per_round =
+        static_cast<std::uint64_t>(NodeCount) *
+        static_cast<std::uint64_t>(PAYLOAD_WORDS);
+
+    constexpr std::uint32_t rounds =
+        RoundsForTarget(
+            TARGET_PAYLOAD_OPERATIONS,
+            operations_per_round
+        );
+
     const auto begin = Clock::now();
 
-    for (
-        std::uint32_t round = 0u;
-        round < PAYLOAD_ROUNDS;
-        ++round
-    )
+    for (std::uint32_t round = 0u; round < rounds; ++round)
     {
-        for (
-            std::size_t node = CHAIN_BEGIN;
-            node <= CHAIN_END;
-            ++node
-        )
+        for (std::size_t node = 0u; node < NodeCount; ++node)
         {
             for (
                 std::uint32_t word = 0u;
@@ -3133,41 +3325,149 @@ Timing PayloadRead(
     }
 
     timing.ElapsedNs =
-        std::chrono::duration_cast<
-            std::chrono::nanoseconds
-        >(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
             Clock::now() - begin
         ).count();
 
     timing.Operations =
-        static_cast<std::uint64_t>(
-            PAYLOAD_ROUNDS
-        ) *
-        CHAIN_LENGTH *
-        PAYLOAD_WORDS;
+        static_cast<std::uint64_t>(rounds) *
+        operations_per_round;
 
     timing.Ok = true;
     return timing;
 }
 
-template <typename Backend>
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
+Timing GraphPayloadRead(
+    Backend& backend
+)
+{
+    Timing timing{};
+
+    constexpr std::uint64_t edges =
+        EdgeCountPerAxis<NodeCount, ParentCapacity>();
+
+    constexpr std::uint32_t rounds =
+        RoundsForTarget(
+            TARGET_GRAPH_PAYLOAD_OPERATIONS,
+            edges
+        );
+
+    const auto begin = Clock::now();
+
+    for (std::uint32_t round = 0u; round < rounds; ++round)
+    {
+        for (std::size_t parent = 0u; parent < NodeCount; ++parent)
+        {
+            BenchmarkReadResult read =
+                BenchmarkFindFirstChildCall(
+                    backend,
+                    parent,
+                    Axis::HORIZONTAL
+                );
+
+            timing.Reads.Observe(read);
+
+            while (read.IsFound())
+            {
+                if (
+                    !read.HasNodeHint() ||
+                    read.NodeHint >= NodeCount ||
+                    !ExpectedEdge<NodeCount, ParentCapacity>(
+                        parent,
+                        read.NodeHint,
+                        Axis::HORIZONTAL
+                    )
+                )
+                {
+                    return {};
+                }
+
+                const std::uint32_t word =
+                    static_cast<std::uint32_t>(
+                        (parent + read.NodeHint) %
+                        PAYLOAD_WORDS
+                    );
+
+                std::uint64_t value = 0u;
+                if (!backend.LoadPayload(
+                    read.NodeHint,
+                    word,
+                    value,
+                    false
+                ))
+                {
+                    return {};
+                }
+
+                timing.Checksum += value;
+                ++timing.Operations;
+
+                const std::uint32_t locator =
+                    read.Locator;
+
+                read = BenchmarkFindNextChildCall(
+                    backend,
+                    parent,
+                    Axis::HORIZONTAL,
+                    locator
+                );
+
+                timing.Reads.Observe(read);
+            }
+
+            if (!read.IsNone())
+            {
+                return {};
+            }
+        }
+    }
+
+    timing.ElapsedNs =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Clock::now() - begin
+        ).count();
+
+    timing.Ok =
+        timing.Operations ==
+        static_cast<std::uint64_t>(rounds) * edges;
+
+    return timing;
+}
+
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
 Timing ParentReplacement(
     Backend& backend,
     Axis axis
 )
 {
-    const std::size_t child =
-        CHAIN_END;
+    static_assert(
+        NodeCount >
+        static_cast<std::size_t>(ParentCapacity) + 1u
+    );
+
+    constexpr std::size_t child =
+        NodeCount - 1u;
 
     const std::size_t parent_a =
         axis == Axis::HORIZONTAL
-            ? CHAIN_END - 1u
-            : MAIN_V_PARENT;
+            ? child - 1u
+            : 0u;
 
     const std::size_t parent_b =
         axis == Axis::HORIZONTAL
-            ? CHAIN_END - 2u
-            : AUX_V_PARENT;
+            ? child -
+                static_cast<std::size_t>(ParentCapacity) -
+                1u
+            : static_cast<std::size_t>(ParentCapacity);
 
     Timing timing{};
     std::size_t current = parent_a;
@@ -3189,7 +3489,8 @@ Timing ParentReplacement(
             current,
             next,
             child,
-            axis
+            axis,
+            DEFAULT_MAX_TRIES
         ))
         {
             return {};
@@ -3200,29 +3501,23 @@ Timing ParentReplacement(
     }
 
     timing.ElapsedNs =
-        std::chrono::duration_cast<
-            std::chrono::nanoseconds
-        >(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
             Clock::now() - begin
         ).count();
 
-    timing.Checksum =
-        timing.Operations;
-
-    timing.Ok =
-        current == parent_a;
-
+    timing.Checksum = timing.Operations;
+    timing.Ok = current == parent_a;
     return timing;
 }
 
 enum class Metric : std::uint8_t
 {
-    H_FORWARD,
-    H_BACKWARD,
-    V_FORWARD,
-    V_BACKWARD,
+    H_PARENT_SCAN,
+    V_PARENT_SCAN,
+    H_CHILD_SCAN,
+    V_CHILD_SCAN,
     PAYLOAD_DIRECT,
-    PAYLOAD_ATOMIC,
+    PAYLOAD_ATOMIC_REF,
     GRAPH_PAYLOAD,
     REPLACE_H_PARENT,
     REPLACE_V_PARENT,
@@ -3230,9 +3525,7 @@ enum class Metric : std::uint8_t
 };
 
 constexpr std::size_t METRIC_COUNT =
-    static_cast<std::size_t>(
-        Metric::COUNT
-    );
+    static_cast<std::size_t>(Metric::COUNT);
 
 constexpr const char* MetricName(
     Metric metric
@@ -3240,20 +3533,20 @@ constexpr const char* MetricName(
 {
     switch (metric)
     {
-    case Metric::H_FORWARD:
-        return "H forward sequential";
-    case Metric::H_BACKWARD:
-        return "H parent read";
-    case Metric::V_FORWARD:
-        return "V child cursor scrambled";
-    case Metric::V_BACKWARD:
-        return "V reverse cursor scrambled";
+    case Metric::H_PARENT_SCAN:
+        return "H parent scan";
+    case Metric::V_PARENT_SCAN:
+        return "V parent scan";
+    case Metric::H_CHILD_SCAN:
+        return "H reverse-child scan";
+    case Metric::V_CHILD_SCAN:
+        return "V reverse-child scan";
     case Metric::PAYLOAD_DIRECT:
         return "payload direct read";
-    case Metric::PAYLOAD_ATOMIC:
-        return "payload atomic read";
+    case Metric::PAYLOAD_ATOMIC_REF:
+        return "payload atomic_ref read";
     case Metric::GRAPH_PAYLOAD:
-        return "graph+payload read";
+        return "H child + payload read";
     case Metric::REPLACE_H_PARENT:
         return "H parent replace";
     case Metric::REPLACE_V_PARENT:
@@ -3263,7 +3556,11 @@ constexpr const char* MetricName(
     }
 }
 
-template <typename Backend>
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity,
+    typename Backend
+>
 Timing RunMetric(
     Backend& backend,
     Metric metric
@@ -3271,55 +3568,72 @@ Timing RunMetric(
 {
     switch (metric)
     {
-    case Metric::H_FORWARD:
-        return HorizontalForward(backend);
-    case Metric::H_BACKWARD:
-        return HorizontalBackward(backend);
-    case Metric::V_FORWARD:
-        return VerticalForward(
-            backend,
-            false
-        );
-    case Metric::V_BACKWARD:
-        return VerticalBackward(backend);
-    case Metric::PAYLOAD_DIRECT:
-        return PayloadRead(
-            backend,
-            false
-        );
-    case Metric::PAYLOAD_ATOMIC:
-        return PayloadRead(
-            backend,
-            true
-        );
-    case Metric::GRAPH_PAYLOAD:
-        return VerticalForward(
-            backend,
-            true
-        );
-    case Metric::REPLACE_H_PARENT:
-        return ParentReplacement(
+    case Metric::H_PARENT_SCAN:
+        return ParentScan<NodeCount, ParentCapacity>(
             backend,
             Axis::HORIZONTAL
         );
-    case Metric::REPLACE_V_PARENT:
-        return ParentReplacement(
+
+    case Metric::V_PARENT_SCAN:
+        return ParentScan<NodeCount, ParentCapacity>(
             backend,
             Axis::VERTICAL
         );
+
+    case Metric::H_CHILD_SCAN:
+        return ReverseChildScan<NodeCount, ParentCapacity>(
+            backend,
+            Axis::HORIZONTAL
+        );
+
+    case Metric::V_CHILD_SCAN:
+        return ReverseChildScan<NodeCount, ParentCapacity>(
+            backend,
+            Axis::VERTICAL
+        );
+
+    case Metric::PAYLOAD_DIRECT:
+        return PayloadRead<NodeCount, ParentCapacity>(
+            backend,
+            false
+        );
+
+    case Metric::PAYLOAD_ATOMIC_REF:
+        return PayloadRead<NodeCount, ParentCapacity>(
+            backend,
+            true
+        );
+
+    case Metric::GRAPH_PAYLOAD:
+        return GraphPayloadRead<NodeCount, ParentCapacity>(
+            backend
+        );
+
+    case Metric::REPLACE_H_PARENT:
+        return ParentReplacement<NodeCount, ParentCapacity>(
+            backend,
+            Axis::HORIZONTAL
+        );
+
+    case Metric::REPLACE_V_PARENT:
+        return ParentReplacement<NodeCount, ParentCapacity>(
+            backend,
+            Axis::VERTICAL
+        );
+
     default:
         return {};
     }
 }
 
-template <typename Backend>
-std::optional<double>
-ConstructionMedianUs()
+template <
+    typename Backend,
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity
+>
+std::optional<double> ConstructionMedianUs()
 {
-    std::array<
-        double,
-        CONSTRUCTION_RUNS
-    > samples{};
+    std::array<double, CONSTRUCTION_RUNS> samples{};
 
     for (
         std::uint32_t run = 0u;
@@ -3327,174 +3641,178 @@ ConstructionMedianUs()
         ++run
     )
     {
-        const auto begin =
-            Clock::now();
+        // Test-harness facade/cache object allocation is excluded. The timed
+        // Build() includes the vector DAG backing allocations and Fabric slab
+        // allocation, all topology insertion, and identical payload initialization.
+        auto backend = std::make_unique<Backend>();
 
-        Backend backend{};
+        const auto begin = Clock::now();
 
-        if (!Build(backend))
+        if (!Build<NodeCount, ParentCapacity>(*backend))
         {
             return std::nullopt;
         }
 
         const auto elapsed =
-            std::chrono::duration_cast<
-                std::chrono::nanoseconds
-            >(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
                 Clock::now() - begin
             ).count();
 
         samples[run] =
-            static_cast<double>(
-                elapsed
-            ) /
+            static_cast<double>(elapsed) /
             1000.0;
     }
 
     return Median(samples);
 }
 
-inline Result Run()
+template <
+    std::size_t NodeCount,
+    std::uint8_t ParentCapacity
+>
+bool RunScenario(
+    const char* label
+)
 {
-    Banner(
-        "TEST 1 - QUIESCENT CORE COST / STORAGE FOOTPRINT / BASELINE FAIRNESS"
-    );
+    using VectorBackend =
+        VectorLockedDAG<
+            NodeCount,
+            PAYLOAD_WORDS,
+            ParentCapacity
+        >;
+
+    using APCBackend =
+        APCFabricBackend<
+            NodeCount,
+            PAYLOAD_WORDS,
+            ParentCapacity,
+            true
+        >;
+
+    constexpr std::uint64_t edges =
+        EdgeCountPerAxis<NodeCount, ParentCapacity>();
 
     std::cout
-        << "Workload: identical 67-node H/V graph, 32 payload words/node, "
-        << "K=4 structural capacity.\n"
-        << "Baseline A is a one-parent-per-axis lower bound.\n"
-        << "Baseline B supports the same K-parent H/V DAG rule under one global mutation mutex.\n"
-        << "APC/Fabric additionally provides generations, schema protocols, relocation metadata,\n"
-        << "and sequence-validated public read/mutation contracts.\n"
-        << "Timed APC traversal executes the public Find* operation but excludes the TestKit-only\n"
-        << "returned-facade -> logical-index conversion. Full facade identity is still checked\n"
-        << "by the exhaustive correctness proof before and after timing.\n\n";
+        << "\n--------------------------------------------------------------------------------\n"
+        << label
+        << "\n--------------------------------------------------------------------------------\n"
+        << "  nodes                    : " << NodeCount << '\n'
+        << "  K per relation axis      : "
+        << static_cast<unsigned>(ParentCapacity) << '\n'
+        << "  directed edges / axis    : " << edges << '\n'
+        << "  total H+V directed edges : " << (2u * edges) << '\n'
+        << "  payload / node           : "
+        << PAYLOAD_WORDS << " x 8 B = "
+        << PAYLOAD_BYTES << " bytes\n"
+        << "  SuperNova APC cells/node : "
+        << APCBackend::SLOT_WORDS
+        << " x 8 B = "
+        << (
+            static_cast<std::uint64_t>(APCBackend::SLOT_WORDS) *
+            sizeof(std::uint64_t)
+        )
+        << " bytes\n";
 
-    const std::optional<double>
-        lower_build_us =
-            ConstructionMedianUs<
-                LowerBoundBackend
-            >();
+    const std::optional<double> vector_build_us =
+        ConstructionMedianUs<
+            VectorBackend,
+            NodeCount,
+            ParentCapacity
+        >();
 
-    const std::optional<double>
-        matched_build_us =
-            ConstructionMedianUs<
-                MatchedBackend
-            >();
-
-    const std::optional<double>
-        apc_build_us =
-            ConstructionMedianUs<
-                APCBackend
-            >();
+    const std::optional<double> apc_build_us =
+        ConstructionMedianUs<
+            APCBackend,
+            NodeCount,
+            ParentCapacity
+        >();
 
     if (
-        !lower_build_us.has_value() ||
-        !matched_build_us.has_value() ||
+        !vector_build_us.has_value() ||
         !apc_build_us.has_value()
     )
     {
-        return Result::FAIL;
+        std::cout << "  construction: FAIL\n";
+        return false;
     }
 
-    LowerBoundBackend lower{};
-    MatchedBackend matched{};
-    APCBackend apc{};
+    auto vector_backend =
+        std::make_unique<VectorBackend>();
+
+    auto apc_backend =
+        std::make_unique<APCBackend>();
 
     if (
-        !Build(lower) ||
-        !Build(matched) ||
-        !Build(apc)
+        !Build<NodeCount, ParentCapacity>(*vector_backend) ||
+        !Build<NodeCount, ParentCapacity>(*apc_backend)
     )
     {
-        return Result::FAIL;
+        std::cout << "  build: FAIL\n";
+        return false;
     }
 
-    const GraphProof lower_proof =
-        ProveQuiescentCombinedDAG<
-            NODE_COUNT,
-            PARENT_CAPACITY
-        >(lower);
+    const GraphProof vector_initial =
+        ProveScenario<NodeCount, ParentCapacity>(
+            *vector_backend
+        );
 
-    const GraphProof matched_proof =
-        ProveQuiescentCombinedDAG<
-            NODE_COUNT,
-            PARENT_CAPACITY
-        >(matched);
-
-    const GraphProof apc_initial_proof =
-        ProveQuiescentCombinedDAG<
-            NODE_COUNT,
-            PARENT_CAPACITY
-        >(apc);
+    const GraphProof apc_initial =
+        ProveScenario<NodeCount, ParentCapacity>(
+            *apc_backend
+        );
 
     if (
-        !lower_proof.Passed() ||
-        !matched_proof.Passed() ||
-        !apc_initial_proof.Passed()
+        !vector_initial.Passed() ||
+        !apc_initial.Passed()
     )
     {
-        return Result::FAIL;
+        std::cout << "  initial proof: FAIL\n";
+        return false;
     }
 
-    // Untimed warm-up.
-    for (
-        std::size_t index = 0u;
-        index < METRIC_COUNT;
-        ++index
-    )
+    // Untimed warm-up for every reported metric.
+    for (std::size_t index = 0u; index < METRIC_COUNT; ++index)
     {
         const Metric metric =
             static_cast<Metric>(index);
 
-        const Timing a =
-            RunMetric(lower, metric);
+        const Timing vector_timing =
+            RunMetric<NodeCount, ParentCapacity>(
+                *vector_backend,
+                metric
+            );
 
-        const Timing b =
-            RunMetric(matched, metric);
-
-        const Timing c =
-            RunMetric(apc, metric);
+        const Timing apc_timing =
+            RunMetric<NodeCount, ParentCapacity>(
+                *apc_backend,
+                metric
+            );
 
         if (
-            !a.Ok ||
-            !b.Ok ||
-            !c.Ok ||
-            a.Checksum != b.Checksum ||
-            b.Checksum != c.Checksum
+            !vector_timing.Ok ||
+            !apc_timing.Ok ||
+            vector_timing.Checksum != apc_timing.Checksum
         )
         {
-            return Result::FAIL;
+            std::cout
+                << "  warm-up failed metric: "
+                << MetricName(metric)
+                << '\n';
+            return false;
         }
     }
 
     std::array<
-        std::array<
-            double,
-            MEASURED_RUNS
-        >,
+        std::array<double, MEASURED_RUNS>,
         METRIC_COUNT
-    > lower_samples{};
+    > vector_samples{};
 
     std::array<
-        std::array<
-            double,
-            MEASURED_RUNS
-        >,
-        METRIC_COUNT
-    > matched_samples{};
-
-    std::array<
-        std::array<
-            double,
-            MEASURED_RUNS
-        >,
+        std::array<double, MEASURED_RUNS>,
         METRIC_COUNT
     > apc_samples{};
 
-    ReadCounts lower_reads{};
-    ReadCounts matched_reads{};
+    ReadCounts vector_reads{};
     ReadCounts apc_reads{};
 
     for (
@@ -3503,57 +3821,48 @@ inline Result Run()
         ++run
     )
     {
-        for (
-            std::size_t index = 0u;
-            index < METRIC_COUNT;
-            ++index
-        )
+        for (std::size_t index = 0u; index < METRIC_COUNT; ++index)
         {
             const Metric metric =
                 static_cast<Metric>(index);
 
-            Timing lower_timing{};
-            Timing matched_timing{};
+            Timing vector_timing{};
             Timing apc_timing{};
 
-            // Rotate measurement order to reduce systematic first/last bias.
-            switch (run % 3u)
+            // Alternate backend order on every measured run.
+            if ((run & 1u) == 0u)
             {
-            case 0u:
-                lower_timing =
-                    RunMetric(lower, metric);
-                matched_timing =
-                    RunMetric(matched, metric);
-                apc_timing =
-                    RunMetric(apc, metric);
-                break;
+                vector_timing =
+                    RunMetric<NodeCount, ParentCapacity>(
+                        *vector_backend,
+                        metric
+                    );
 
-            case 1u:
-                matched_timing =
-                    RunMetric(matched, metric);
                 apc_timing =
-                    RunMetric(apc, metric);
-                lower_timing =
-                    RunMetric(lower, metric);
-                break;
+                    RunMetric<NodeCount, ParentCapacity>(
+                        *apc_backend,
+                        metric
+                    );
+            }
+            else
+            {
+                apc_timing =
+                    RunMetric<NodeCount, ParentCapacity>(
+                        *apc_backend,
+                        metric
+                    );
 
-            default:
-                apc_timing =
-                    RunMetric(apc, metric);
-                lower_timing =
-                    RunMetric(lower, metric);
-                matched_timing =
-                    RunMetric(matched, metric);
-                break;
+                vector_timing =
+                    RunMetric<NodeCount, ParentCapacity>(
+                        *vector_backend,
+                        metric
+                    );
             }
 
             if (
-                !lower_timing.Ok ||
-                !matched_timing.Ok ||
+                !vector_timing.Ok ||
                 !apc_timing.Ok ||
-                lower_timing.Checksum !=
-                    matched_timing.Checksum ||
-                matched_timing.Checksum !=
+                vector_timing.Checksum !=
                     apc_timing.Checksum
             )
             {
@@ -3561,153 +3870,125 @@ inline Result Run()
                     << "  failed metric: "
                     << MetricName(metric)
                     << '\n';
-
-                return Result::FAIL;
+                return false;
             }
 
-            lower_samples[index][run] =
-                lower_timing.NsPerOperation();
-
-            matched_samples[index][run] =
-                matched_timing.NsPerOperation();
+            vector_samples[index][run] =
+                vector_timing.NsPerOperation();
 
             apc_samples[index][run] =
                 apc_timing.NsPerOperation();
 
-            lower_reads.Add(
-                lower_timing.Reads
-            );
-
-            matched_reads.Add(
-                matched_timing.Reads
-            );
-
-            apc_reads.Add(
-                apc_timing.Reads
-            );
+            vector_reads.Add(vector_timing.Reads);
+            apc_reads.Add(apc_timing.Reads);
         }
     }
 
-    const GraphProof apc_final_proof =
-        ProveQuiescentCombinedDAG<
-            NODE_COUNT,
-            PARENT_CAPACITY
-        >(apc);
+    const GraphProof vector_final =
+        ProveScenario<NodeCount, ParentCapacity>(
+            *vector_backend
+        );
 
-    const GraphProof matched_final_proof =
-        ProveQuiescentCombinedDAG<
-            NODE_COUNT,
-            PARENT_CAPACITY
-        >(matched);
+    const GraphProof apc_final =
+        ProveScenario<NodeCount, ParentCapacity>(
+            *apc_backend
+        );
+
+    const std::size_t vector_bytes =
+        vector_backend->ApproxStorageBytes();
+
+    const std::size_t apc_bytes =
+        apc_backend->ApproxStorageBytes();
 
     std::cout
-        << "Correctness before/after timing: "
-        << (
-            apc_final_proof.Passed() &&
-            matched_final_proof.Passed()
-                ? "PASS"
-                : "FAIL"
-        )
-        << "\n\n"
-        << "MEDIAN CONSTRUCTION ("
+        << "\n  MEDIAN CONSTRUCTION ("
         << CONSTRUCTION_RUNS
-        << " fresh builds)\n"
-        << "  vector forest lower bound : "
+        << " complete fresh builds)\n"
+        << "    compact bidirectional vector DAG : "
         << std::fixed
         << std::setprecision(2)
-        << lower_build_us.value()
+        << vector_build_us.value()
         << " us\n"
-        << "  vector K-parent DAG/mutex  : "
-        << matched_build_us.value()
-        << " us\n"
-        << "  APC/Fabric                 : "
+        << "    minimal-payload APC/Fabric       : "
         << apc_build_us.value()
-        << " us\n\n"
-        << "ALLOCATED STORAGE FOR TEST BACKING\n"
-        << "  vector forest lower bound : "
-        << lower.ApproxStorageBytes()
-        << " bytes\n"
-        << "  vector K-parent DAG/mutex  : "
-        << matched.ApproxStorageBytes()
-        << " bytes\n"
-        << "  APC/Fabric slab            : "
-        << apc.ApproxStorageBytes()
-        << " bytes\n"
-        << "  note: these are representation/backing bytes, not a heap-profiler total.\n\n"
-        << "MEDIAN COST PER OPERATION ("
+        << " us\n"
+        << "    APC/vector construction ratio    : "
+        << Ratio(
+            apc_build_us.value(),
+            vector_build_us.value()
+        )
+        << "x\n\n"
+        << "  REPRESENTATION / BACKING STORAGE\n"
+        << "    compact vector DAG               : "
+        << vector_bytes
+        << " bytes ("
+        << (
+            static_cast<double>(vector_bytes) /
+            static_cast<double>(NodeCount)
+        )
+        << " B/node)\n"
+        << "    APC/Fabric slab                  : "
+        << apc_bytes
+        << " bytes ("
+        << (
+            static_cast<double>(apc_bytes) /
+            static_cast<double>(NodeCount)
+        )
+        << " B/node)\n"
+        << "    APC/vector storage ratio         : "
+        << Ratio(
+            static_cast<double>(apc_bytes),
+            static_cast<double>(vector_bytes)
+        )
+        << "x\n"
+        << "    note: allocator bookkeeping and TestKit facade/cache objects are excluded;\n"
+        << "          the vector number is its node+relation backing and the APC number is\n"
+        << "          the exact Fabric slab byte count.\n\n"
+        << "  MEDIAN COST PER LOGICAL OPERATION ("
         << MEASURED_RUNS
         << " measured runs after warm-up)\n";
 
     std::cout
         << std::left
-        << std::setw(28) << "metric"
+        << std::setw(29) << "metric"
         << std::right
-        << std::setw(13) << "forest-LB"
-        << std::setw(13) << "vector-DAG"
-        << std::setw(13) << "APC"
-        << std::setw(13) << "APC/DAG"
+        << std::setw(14) << "vector-DAG"
+        << std::setw(14) << "APC"
+        << std::setw(14) << "APC/vector"
         << '\n';
 
-    for (
-        std::size_t index = 0u;
-        index < METRIC_COUNT;
-        ++index
-    )
+    for (std::size_t index = 0u; index < METRIC_COUNT; ++index)
     {
-        const double lower_ns =
-            Median(
-                lower_samples[index]
-            );
-
-        const double matched_ns =
-            Median(
-                matched_samples[index]
-            );
+        const double vector_ns =
+            Median(vector_samples[index]);
 
         const double apc_ns =
-            Median(
-                apc_samples[index]
-            );
+            Median(apc_samples[index]);
 
         std::cout
             << std::left
-            << std::setw(28)
-            << MetricName(
-                static_cast<Metric>(
-                    index
-                )
-            )
+            << std::setw(29)
+            << MetricName(static_cast<Metric>(index))
             << std::right
-            << std::setw(10)
+            << std::setw(11)
             << std::fixed
             << std::setprecision(2)
-            << lower_ns
+            << vector_ns
             << " ns"
-            << std::setw(10)
-            << matched_ns
-            << " ns"
-            << std::setw(10)
+            << std::setw(11)
             << apc_ns
             << " ns"
-            << std::setw(10)
-            << Ratio(
-                apc_ns,
-                matched_ns
-            )
+            << std::setw(11)
+            << Ratio(apc_ns, vector_ns)
             << "x\n";
     }
 
     std::cout
-        << "\nPUBLIC READ OUTCOMES\n";
+        << "\n  TIMED READ OUTCOMES\n";
 
     PrintReadCounts(
-        "vector forest lower bound",
-        lower_reads
-    );
-
-    PrintReadCounts(
-        "vector K-parent DAG",
-        matched_reads
+        "compact bidirectional vector DAG",
+        vector_reads
     );
 
     PrintReadCounts(
@@ -3716,13 +3997,64 @@ inline Result Run()
     );
 
     const bool ok =
-        lower_proof.Passed() &&
-        matched_final_proof.Passed() &&
-        apc_final_proof.Passed() &&
-        lower_reads.BadContract == 0u &&
-        matched_reads.BadContract == 0u &&
+        vector_final.Passed() &&
+        apc_final.Passed() &&
+        vector_reads.BadContract == 0u &&
         apc_reads.BadContract == 0u &&
         apc_reads.Retry == 0u;
+
+    std::cout
+        << "\n  scenario result: "
+        << (ok ? "PASS" : "FAIL")
+        << '\n';
+
+    return ok;
+}
+
+inline Result Run()
+{
+    Banner(
+        "TEST 1 - SCALED FAIR BIDIRECTIONAL DAG / 1 KiB PAYLOAD COMPARISON"
+    );
+
+    std::cout
+        << "Fairness contract:\n"
+        << "  * exactly one 128 x uint64_t (1024-byte) data region per node in both backends;\n"
+        << "  * identical H/V directed edges and identical K capacity in both backends;\n"
+        << "  * vector DAG keeps only parent + prev/next relation fields and two reverse-list\n"
+        << "    anchors per node; child identity comes from the fixed relation locator;\n"
+        << "  * SuperNova uses one PRIVATE_REGION and the minimum aligned APC size that can\n"
+        << "    contain its 8-cell header plus the 128-cell payload (136 cells = 1088 bytes);\n"
+        << "  * payload atomic_ref timing uses the SAME single payload region in each backend;\n"
+        << "    it is a raw same-storage comparison, not a claim about ATOMIC_WORD_ARRAY protocol;\n"
+        << "  * quiescent relation timing still executes SuperNova's public Find*/ReplaceParent\n"
+        << "    contracts; correctness resolves full returned APC identity outside timed adapters.\n";
+
+    const bool n100_k4 =
+        RunScenario<100u, 4u>(
+            "CASE 1/4 - N=100, K=4"
+        );
+
+    const bool n100_k32 =
+        RunScenario<100u, 32u>(
+            "CASE 2/4 - N=100, K=32"
+        );
+
+    const bool n10000_k4 =
+        RunScenario<10'000u, 4u>(
+            "CASE 3/4 - N=10000, K=4"
+        );
+
+    const bool n10000_k32 =
+        RunScenario<10'000u, 32u>(
+            "CASE 4/4 - N=10000, K=32"
+        );
+
+    const bool ok =
+        n100_k4 &&
+        n100_k32 &&
+        n10000_k4 &&
+        n10000_k32;
 
     std::cout
         << "\nTEST 1 OVERALL: "
@@ -7241,7 +7573,7 @@ inline int RunAll()
     PrintBenchmarkEnvironment();
 
     const std::array<std::pair<const char*, Result>, 8u> results{{
-        {"Test 1 - adapter-free quiescent benchmark", Test01_Baseline::Run()},
+        {"Test 1 - scaled fair bidirectional DAG benchmark", Test01_Baseline::Run()},
         {"Test 2 - hotspot + distributed mutation", Test02_Contention::Run()},
         {"Test 3 - hotspot + distributed readers", Test03_ReaderWriter::Run()},
         {"Test 4 - public mutation API", Test04_PublicMutationAPI::Run()},
@@ -7267,6 +7599,7 @@ inline int RunAll()
 }
 
 } // namespace APCDAGTests
+
 
 
 

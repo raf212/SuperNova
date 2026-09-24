@@ -211,5 +211,4 @@ namespace BidirectionalInMemGraph
         ReleseFabricBindingOnly_();
         return true;
     }
-
 }
