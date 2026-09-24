@@ -4,8 +4,11 @@
 //
 // The benchmark sections deliberately distinguish:
 //   1) a minimal one-parent vector forest lower bound,
-//   2) a feature-matched fixed-capacity vector DAG with one global mutation mutex,
-//   3) APC/Fabric with public generation/transaction/read contracts.
+//   2) a feature-matched fixed-capacity vector DAG with one global mutation mutex
+//      for Test 1's quiescent baseline,
+//   3) a feature-matched row-local-lock vector DAG for Test 2,
+//   4) the same row-local DAG with shared-reader/exclusive-writer locks for Test 3,
+//   5) APC/Fabric with public generation/transaction/read contracts.
 //
 // Baselines are not claimed to provide APC/Fabric relocation, schema protocols,
 // generation-safe handles, retirement/ABA protection, or concurrent reader semantics.
@@ -43,6 +46,7 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <shared_mutex>
 #include <optional>
 #include <span>
 #include <thread>
@@ -97,8 +101,8 @@ constexpr std::size_t DISTRIBUTED_V_PARENT_OFFSET =
 constexpr std::size_t HOTSPOT_MUTATION_NODE_COUNT = 40u;
 constexpr std::size_t HOTSPOT_MUTATION_PARENT_COUNT = 4u;
 constexpr std::size_t HOTSPOT_MUTATION_FIRST_CHILD = 8u;
-constexpr std::size_t HOTSPOT_MUTATION_MAX_WRITERS = 8u;
-constexpr std::size_t HOTSPOT_MUTATION_SWEEP_COUNT = 4u;
+constexpr std::size_t HOTSPOT_MUTATION_MAX_WRITERS = 16u;
+constexpr std::size_t HOTSPOT_MUTATION_SWEEP_COUNT = HOTSPOT_MUTATION_MAX_WRITERS;
 constexpr std::size_t HOTSPOT_READER_NODE_COUNT = 5u;
 constexpr std::size_t HOTSPOT_READER_PARENT_COUNT = 4u;
 constexpr std::size_t HOTSPOT_READER_CHILD = 4u;
@@ -127,7 +131,8 @@ constexpr std::array<std::size_t, MAX_MUTATOR_THREADS> MUTATOR_THREADS{
 
 constexpr std::array<std::size_t, HOTSPOT_MUTATION_SWEEP_COUNT>
     HOTSPOT_MUTATOR_THREADS{
-    1u, 2u, 4u, 8u
+    1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u,
+    9u, 10u, 11u, 12u, 13u, 14u, 15u, 16u
 };
 
 constexpr std::array<std::size_t, MAX_READER_THREADS> READER_THREADS{
@@ -1166,6 +1171,580 @@ private:
         return true;
     }
 };
+
+// -----------------------------------------------------------------------------
+// Feature-matched row-local-lock vector DAG baseline.
+//
+// The default instantiation uses one std::mutex per node/relation-axis row and
+// is the mutation baseline for Test 2. Test 3 instantiates the same representation
+// with std::shared_mutex and SharedReaders=true: stable readers acquire shared
+// ownership of the queried child row, while mutations acquire exclusive ownership
+// of every participating row. Thus reader/read concurrency is not artificially
+// serialized, while reader/write and conflicting writer/write access remain
+// synchronized by the baseline. APC/Fabric retains its generation/use-scope and
+// sequence-validated optimistic transaction semantics.
+// -----------------------------------------------------------------------------
+
+template <
+    std::size_t NodeCount,
+    std::size_t PayloadWords,
+    std::uint8_t ParentCapacity,
+    typename RowMutex = std::mutex,
+    bool SharedReaders = false
+>
+class VectorRowLockedDAG
+{
+    static_assert(NodeCount > 0u);
+    static_assert(ParentCapacity > 0u);
+    static_assert(
+        !SharedReaders || std::is_same_v<RowMutex, std::shared_mutex>,
+        "SharedReaders requires std::shared_mutex row synchronization"
+    );
+
+    static constexpr std::uint32_t NIL = UINT32_MAX;
+    static constexpr std::size_t RELATION_COUNT =
+        NodeCount * static_cast<std::size_t>(ParentCapacity);
+
+    struct AxisState
+    {
+        std::array<std::uint32_t, ParentCapacity> ParentRelations{};
+        std::uint32_t FirstChildRelation = NIL;
+        std::uint32_t LastChildRelation = NIL;
+    };
+
+    struct Node
+    {
+        AxisState H{};
+        AxisState V{};
+        std::array<std::uint64_t, PayloadWords> Payload{};
+    };
+
+    struct Relation
+    {
+        std::uint32_t Parent = NIL;
+        std::uint32_t Child = NIL;
+        std::uint32_t Previous = NIL;
+        std::uint32_t Next = NIL;
+        bool Used = false;
+    };
+
+public:
+    bool Initialize() noexcept
+    {
+        Nodes_ = {};
+        HRelations_ = {};
+        VRelations_ = {};
+
+        for (Node& node : Nodes_)
+        {
+            node.H.ParentRelations.fill(NIL);
+            node.V.ParentRelations.fill(NIL);
+            node.H.FirstChildRelation = NIL;
+            node.H.LastChildRelation = NIL;
+            node.V.FirstChildRelation = NIL;
+            node.V.LastChildRelation = NIL;
+        }
+
+        for (Relation& relation : HRelations_) relation = Relation{};
+        for (Relation& relation : VRelations_) relation = Relation{};
+        return true;
+    }
+
+    bool AddParent(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t = DEFAULT_MAX_TRIES
+    ) noexcept
+    {
+        if (
+            parent >= NodeCount ||
+            child >= NodeCount ||
+            parent >= child
+        )
+        {
+            return false;
+        }
+
+        std::scoped_lock lock(
+            RowMutex_(parent, axis),
+            RowMutex_(child, axis)
+        );
+        return AddUnlocked_(parent, child, axis);
+    }
+
+    bool RemoveParent(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t = DEFAULT_MAX_TRIES
+    ) noexcept
+    {
+        if (
+            parent >= NodeCount ||
+            child >= NodeCount ||
+            parent >= child
+        )
+        {
+            return false;
+        }
+
+        std::scoped_lock lock(
+            RowMutex_(parent, axis),
+            RowMutex_(child, axis)
+        );
+        return RemoveUnlocked_(parent, child, axis);
+    }
+
+    bool ReplaceParent(
+        std::size_t old_parent,
+        std::size_t new_parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t = DEFAULT_MAX_TRIES
+    ) noexcept
+    {
+        if (
+            old_parent >= NodeCount ||
+            new_parent >= NodeCount ||
+            child >= NodeCount ||
+            old_parent == new_parent ||
+            old_parent >= child ||
+            new_parent >= child
+        )
+        {
+            return false;
+        }
+
+        // One relation-axis row mutex protects all metadata logically owned by
+        // that row. ReplaceParent touches the child's parent row plus the
+        // reverse-child rows of both the old and the new parent.
+        std::scoped_lock lock(
+            RowMutex_(old_parent, axis),
+            RowMutex_(new_parent, axis),
+            RowMutex_(child, axis)
+        );
+
+        const std::uint32_t locator =
+            FindParentRelationLocator_(child, old_parent, axis);
+
+        if (
+            locator == NIL ||
+            FindParentRelationLocator_(child, new_parent, axis) != NIL
+        )
+        {
+            return false;
+        }
+
+        Relation& relation = Relations_(axis)[locator];
+
+        UnlinkFromParent_(locator, axis);
+
+        relation.Parent = static_cast<std::uint32_t>(new_parent);
+        relation.Previous = Axis_(new_parent, axis).LastChildRelation;
+        relation.Next = NIL;
+
+        AxisState& new_parent_axis = Axis_(new_parent, axis);
+        if (new_parent_axis.LastChildRelation == NIL)
+        {
+            new_parent_axis.FirstChildRelation = locator;
+        }
+        else
+        {
+            Relations_(axis)[new_parent_axis.LastChildRelation].Next = locator;
+        }
+        new_parent_axis.LastChildRelation = locator;
+        return true;
+    }
+
+    ReadResult FindParent(
+        std::size_t child,
+        Axis axis,
+        std::uint8_t ordinal,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        if (child >= NodeCount || ordinal >= ParentCapacity)
+        {
+            return {};
+        }
+
+        const std::uint32_t locator =
+            static_cast<std::uint32_t>(
+                child * static_cast<std::size_t>(ParentCapacity) + ordinal
+            );
+
+        const Relation& relation = Relations_(axis)[locator];
+
+        return relation.Used
+            ? ReadResult{
+                relation.Parent,
+                locator,
+                ReadOperation::FOUND,
+                true
+            }
+            : ReadResult{};
+    }
+
+    ReadResult StableFindParent(
+        std::size_t child,
+        Axis axis,
+        std::uint8_t ordinal,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        if (child >= NodeCount || ordinal >= ParentCapacity)
+        {
+            return {};
+        }
+
+        if constexpr (SharedReaders)
+        {
+            std::shared_lock<RowMutex> lock(RowMutex_(child, axis));
+            return FindParent(child, axis, ordinal, 1u);
+        }
+        else
+        {
+            std::lock_guard<RowMutex> lock(RowMutex_(child, axis));
+            return FindParent(child, axis, ordinal, 1u);
+        }
+    }
+
+    ReadResult FindFirstChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        return parent < NodeCount
+            ? ChildResult_(Axis_(parent, axis).FirstChildRelation, axis)
+            : ReadResult{};
+    }
+
+    ReadResult FindLastChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        return parent < NodeCount
+            ? ChildResult_(Axis_(parent, axis).LastChildRelation, axis)
+            : ReadResult{};
+    }
+
+    ReadResult FindNextChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t locator,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        if (parent >= NodeCount || locator >= RELATION_COUNT)
+        {
+            return {};
+        }
+
+        const Relation& relation = Relations_(axis)[locator];
+        if (!relation.Used || relation.Parent != parent)
+        {
+            return {};
+        }
+
+        return ChildResult_(relation.Next, axis);
+    }
+
+    ReadResult FindPreviousChild(
+        std::size_t parent,
+        Axis axis,
+        std::uint32_t locator,
+        std::uint32_t = 1u
+    ) noexcept
+    {
+        if (parent >= NodeCount || locator >= RELATION_COUNT)
+        {
+            return {};
+        }
+
+        const Relation& relation = Relations_(axis)[locator];
+        if (!relation.Used || relation.Parent != parent)
+        {
+            return {};
+        }
+
+        return ChildResult_(relation.Previous, axis);
+    }
+
+    bool StorePayload(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t value,
+        bool atomic
+    ) noexcept
+    {
+        if (node >= NodeCount || word >= PayloadWords)
+        {
+            return false;
+        }
+
+        if (atomic)
+        {
+            std::atomic_ref<std::uint64_t>(Nodes_[node].Payload[word]).store(
+                value,
+                std::memory_order_release
+            );
+        }
+        else
+        {
+            Nodes_[node].Payload[word] = value;
+        }
+        return true;
+    }
+
+    bool LoadPayload(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t& value,
+        bool atomic
+    ) noexcept
+    {
+        if (node >= NodeCount || word >= PayloadWords)
+        {
+            return false;
+        }
+
+        value = atomic
+            ? std::atomic_ref<std::uint64_t>(Nodes_[node].Payload[word]).load(
+                std::memory_order_acquire
+            )
+            : Nodes_[node].Payload[word];
+
+        return true;
+    }
+
+    std::size_t ApproxStorageBytes() const noexcept
+    {
+        return
+            sizeof(Nodes_) +
+            sizeof(HRelations_) +
+            sizeof(VRelations_);
+    }
+
+private:
+    std::array<Node, NodeCount> Nodes_{};
+    std::array<Relation, RELATION_COUNT> HRelations_{};
+    std::array<Relation, RELATION_COUNT> VRelations_{};
+    std::array<RowMutex, NodeCount> HRowMutexes_{};
+    std::array<RowMutex, NodeCount> VRowMutexes_{};
+
+    RowMutex& RowMutex_(std::size_t node, Axis axis) noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? HRowMutexes_[node]
+            : VRowMutexes_[node];
+    }
+
+    AxisState& Axis_(std::size_t node, Axis axis) noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? Nodes_[node].H
+            : Nodes_[node].V;
+    }
+
+    const AxisState& Axis_(std::size_t node, Axis axis) const noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? Nodes_[node].H
+            : Nodes_[node].V;
+    }
+
+    std::array<Relation, RELATION_COUNT>& Relations_(Axis axis) noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? HRelations_
+            : VRelations_;
+    }
+
+    const std::array<Relation, RELATION_COUNT>& Relations_(Axis axis) const noexcept
+    {
+        return axis == Axis::HORIZONTAL
+            ? HRelations_
+            : VRelations_;
+    }
+
+    ReadResult ChildResult_(
+        std::uint32_t locator,
+        Axis axis
+    ) const noexcept
+    {
+        if (locator == NIL || locator >= RELATION_COUNT)
+        {
+            return {};
+        }
+
+        const Relation& relation = Relations_(axis)[locator];
+        return relation.Used
+            ? ReadResult{
+                relation.Child,
+                locator,
+                ReadOperation::FOUND,
+                true
+            }
+            : ReadResult{};
+    }
+
+    std::uint32_t FindParentRelationLocator_(
+        std::size_t child,
+        std::size_t parent,
+        Axis axis
+    ) const noexcept
+    {
+        if (child >= NodeCount || parent >= NodeCount)
+        {
+            return NIL;
+        }
+
+        for (std::uint8_t ordinal = 0u; ordinal < ParentCapacity; ++ordinal)
+        {
+            const std::uint32_t locator =
+                static_cast<std::uint32_t>(
+                    child * static_cast<std::size_t>(ParentCapacity) +
+                    ordinal
+                );
+
+            const Relation& relation = Relations_(axis)[locator];
+            if (
+                relation.Used &&
+                relation.Parent == parent &&
+                relation.Child == child
+            )
+            {
+                return locator;
+            }
+        }
+
+        return NIL;
+    }
+
+    void UnlinkFromParent_(
+        std::uint32_t locator,
+        Axis axis
+    ) noexcept
+    {
+        Relation& relation = Relations_(axis)[locator];
+        AxisState& parent_axis = Axis_(relation.Parent, axis);
+
+        if (relation.Previous == NIL)
+        {
+            parent_axis.FirstChildRelation = relation.Next;
+        }
+        else
+        {
+            Relations_(axis)[relation.Previous].Next = relation.Next;
+        }
+
+        if (relation.Next == NIL)
+        {
+            parent_axis.LastChildRelation = relation.Previous;
+        }
+        else
+        {
+            Relations_(axis)[relation.Next].Previous = relation.Previous;
+        }
+
+        relation.Previous = NIL;
+        relation.Next = NIL;
+    }
+
+    bool AddUnlocked_(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis
+    ) noexcept
+    {
+        if (
+            parent >= NodeCount ||
+            child >= NodeCount ||
+            parent >= child ||
+            FindParentRelationLocator_(child, parent, axis) != NIL
+        )
+        {
+            return false;
+        }
+
+        std::uint8_t ordinal = ParentCapacity;
+        for (std::uint8_t i = 0u; i < ParentCapacity; ++i)
+        {
+            const std::uint32_t locator =
+                static_cast<std::uint32_t>(
+                    child * static_cast<std::size_t>(ParentCapacity) + i
+                );
+            if (!Relations_(axis)[locator].Used)
+            {
+                ordinal = i;
+                break;
+            }
+        }
+
+        if (ordinal == ParentCapacity)
+        {
+            return false;
+        }
+
+        const std::uint32_t locator =
+            static_cast<std::uint32_t>(
+                child * static_cast<std::size_t>(ParentCapacity) + ordinal
+            );
+
+        Relation& relation = Relations_(axis)[locator];
+        AxisState& parent_axis = Axis_(parent, axis);
+
+        relation.Used = true;
+        relation.Parent = static_cast<std::uint32_t>(parent);
+        relation.Child = static_cast<std::uint32_t>(child);
+        relation.Previous = parent_axis.LastChildRelation;
+        relation.Next = NIL;
+
+        if (parent_axis.LastChildRelation == NIL)
+        {
+            parent_axis.FirstChildRelation = locator;
+        }
+        else
+        {
+            Relations_(axis)[parent_axis.LastChildRelation].Next = locator;
+        }
+        parent_axis.LastChildRelation = locator;
+
+        Axis_(child, axis).ParentRelations[ordinal] = locator;
+        return true;
+    }
+
+    bool RemoveUnlocked_(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis
+    ) noexcept
+    {
+        const std::uint32_t locator =
+            FindParentRelationLocator_(child, parent, axis);
+
+        if (locator == NIL)
+        {
+            return false;
+        }
+
+        UnlinkFromParent_(locator, axis);
+
+        const std::uint8_t ordinal =
+            static_cast<std::uint8_t>(
+                locator % static_cast<std::uint32_t>(ParentCapacity)
+            );
+
+        Axis_(child, axis).ParentRelations[ordinal] = NIL;
+        Relations_(axis)[locator] = Relation{};
+        return true;
+    }
+};
+
 
 // -----------------------------------------------------------------------------
 // Public APC/Fabric adapter for the completed DAG API.
@@ -3159,8 +3738,8 @@ inline Result Run()
 // -----------------------------------------------------------------------------
 // Shared concurrency benchmark core.
 //
-// Tests 2A, 2B, 3A and 3B use this one core for both the global-mutex baseline
-// and APC/Fabric. Scenarios supply only topology and deterministic schedules.
+// Tests 2A, 2B, 3A and 3B use this one core for both the row-local-lock
+// baseline and APC/Fabric. Scenarios supply only topology and deterministic schedules.
 // Thread creation, barriers, retry accounting, timing, medians and proof logic
 // therefore remain identical across the compared backends.
 // -----------------------------------------------------------------------------
@@ -3444,7 +4023,7 @@ bool RunMutationComparison(
 )
 {
     using MatchedBackend =
-        VectorLockedDAG<
+        VectorRowLockedDAG<
             Scenario::NODE_COUNT,
             ConcurrencyConfig::BENCHMARK_PAYLOAD_WORDS,
             Scenario::PARENT_CAPACITY
@@ -3472,11 +4051,16 @@ bool RunMutationComparison(
             ? writer_counts.back()
             : std::min(writer_counts.back(), reported_threads);
 
+    std::cout
+        << "  writer sweep             : 1.." << max_writer_count
+        << " (preferred cap " << writer_counts.back()
+        << ", hardware_concurrency=" << reported_threads << ")\n\n";
+
     for (const std::size_t configured_writer_count : writer_counts)
     {
         const std::size_t writer_count =
             std::min(configured_writer_count, max_writer_count);
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_ns{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> rowlock_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_retry_rate{};
         bool row_ok = true;
@@ -3487,25 +4071,25 @@ bool RunMutationComparison(
             ++run
         )
         {
-            MatchedBackend vector_backend{};
+            MatchedBackend rowlock_backend{};
             APCBackend apc_backend{};
 
             if (
-                !BuildMutationBackend<Scenario>(vector_backend, writer_count) ||
+                !BuildMutationBackend<Scenario>(rowlock_backend, writer_count) ||
                 !BuildMutationBackend<Scenario>(apc_backend, writer_count)
             )
             {
                 return false;
             }
 
-            MutationSweepResult vector_result{};
+            MutationSweepResult rowlock_result{};
             MutationSweepResult apc_result{};
 
             if ((run & 1u) == 0u)
             {
-                vector_result =
+                rowlock_result =
                     RunMutationWorkers<Scenario>(
-                        vector_backend,
+                        rowlock_backend,
                         schedule,
                         writer_count
                     );
@@ -3524,19 +4108,19 @@ bool RunMutationComparison(
                         schedule,
                         writer_count
                     );
-                vector_result =
+                rowlock_result =
                     RunMutationWorkers<Scenario>(
-                        vector_backend,
+                        rowlock_backend,
                         schedule,
                         writer_count
                     );
             }
 
-            const GraphProof vector_proof =
+            const GraphProof rowlock_proof =
                 ProveQuiescentCombinedDAG<
                     Scenario::NODE_COUNT,
                     Scenario::PARENT_CAPACITY
-                >(vector_backend);
+                >(rowlock_backend);
 
             const GraphProof apc_proof =
                 ProveQuiescentCombinedDAG<
@@ -3546,12 +4130,12 @@ bool RunMutationComparison(
 
             row_ok =
                 row_ok &&
-                vector_result.Ok &&
+                rowlock_result.Ok &&
                 apc_result.Ok &&
-                vector_proof.Passed() &&
+                rowlock_proof.Passed() &&
                 apc_proof.Passed();
 
-            vector_ns[run] = vector_result.NsPerSuccess;
+            rowlock_ns[run] = rowlock_result.NsPerSuccess;
             apc_ns[run] = apc_result.NsPerSuccess;
             apc_retry_rate[run] =
                 apc_result.Success == 0u
@@ -3560,13 +4144,13 @@ bool RunMutationComparison(
                         static_cast<double>(apc_result.Success);
         }
 
-        const double vector_median = Median(vector_ns);
+        const double rowlock_median = Median(rowlock_ns);
         const double apc_median = Median(apc_ns);
         const double retry_rate = Median(apc_retry_rate);
-        const double vector_mops =
-            vector_median > 0.0
+        const double rowlock_mops =
+            rowlock_median > 0.0
                 ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
-                    vector_median
+                    rowlock_median
                 : 0.0;
         const double apc_mops =
             apc_median > 0.0
@@ -3578,13 +4162,13 @@ bool RunMutationComparison(
 
         std::cout
             << "  threads=" << std::setw(2) << writer_count
-            << "  vector-DAG=" << std::setw(9)
-            << std::fixed << std::setprecision(2) << vector_median
-            << " ns/op (" << std::setw(6) << vector_mops << " Mops/s)"
+            << "  rowlock-DAG=" << std::setw(9)
+            << std::fixed << std::setprecision(2) << rowlock_median
+            << " ns/op (" << std::setw(6) << rowlock_mops << " Mops/s)"
             << "  APC=" << std::setw(9) << apc_median
             << " ns/op (" << std::setw(6) << apc_mops << " Mops/s)"
-            << "  APC/vector=" << std::setw(6)
-            << Ratio(apc_median, vector_median) << "x"
+            << "  APC/rowlock=" << std::setw(6)
+            << Ratio(apc_median, rowlock_median) << "x"
             << "  retries/success=" << std::setw(8)
             << std::setprecision(4) << retry_rate
             << "  integrity=" << (row_ok ? "PASS" : "FAIL")
@@ -3913,10 +4497,12 @@ template <typename Scenario>
 bool RunReaderComparison(const char* title, const char* description)
 {
     using MatchedBackend =
-        VectorLockedDAG<
+        VectorRowLockedDAG<
             Scenario::NODE_COUNT,
             ConcurrencyConfig::BENCHMARK_PAYLOAD_WORDS,
-            Scenario::PARENT_CAPACITY
+            Scenario::PARENT_CAPACITY,
+            std::shared_mutex,
+            true
         >;
 
     using APCBackend =
@@ -3950,6 +4536,13 @@ bool RunReaderComparison(const char* title, const char* description)
         return false;
     }
 
+    std::cout
+        << "  reader sweep             : 1.." << max_reader_count
+        << " + " << ConcurrencyConfig::READER_WRITER_COUNT
+        << " fixed writers (preferred reader cap "
+        << ConcurrencyConfig::MAX_READER_THREADS
+        << ", hardware_concurrency=" << reported_threads << ")\n\n";
+
     for (
         const std::size_t configured_reader_count :
         ConcurrencyConfig::READER_THREADS
@@ -3957,10 +4550,10 @@ bool RunReaderComparison(const char* title, const char* description)
     {
         const std::size_t reader_count =
             std::min(configured_reader_count, max_reader_count);
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_ns{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> rowlock_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_retry_rate{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> vector_writer_mops{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> rowlock_writer_mops{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> apc_writer_mops{};
         bool row_ok = true;
 
@@ -3970,25 +4563,25 @@ bool RunReaderComparison(const char* title, const char* description)
             ++run
         )
         {
-            MatchedBackend vector_backend{};
+            MatchedBackend rowlock_backend{};
             APCBackend apc_backend{};
 
             if (
-                !BuildReaderWriterBackend<Scenario>(vector_backend) ||
+                !BuildReaderWriterBackend<Scenario>(rowlock_backend) ||
                 !BuildReaderWriterBackend<Scenario>(apc_backend)
             )
             {
                 return false;
             }
 
-            ReaderSweepResult vector_result{};
+            ReaderSweepResult rowlock_result{};
             ReaderSweepResult apc_result{};
 
             if ((run & 1u) == 0u)
             {
-                vector_result =
+                rowlock_result =
                     RunReadersWithWriters<Scenario>(
-                        vector_backend,
+                        rowlock_backend,
                         schedule,
                         reader_count
                     );
@@ -4007,9 +4600,9 @@ bool RunReaderComparison(const char* title, const char* description)
                         schedule,
                         reader_count
                     );
-                vector_result =
+                rowlock_result =
                     RunReadersWithWriters<Scenario>(
-                        vector_backend,
+                        rowlock_backend,
                         schedule,
                         reader_count
                     );
@@ -4017,10 +4610,10 @@ bool RunReaderComparison(const char* title, const char* description)
 
             row_ok =
                 row_ok &&
-                vector_result.Ok &&
+                rowlock_result.Ok &&
                 apc_result.Ok;
 
-            vector_ns[run] = vector_result.NsPerStableRead;
+            rowlock_ns[run] = rowlock_result.NsPerStableRead;
             apc_ns[run] = apc_result.NsPerStableRead;
             apc_retry_rate[run] =
                 apc_result.StableReads == 0u
@@ -4028,19 +4621,19 @@ bool RunReaderComparison(const char* title, const char* description)
                     : static_cast<double>(apc_result.ReaderRetries) /
                         static_cast<double>(apc_result.StableReads);
 
-            const double vector_elapsed_ns =
-                vector_result.NsPerStableRead *
-                static_cast<double>(vector_result.StableReads);
+            const double rowlock_elapsed_ns =
+                rowlock_result.NsPerStableRead *
+                static_cast<double>(rowlock_result.StableReads);
             const double apc_elapsed_ns =
                 apc_result.NsPerStableRead *
                 static_cast<double>(apc_result.StableReads);
 
-            vector_writer_mops[run] =
-                vector_elapsed_ns > 0.0
+            rowlock_writer_mops[run] =
+                rowlock_elapsed_ns > 0.0
                     ? (
-                        static_cast<double>(vector_result.WriterSuccess) *
+                        static_cast<double>(rowlock_result.WriterSuccess) *
                         ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS
-                    ) / vector_elapsed_ns
+                    ) / rowlock_elapsed_ns
                     : 0.0;
 
             apc_writer_mops[run] =
@@ -4052,37 +4645,37 @@ bool RunReaderComparison(const char* title, const char* description)
                     : 0.0;
         }
 
-        const double vector_median = Median(vector_ns);
+        const double rowlock_median = Median(rowlock_ns);
         const double apc_median = Median(apc_ns);
         const double retry_rate = Median(apc_retry_rate);
-        const double vector_read_mops =
-            vector_median > 0.0
+        const double rowlock_read_mops =
+            rowlock_median > 0.0
                 ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
-                    vector_median
+                    rowlock_median
                 : 0.0;
         const double apc_read_mops =
             apc_median > 0.0
                 ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
                     apc_median
                 : 0.0;
-        const double vector_write_mops = Median(vector_writer_mops);
+        const double rowlock_write_mops = Median(rowlock_writer_mops);
         const double apc_write_mops = Median(apc_writer_mops);
 
         all_ok = all_ok && row_ok;
 
         std::cout
             << "  readers=" << std::setw(2) << reader_count
-            << "  mutex-read=" << std::setw(9)
-            << std::fixed << std::setprecision(2) << vector_median
-            << " ns (" << std::setw(6) << vector_read_mops << " M/s)"
+            << "  row-rwlock-read=" << std::setw(9)
+            << std::fixed << std::setprecision(2) << rowlock_median
+            << " ns (" << std::setw(6) << rowlock_read_mops << " M/s)"
             << "  APC-read=" << std::setw(9) << apc_median
             << " ns (" << std::setw(6) << apc_read_mops << " M/s)"
-            << "  APC/mutex=" << std::setw(6)
-            << Ratio(apc_median, vector_median) << "x"
+            << "  APC/row-rwlock=" << std::setw(6)
+            << Ratio(apc_median, rowlock_median) << "x"
             << "  APC retry/read=" << std::setw(8)
             << std::setprecision(4) << retry_rate
-            << "  writers M/s mutex/APC=" << std::setprecision(2)
-            << vector_write_mops << "/" << apc_write_mops
+            << "  writers M/s row-rwlock/APC=" << std::setprecision(2)
+            << rowlock_write_mops << "/" << apc_write_mops
             << "  integrity=" << (row_ok ? "PASS" : "FAIL")
             << '\n';
 
@@ -4206,11 +4799,12 @@ inline Result Run()
 {
     const bool hotspot_ok =
         ConcurrentGraphTestCore::RunMutationComparison<HotspotScenario>(
-            "TEST 2A - SAME-K HOTSPOT CONTENTION: GLOBAL MUTEX vs APC/FABRIC",
+            "TEST 2A - SAME-K HOTSPOT CONTENTION: ROW-LOCAL LOCK vs APC/FABRIC",
             "Both backends use K=4 and parent<child. Each writer owns one child;\n"
             "all writers replace parents drawn from the same two H and two V parents.\n"
-            "The vector DAG serializes ReplaceParent with one global mutex; APC/Fabric\n"
-            "uses one-attempt transactions with workload-level retry.",
+            "The vector DAG locks only the child, old-parent and new-parent rows;\n"
+            "APC/Fabric uses one-attempt optimistic transactions with workload-level retry.\n"
+            "The sweep prints every writer count up to min(16, hardware_concurrency).",
             ConcurrencyConfig::HOTSPOT_MUTATOR_THREADS
         );
 
@@ -4222,9 +4816,9 @@ inline Result Run()
         ConcurrentGraphTestCore::RunMutationComparison<DistributedScenario>(
             "TEST 2B - DISTRIBUTED RANDOM MUTATION: 100 PARENTS, 1-10 WRITERS",
             "Both backends execute the same pre-generated schedule over 100 legal\n"
-            "parents and 10 writer-owned children. Random generation is outside timing.\n"
-            "Every row from 1 through 10 writers is printed; all parents satisfy\n"
-            "parent<child and integrity is proven after every measured run.",
+            "parents and 10 writer-owned children. The baseline uses per-node/per-axis\n"
+            "row mutexes; random generation is outside timing. Every row from 1 through\n"
+            "10 writers is printed and integrity is proven after every measured run.",
             ConcurrencyConfig::MUTATOR_THREADS
         );
 
@@ -4374,9 +4968,11 @@ inline Result Run()
     const bool hotspot_ok =
         ConcurrentGraphTestCore::RunReaderComparison<HotspotScenario>(
             "TEST 3A - TWO-PARENT HOTSPOT READS WITH TWO ACTIVE WRITERS",
-            "The original concentrated test is preserved: one H writer toggles 0<->1\n"
-            "and one V writer toggles 2<->3 on the same child. Stable-reader rows\n"
-            "are printed for every reader count from 1 through 16."
+            "The concentrated workload is preserved: one H writer toggles 0<->1 and\n"
+            "one V writer toggles 2<->3 on the same child. The matched vector baseline\n"
+            "uses one row-local shared mutex per node/axis: readers take shared locks\n"
+            "and writers take exclusive locks on participating rows. Reader/read access\n"
+            "therefore remains concurrent. Every supported reader count is printed."
         );
 
     std::cout
@@ -4388,8 +4984,9 @@ inline Result Run()
             "TEST 3B - DISTRIBUTED STABLE READS: 100 PARENTS, TWO WRITERS",
             "Two writers own separate child relations and mutate across the same 100\n"
             "legal parents using identical pre-generated schedules for both backends.\n"
-            "Readers alternate between those live H and V relations; every reader\n"
-            "count from 1 through 16 is printed and RETRY is never counted as a read."
+            "The matched vector baseline uses row-local shared-reader/exclusive-writer\n"
+            "locking; readers alternate between live H/V relations. APC RETRY outcomes\n"
+            "are retried and never counted as successful stable reads."
         );
 
     std::cout
@@ -6670,4 +7267,6 @@ inline int RunAll()
 }
 
 } // namespace APCDAGTests
+
+
 

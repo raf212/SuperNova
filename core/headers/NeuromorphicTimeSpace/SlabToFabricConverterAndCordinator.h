@@ -6,6 +6,7 @@ namespace BidirectionalInMemGraph
     
     class SlabToFabricConverterAndCordinator : public CompiledDAGTableConstructor
     {
+        friend class AdaptivePackedCellContainer;
     private:
 
         uint64_t* AllocatePackedCellRaw_(size_t count_of_cells) noexcept;
