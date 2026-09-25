@@ -30,8 +30,8 @@
 // relocation without involving GHGF.
 
 #ifndef APC_DAG_TEST_EXTERNAL_TYPES
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
-#include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
+#include "../headers/NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include "../headers/AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
 
 #endif
 

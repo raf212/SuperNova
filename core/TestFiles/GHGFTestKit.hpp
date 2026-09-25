@@ -24,7 +24,7 @@
 // ============================================================================
 
 #ifndef APC_DAG_TEST_EXTERNAL_TYPES
-#include "Models/GHGF/GHGFModelOfAPC.hpp"
+#include "../headers/Models/GHGF/GHGFModelOfAPC.hpp"
 #endif
 
 #include <algorithm>
