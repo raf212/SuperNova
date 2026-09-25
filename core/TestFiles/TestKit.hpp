@@ -96,6 +96,15 @@ constexpr std::uint32_t STABLE_READS_PER_READER = 20'000u;
 constexpr std::uint32_t WRITER_WARMUP_MUTATIONS = 256u;
 constexpr std::size_t MEASURED_RUNS = 4u;
 constexpr std::uint32_t TRANSACTION_ATTEMPT_LIMIT = 100'000u;
+
+// Stable readers use an explicit TestKit-local budget rather than inheriting
+// DEFAULT_MAX_TRIES from the production API. A bounded optimistic read can
+// legitimately observe RETRY while a writer owns the row; exhausting one
+// budget is therefore a progress/starvation event, not by itself corruption.
+constexpr std::uint32_t STABLE_READ_ATTEMPT_LIMIT =
+    TRANSACTION_ATTEMPT_LIMIT;
+constexpr std::uint32_t STABLE_READ_STARVATION_ROUND_LIMIT = 16u;
+
 constexpr std::uint64_t OPERATIONS_PER_MUTATION_STEP = 2u;
 constexpr double MILLION_OPERATIONS_PER_SECOND_FROM_NS = 1000.0;
 constexpr std::uint64_t RANDOM_SEED = 0x9E3779B97F4A7C15ull;
@@ -2850,41 +2859,72 @@ bool BuildReaderBackend(Backend& backend, const ReaderScenario& scenario)
     return true;
 }
 
+enum class StableReadStatus : std::uint8_t
+{
+    SUCCESS,
+    RETRY_LIMIT,
+    BAD_CONTRACT,
+    INVALID_PARENT
+};
+
 template <typename Backend>
-bool StableReadOne(
+StableReadStatus StableReadOne(
     Backend& backend,
     const ReaderScenario& scenario,
     std::size_t writer,
     std::uint64_t& retries) noexcept
 {
-    for (std::uint32_t attempt = 0u;
-         attempt < ConcurrencyConfig::TRANSACTION_ATTEMPT_LIMIT;
-         ++attempt)
+    const WriterSpec& spec = scenario.Writers[writer];
+
+    for (
+        std::uint32_t attempt = 0u;
+        attempt < ConcurrencyConfig::STABLE_READ_ATTEMPT_LIMIT;
+        ++attempt
+    )
     {
-        const WriterSpec& spec = scenario.Writers[writer];
         const ReadResult read = backend.StableFindParent(
             spec.Child, spec.RelationAxis, 0u, 1u);
-        if (!read.ContractValid()) return false;
+
+        if (!read.ContractValid())
+        {
+            return StableReadStatus::BAD_CONTRACT;
+        }
+
         if (read.IsRetry())
         {
             ++retries;
             PerturbSchedule(attempt);
             continue;
         }
-        return read.IsFound() && scenario.ParentAllowed(writer, read.Node);
+
+        if (
+            !read.IsFound() ||
+            !scenario.ParentAllowed(writer, read.Node)
+        )
+        {
+            return StableReadStatus::INVALID_PARENT;
+        }
+
+        return StableReadStatus::SUCCESS;
     }
-    return false;
+
+    return StableReadStatus::RETRY_LIMIT;
 }
 
 struct ReaderSweepResult
 {
     bool Ok = false;
+    bool CorrectnessOk = false;
+    bool ProgressOk = false;
+    bool FinalVerificationOk = false;
     double NsPerStableRead = 0.0;
     double ElapsedNs = 0.0;
     std::uint64_t StableReads = 0u;
     std::uint64_t ReaderRetries = 0u;
+    std::uint64_t ReaderStarvations = 0u;
     std::uint64_t WriterSuccess = 0u;
     std::uint64_t WriterRetries = 0u;
+    std::uint64_t WriterExhaustions = 0u;
 };
 
 template <typename Backend>
@@ -2931,13 +2971,27 @@ ReaderSweepResult RunReadersWithWriters(
     std::barrier reader_finish(
         static_cast<std::ptrdiff_t>(reader_count + 1u), end_phase);
 
-    std::atomic<bool> failed{false};
+    // Keep correctness and progress failures separate. A malformed/illegal
+    // stable read is a correctness failure. Exhausting a retry budget is a
+    // progress event; the TestKit retries that logical read for a bounded
+    // number of starvation rounds before declaring the measurement incomplete.
+    std::atomic<bool> correctness_failed{false};
+    std::atomic<bool> progress_failed{false};
     std::atomic<bool> stop_writers{false};
     std::atomic<std::size_t> warmed_writers{0u};
     std::atomic<std::uint64_t> stable_reads{0u};
     std::atomic<std::uint64_t> reader_retries{0u};
+    std::atomic<std::uint64_t> reader_starvations{0u};
     std::atomic<std::uint64_t> writer_success{0u};
     std::atomic<std::uint64_t> writer_retries{0u};
+    std::atomic<std::uint64_t> writer_exhaustions{0u};
+
+    const auto abort_requested = [&]() noexcept
+    {
+        return
+            correctness_failed.load(std::memory_order_acquire) ||
+            progress_failed.load(std::memory_order_acquire);
+    };
 
     std::vector<std::thread> writers;
     writers.reserve(ConcurrencyConfig::READER_WRITER_COUNT);
@@ -2962,8 +3016,10 @@ ReaderSweepResult RunReadersWithWriters(
                         backend, current, target, spec.Child,
                         spec.RelationAxis, local_retries))
                     {
+                        writer_exhaustions.fetch_add(1u, std::memory_order_relaxed);
                         return false;
                     }
+
                     current = target;
                     if (measure_writers.load(std::memory_order_acquire))
                     {
@@ -2976,21 +3032,33 @@ ReaderSweepResult RunReadersWithWriters(
             };
 
             writer_start.arrive_and_wait();
-            for (std::uint32_t i = 0u;
-                 i < ConcurrencyConfig::WRITER_WARMUP_MUTATIONS &&
-                 !failed.load(std::memory_order_acquire);
-                 ++i)
+
+            for (
+                std::uint32_t i = 0u;
+                i < ConcurrencyConfig::WRITER_WARMUP_MUTATIONS &&
+                !abort_requested();
+                ++i
+            )
             {
-                if (!mutate_once()) failed.store(true, std::memory_order_release);
+                if (!mutate_once())
+                {
+                    progress_failed.store(true, std::memory_order_release);
+                    break;
+                }
             }
+
             warmed_writers.fetch_add(1u, std::memory_order_release);
 
             while (
                 !stop_writers.load(std::memory_order_acquire) &&
-                !failed.load(std::memory_order_acquire)
+                !abort_requested()
             )
             {
-                if (!mutate_once()) failed.store(true, std::memory_order_release);
+                if (!mutate_once())
+                {
+                    progress_failed.store(true, std::memory_order_release);
+                    break;
+                }
             }
         });
     }
@@ -3003,27 +3071,67 @@ ReaderSweepResult RunReadersWithWriters(
         {
             std::uint64_t local_reads = 0u;
             std::uint64_t local_retries = 0u;
+            std::uint64_t local_starvations = 0u;
             const std::size_t writer =
                 reader % ConcurrencyConfig::READER_WRITER_COUNT;
 
             reader_start.arrive_and_wait();
-            if (!failed.load(std::memory_order_acquire))
+
+            if (!abort_requested())
             {
-                for (std::uint32_t i = 0u;
-                     i < ConcurrencyConfig::STABLE_READS_PER_READER;
-                     ++i)
+                for (
+                    std::uint32_t i = 0u;
+                    i < ConcurrencyConfig::STABLE_READS_PER_READER &&
+                    !abort_requested();
+                    ++i
+                )
                 {
-                    if (!StableReadOne(
-                        backend, scenario, writer, local_retries))
+                    std::uint32_t starvation_rounds = 0u;
+
+                    for (;;)
                     {
-                        failed.store(true, std::memory_order_release);
+                        const StableReadStatus status = StableReadOne(
+                            backend, scenario, writer, local_retries);
+
+                        if (status == StableReadStatus::SUCCESS)
+                        {
+                            ++local_reads;
+                            break;
+                        }
+
+                        if (status == StableReadStatus::RETRY_LIMIT)
+                        {
+                            ++local_starvations;
+                            ++starvation_rounds;
+
+                            if (
+                                starvation_rounds >=
+                                ConcurrencyConfig::STABLE_READ_STARVATION_ROUND_LIMIT
+                            )
+                            {
+                                progress_failed.store(
+                                    true, std::memory_order_release);
+                                break;
+                            }
+
+                            // Give a continuously publishing writer a chance to
+                            // leave RESERVED and let this logical read resume.
+                            std::this_thread::yield();
+                            continue;
+                        }
+
+                        // BAD_CONTRACT or INVALID_PARENT are actual correctness
+                        // failures and must never be masked as scheduler noise.
+                        correctness_failed.store(true, std::memory_order_release);
                         break;
                     }
-                    ++local_reads;
                 }
             }
+
             stable_reads.fetch_add(local_reads, std::memory_order_relaxed);
             reader_retries.fetch_add(local_retries, std::memory_order_relaxed);
+            reader_starvations.fetch_add(
+                local_starvations, std::memory_order_relaxed);
             reader_finish.arrive_and_wait();
         });
     }
@@ -3032,13 +3140,16 @@ ReaderSweepResult RunReadersWithWriters(
     while (
         warmed_writers.load(std::memory_order_acquire) <
             ConcurrencyConfig::READER_WRITER_COUNT &&
-        !failed.load(std::memory_order_acquire))
+        !abort_requested()
+    )
     {
         std::this_thread::yield();
     }
 
-    if (failed.load(std::memory_order_acquire))
+    if (abort_requested())
+    {
         stop_writers.store(true, std::memory_order_release);
+    }
 
     reader_start.arrive_and_wait();
     reader_finish.arrive_and_wait();
@@ -3053,15 +3164,28 @@ ReaderSweepResult RunReadersWithWriters(
     const double elapsed = static_cast<double>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());
 
+    const bool final_verification = VerifyReaderScenario(backend, scenario);
+    const bool correctness_ok =
+        !correctness_failed.load(std::memory_order_acquire) &&
+        final_verification;
+    const bool progress_ok =
+        !progress_failed.load(std::memory_order_acquire) &&
+        completed == expected &&
+        writer_exhaustions.load(std::memory_order_acquire) == 0u;
+
     return {
-        !failed.load(std::memory_order_acquire) &&
-            completed == expected && VerifyReaderScenario(backend, scenario),
+        correctness_ok && progress_ok,
+        correctness_ok,
+        progress_ok,
+        final_verification,
         completed == 0u ? 0.0 : elapsed / static_cast<double>(completed),
         elapsed,
         completed,
         reader_retries.load(std::memory_order_acquire),
+        reader_starvations.load(std::memory_order_acquire),
         writer_success.load(std::memory_order_acquire),
-        writer_retries.load(std::memory_order_acquire)
+        writer_retries.load(std::memory_order_acquire),
+        writer_exhaustions.load(std::memory_order_acquire)
     };
 }
 
@@ -3475,9 +3599,15 @@ inline bool RunCase(
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> row_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> retry_rate{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> row_starvations{};
+        std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_starvations{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> row_writer_mops{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_writer_mops{};
         bool row_ok = true;
+        bool row_correctness_ok = true;
+        bool fabric_correctness_ok = true;
+        bool row_progress_ok = true;
+        bool fabric_progress_ok = true;
 
         for (std::size_t run = 0u; run < ConcurrencyConfig::MEASURED_RUNS; ++run)
         {
@@ -3509,11 +3639,25 @@ inline bool RunCase(
             }
 
             row_ok = row_ok && row_result.Ok && fabric_result.Ok;
+            row_correctness_ok =
+                row_correctness_ok && row_result.CorrectnessOk;
+            fabric_correctness_ok =
+                fabric_correctness_ok && fabric_result.CorrectnessOk;
+            row_progress_ok =
+                row_progress_ok && row_result.ProgressOk;
+            fabric_progress_ok =
+                fabric_progress_ok && fabric_result.ProgressOk;
+
             row_ns[run] = row_result.NsPerStableRead;
             fabric_ns[run] = fabric_result.NsPerStableRead;
             retry_rate[run] = fabric_result.StableReads == 0u ? 0.0 :
                 static_cast<double>(fabric_result.ReaderRetries) /
                 static_cast<double>(fabric_result.StableReads);
+            row_starvations[run] =
+                static_cast<double>(row_result.ReaderStarvations);
+            fabric_starvations[run] =
+                static_cast<double>(fabric_result.ReaderStarvations);
+
             row_writer_mops[run] = row_result.ElapsedNs > 0.0
                 ? static_cast<double>(row_result.WriterSuccess) *
                     ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
@@ -3546,8 +3690,14 @@ inline bool RunCase(
             << "  Fabric/row=" << std::setw(6)
             << Ratio(fabric_median, row_median) << "x"
             << "  retry/read=" << std::setw(8) << std::setprecision(4) << retries
+            << "  starve row/Fabric=" << std::setprecision(0)
+            << Median(row_starvations) << "/" << Median(fabric_starvations)
             << "  writers M/s row/Fabric=" << std::setprecision(2)
             << Median(row_writer_mops) << "/" << Median(fabric_writer_mops)
+            << "  correctness="
+            << (row_correctness_ok && fabric_correctness_ok ? "PASS" : "FAIL")
+            << "  progress="
+            << (row_progress_ok && fabric_progress_ok ? "PASS" : "FAIL")
             << "  " << (row_ok ? "PASS" : "FAIL") << '\n';
     }
     return all_ok;
@@ -5947,6 +6097,7 @@ inline int RunAll(
 }
 
 } // namespace APCDAGTests
+
 
 
 
