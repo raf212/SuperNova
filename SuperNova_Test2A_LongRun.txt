@@ -1,0 +1,32 @@
+SUPERNOVA FABRIC TEST 2A REPEAT TEST
+repeats=100000
+writer_sweep=1..16
+measured_runs_per_point=4
+
+FAIL repeat=3 case=3 N=10000 K=4 writers=15 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=58776 retries=2641347 retry/success=44.9392
+FAIL repeat=9 case=2 N=100 K=32 writers=15 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=43392 retries=1944747 retry/success=44.8181
+FAIL repeat=19 case=4 N=10000 K=32 writers=13 sample=4 build=PASS mutation=FAIL verify=SKIPPED success=42832 retries=1833035 retry/success=42.7959
+FAIL repeat=19 case=4 N=10000 K=32 writers=14 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=48610 retries=2343019 retry/success=48.2003
+FAIL repeat=19 case=4 N=10000 K=32 writers=14 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=38756 retries=2284599 retry/success=58.9483
+FAIL repeat=28 case=2 N=100 K=32 writers=16 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=44018 retries=2299724 retry/success=52.2451
+FAIL repeat=112 case=2 N=100 K=32 writers=14 sample=4 build=PASS mutation=FAIL verify=SKIPPED success=54440 retries=2647468 retry/success=48.6309
+FAIL repeat=155 case=3 N=10000 K=4 writers=14 sample=4 build=PASS mutation=FAIL verify=SKIPPED success=22320 retries=1451363 retry/success=65.0252
+FAIL repeat=159 case=2 N=100 K=32 writers=16 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=55824 retries=2465324 retry/success=44.1624
+FAIL repeat=201 case=3 N=10000 K=4 writers=15 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=49456 retries=2572079 retry/success=52.0074
+FAIL repeat=446 case=4 N=10000 K=32 writers=14 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=43844 retries=2765660 retry/success=63.0796
+FAIL repeat=505 case=4 N=10000 K=32 writers=16 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=59712 retries=2980844 retry/success=49.9204
+FAIL repeat=508 case=4 N=10000 K=32 writers=11 sample=4 build=PASS mutation=FAIL verify=SKIPPED success=41110 retries=1437037 retry/success=34.9559
+FAIL repeat=620 case=2 N=100 K=32 writers=14 sample=3 build=PASS mutation=FAIL verify=SKIPPED success=35542 retries=1792718 retry/success=50.4394
+FAIL repeat=634 case=3 N=10000 K=4 writers=16 sample=3 build=PASS mutation=FAIL verify=SKIPPED success=25484 retries=1715904 retry/success=67.3326
+FAIL repeat=759 case=2 N=100 K=32 writers=10 sample=4 build=PASS mutation=FAIL verify=SKIPPED success=17646 retries=696217 retry/success=39.4547
+FAIL repeat=759 case=2 N=100 K=32 writers=12 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=41428 retries=2272386 retry/success=54.8515
+FAIL repeat=759 case=2 N=100 K=32 writers=12 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=20762 retries=1455603 retry/success=70.1090
+FAIL repeat=759 case=2 N=100 K=32 writers=12 sample=4 build=PASS mutation=FAIL verify=SKIPPED success=44374 retries=1213331 retry/success=27.3433
+FAIL repeat=759 case=2 N=100 K=32 writers=13 sample=4 build=PASS mutation=FAIL verify=SKIPPED success=49540 retries=1177342 retry/success=23.7655
+FAIL repeat=759 case=2 N=100 K=32 writers=14 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=27174 retries=1885616 retry/success=69.3904
+FAIL repeat=759 case=2 N=100 K=32 writers=14 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=51146 retries=2387298 retry/success=46.6761
+FAIL repeat=759 case=2 N=100 K=32 writers=15 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=46650 retries=1794618 retry/success=38.4698
+FAIL repeat=920 case=4 N=10000 K=32 writers=16 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=51962 retries=2648556 retry/success=50.9710
+FAIL repeat=920 case=4 N=10000 K=32 writers=16 sample=2 build=PASS mutation=FAIL verify=SKIPPED success=56856 retries=2998940 retry/success=52.7462
+FAIL repeat=981 case=2 N=100 K=32 writers=11 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=17642 retries=1023584 retry/success=58.0197
+FAIL repeat=1046 case=4 N=10000 K=32 writers=16 sample=1 build=PASS mutation=FAIL verify=SKIPPED success=57056 retries=3466903 retry/success=60.7632

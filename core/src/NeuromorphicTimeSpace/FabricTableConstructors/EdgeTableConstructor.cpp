@@ -256,11 +256,8 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
-            uint64_t observed_raw = std::atomic_ref<const uint64_t>(
-                SlabBasePtr_[index]
-            ).load(std::memory_order_acquire);
-            EdgeBuilder::EdgeData observed =
-                EdgeBuilder::UnpackEdgeHeader(observed_raw);
+            uint64_t observed_raw = std::atomic_ref<const uint64_t>(SlabBasePtr_[index]).load(std::memory_order_acquire);
+            EdgeBuilder::EdgeData observed = EdgeBuilder::UnpackEdgeHeader(observed_raw);
             if (!observed.IsValid)
             {
                 return SeqLockedOperation::NONE;
@@ -278,7 +275,8 @@ namespace BidirectionalInMemGraph
             reserved.SeqLock = EdgeBuilder::NextSequence(observed.SeqLock);
             reserved.Status = EdgeBuilder::EdgeStatus::RESERVED;
             reserved.IsValid = true;
-            if (CompareExchangeWeakInSlab(
+            /// Can Fail Spontenuiusly if used compare_exchange_weak()
+            if (CompareExchangeStrongFromFabric(
                 index,
                 observed_raw,
                 EdgeBuilder::PackEdgeHeader(reserved)
@@ -287,6 +285,7 @@ namespace BidirectionalInMemGraph
                 before = observed;
                 return SeqLockedOperation::FOUND;
             }
+            ///
         }
         return SeqLockedOperation::RETRY;
     }

@@ -482,15 +482,16 @@ namespace BidirectionalInMemGraph
 
         const auto PublishDomain___ = [this, &transaction](
             EdgeBuilder::EdgeDomain domain
-        ) noexcept
+        ) noexcept -> void
         {
-            for (uint8_t i = 0u; i < transaction.RowCount; ++i)
+            for (uint8_t i = transaction.RowCount; i > 0u; --i)
             {
-                DAGRowParticipant& row = transaction.Rows[i];
+                DAGRowParticipant& row = transaction.Rows[i - 1u];
                 if (row.Domain != domain)
                 {
                     continue;
                 }
+
                 PublishReservedEdgeDomain_(
                     transaction.EdgeTable,
                     row.Slot,
@@ -499,6 +500,7 @@ namespace BidirectionalInMemGraph
                     row.WorkTail,
                     EdgeBuilder::EdgeStatus::LIVE
                 );
+
                 row.Reserved = false;
             }
         };
