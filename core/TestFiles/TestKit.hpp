@@ -1101,7 +1101,9 @@ public:
         std::size_t parent,
         std::size_t child,
         Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
+        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         if (parent >= NodeCount || child >= NodeCount)
             return MutationResult::INVALID;
@@ -1109,7 +1111,8 @@ public:
         return Nodes_[child].AddParent(
             Nodes_[parent],
             EdgeTableForAxis(axis),
-            max_tries
+            max_tries,
+            internal_recursion
         );
     }
 
@@ -1117,7 +1120,9 @@ public:
         std::size_t parent,
         std::size_t child,
         Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
+        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         if (parent >= NodeCount || child >= NodeCount)
             return MutationResult::INVALID;
@@ -1125,7 +1130,8 @@ public:
         return Nodes_[child].RemoveParent(
             Nodes_[parent],
             EdgeTableForAxis(axis),
-            max_tries
+            max_tries,
+            internal_recursion
         );
     }
 
@@ -1134,7 +1140,9 @@ public:
         std::size_t new_parent,
         std::size_t child,
         Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
+        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         if (
             old_parent >= NodeCount ||
@@ -1149,7 +1157,8 @@ public:
             Nodes_[old_parent],
             Nodes_[new_parent],
             EdgeTableForAxis(axis),
-            max_tries
+            max_tries,
+            internal_recursion
         );
     }
 
@@ -1697,26 +1706,36 @@ public:
         std::size_t p,
         std::size_t c,
         Axis a,
-        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         if (p >= NodeCount_ || c >= NodeCount_)
             return MutationResult::INVALID;
 
         return Nodes_[c].AddParent(
-            Nodes_[p], EdgeTableForAxis(a), tries);
+            Nodes_[p],
+            EdgeTableForAxis(a),
+            tries,
+            internal_recursion);
     }
 
     MutationResult RemoveParentResult(
         std::size_t p,
         std::size_t c,
         Axis a,
-        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         if (p >= NodeCount_ || c >= NodeCount_)
             return MutationResult::INVALID;
 
         return Nodes_[c].RemoveParent(
-            Nodes_[p], EdgeTableForAxis(a), tries);
+            Nodes_[p],
+            EdgeTableForAxis(a),
+            tries,
+            internal_recursion);
     }
 
     MutationResult ReplaceParentResult(
@@ -1724,13 +1743,19 @@ public:
         std::size_t new_p,
         std::size_t c,
         Axis a,
-        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         if (old_p >= NodeCount_ || new_p >= NodeCount_ || c >= NodeCount_)
             return MutationResult::INVALID;
 
         return Nodes_[c].ReplaceParent(
-            Nodes_[old_p], Nodes_[new_p], EdgeTableForAxis(a), tries);
+            Nodes_[old_p],
+            Nodes_[new_p],
+            EdgeTableForAxis(a),
+            tries,
+            internal_recursion);
     }
 
     bool AddParent(
@@ -2240,14 +2265,38 @@ MutationResult ReplaceParentMutation(
     std::size_t new_parent,
     std::size_t child,
     Axis axis,
-    std::uint32_t tries) noexcept
+    std::uint32_t tries,
+    std::uint32_t internal_recursion =
+        AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
 {
     if constexpr (requires
+    {
+        backend.ReplaceParentResult(
+            old_parent,
+            new_parent,
+            child,
+            axis,
+            tries,
+            internal_recursion);
+    })
+    {
+        return backend.ReplaceParentResult(
+            old_parent,
+            new_parent,
+            child,
+            axis,
+            tries,
+            internal_recursion);
+    }
+    else if constexpr (requires
     {
         backend.ReplaceParentResult(
             old_parent, new_parent, child, axis, tries);
     })
     {
+        // Backends without an internal-reservation budget retain their
+        // existing behavior. The delta-recursion experiment is meaningful
+        // for SuperNova Fabric backends.
         return backend.ReplaceParentResult(
             old_parent, new_parent, child, axis, tries);
     }
@@ -2292,6 +2341,85 @@ MutationResult RetryReplace(
     }
 
     return MutationResult::RETRY;
+}
+
+template <typename Backend>
+MutationResult RetryReplaceDeltaRecursion(
+    Backend& backend,
+    std::size_t old_parent,
+    std::size_t new_parent,
+    std::size_t child,
+    Axis axis,
+    std::uint64_t& retry_count,
+    std::uint64_t& recursion_escalations,
+    std::uint64_t& escalated_commits,
+    std::uint32_t delta_recursion = 1u,
+    std::uint32_t attempt_limit =
+        ConcurrencyConfig::TRANSACTION_ATTEMPT_LIMIT) noexcept
+{
+    constexpr std::uint32_t BASE_INTERNAL_RECURSION =
+        AdaptivePackedCellContainer::INTERNAL_RECURSION;
+
+    if (
+        delta_recursion == 0u ||
+        BASE_INTERNAL_RECURSION >
+            UINT32_MAX - delta_recursion)
+    {
+        return MutationResult::INVALID;
+    }
+
+    const auto RunStage___ =
+        [&](std::uint32_t internal_recursion) noexcept -> MutationResult
+    {
+        for (
+            std::uint32_t attempt = 0u;
+            attempt < attempt_limit;
+            ++attempt)
+        {
+            const MutationResult result =
+                ReplaceParentMutation(
+                    backend,
+                    old_parent,
+                    new_parent,
+                    child,
+                    axis,
+                    1u,
+                    internal_recursion);
+
+            if (result == MutationResult::COMMITTED)
+                return MutationResult::COMMITTED;
+
+            if (result == MutationResult::INVALID)
+                return MutationResult::INVALID;
+
+            ++retry_count;
+            PerturbSchedule(attempt);
+        }
+
+        return MutationResult::RETRY;
+    };
+
+    // Stage 1 is the existing control behavior:
+    // max_tries=1, internal recursion=1.
+    const MutationResult first =
+        RunStage___(BASE_INTERNAL_RECURSION);
+
+    if (first != MutationResult::RETRY)
+        return first;
+
+    // Only a complete 100,000-attempt exhaustion escalates the internal
+    // row-reservation budget. With delta_recursion=1 this becomes 1 -> 2.
+    ++recursion_escalations;
+
+    const MutationResult second =
+        RunStage___(
+            BASE_INTERNAL_RECURSION +
+            delta_recursion);
+
+    if (second == MutationResult::COMMITTED)
+        ++escalated_commits;
+
+    return second;
 }
 
 // -----------------------------------------------------------------------------
@@ -2801,6 +2929,11 @@ struct MutationSweepResult
     std::uint64_t InvalidFailures = 0u;
     std::uint64_t RetryExhaustions = 0u;
 
+    // Delta-recursion experiment only. Existing RunMutationWorkers leaves
+    // these at zero.
+    std::uint64_t RecursionEscalations = 0u;
+    std::uint64_t EscalatedCommits = 0u;
+
     bool Completed() const noexcept
     {
         return Status == MutationResult::COMMITTED;
@@ -2950,6 +3083,178 @@ MutationSweepResult RunMutationWorkers(
         exhausted
     };
 }
+
+template <typename Backend>
+MutationSweepResult RunMutationWorkersDeltaRecursion(
+    Backend& backend,
+    const MutationScenario& scenario,
+    const MutationSchedule& schedule,
+    std::size_t writer_count,
+    std::uint32_t delta_recursion = 1u)
+{
+    Clock::time_point begin{};
+    Clock::time_point end{};
+    auto begin_phase = [&]() noexcept { begin = Clock::now(); };
+    auto end_phase = [&]() noexcept { end = Clock::now(); };
+    std::barrier start(
+        static_cast<std::ptrdiff_t>(writer_count + 1u), begin_phase);
+    std::barrier finish(
+        static_cast<std::ptrdiff_t>(writer_count + 1u), end_phase);
+
+    std::atomic<std::uint64_t> success{0u};
+    std::atomic<std::uint64_t> retries{0u};
+    std::atomic<std::uint64_t> invalid_failures{0u};
+    std::atomic<std::uint64_t> retry_exhaustions{0u};
+    std::atomic<std::uint64_t> recursion_escalations{0u};
+    std::atomic<std::uint64_t> escalated_commits{0u};
+
+    std::vector<std::thread> writers;
+    writers.reserve(writer_count);
+
+    for (std::size_t writer = 0u; writer < writer_count; ++writer)
+    {
+        writers.emplace_back([&, writer]() noexcept
+        {
+            const std::size_t child = scenario.Child(writer);
+            std::size_t h_current = scenario.InitialH(writer);
+            std::size_t v_current = scenario.InitialV(writer);
+
+            std::uint64_t local_success = 0u;
+            std::uint64_t local_retries = 0u;
+            std::uint64_t local_invalid = 0u;
+            std::uint64_t local_retry_exhaustions = 0u;
+            std::uint64_t local_recursion_escalations = 0u;
+            std::uint64_t local_escalated_commits = 0u;
+
+            start.arrive_and_wait();
+
+            for (
+                std::uint32_t step = 0u;
+                step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+                ++step)
+            {
+                const MutationStep mutation = schedule[writer][step];
+
+                const MutationResult h_result =
+                    RetryReplaceDeltaRecursion(
+                        backend,
+                        h_current,
+                        mutation.HParent,
+                        child,
+                        Axis::HORIZONTAL,
+                        local_retries,
+                        local_recursion_escalations,
+                        local_escalated_commits,
+                        delta_recursion);
+
+                if (h_result != MutationResult::COMMITTED)
+                {
+                    if (h_result == MutationResult::INVALID)
+                        ++local_invalid;
+                    else
+                        ++local_retry_exhaustions;
+                    break;
+                }
+
+                h_current = mutation.HParent;
+                ++local_success;
+
+                const MutationResult v_result =
+                    RetryReplaceDeltaRecursion(
+                        backend,
+                        v_current,
+                        mutation.VParent,
+                        child,
+                        Axis::VERTICAL,
+                        local_retries,
+                        local_recursion_escalations,
+                        local_escalated_commits,
+                        delta_recursion);
+
+                if (v_result != MutationResult::COMMITTED)
+                {
+                    if (v_result == MutationResult::INVALID)
+                        ++local_invalid;
+                    else
+                        ++local_retry_exhaustions;
+                    break;
+                }
+
+                v_current = mutation.VParent;
+                ++local_success;
+            }
+
+            success.fetch_add(
+                local_success,
+                std::memory_order_relaxed);
+            retries.fetch_add(
+                local_retries,
+                std::memory_order_relaxed);
+            invalid_failures.fetch_add(
+                local_invalid,
+                std::memory_order_relaxed);
+            retry_exhaustions.fetch_add(
+                local_retry_exhaustions,
+                std::memory_order_relaxed);
+            recursion_escalations.fetch_add(
+                local_recursion_escalations,
+                std::memory_order_relaxed);
+            escalated_commits.fetch_add(
+                local_escalated_commits,
+                std::memory_order_relaxed);
+
+            finish.arrive_and_wait();
+        });
+    }
+
+    start.arrive_and_wait();
+    finish.arrive_and_wait();
+
+    for (std::thread& writer : writers)
+        writer.join();
+
+    const std::uint64_t completed =
+        success.load(std::memory_order_acquire);
+    const std::uint64_t invalid =
+        invalid_failures.load(std::memory_order_acquire);
+    const std::uint64_t exhausted =
+        retry_exhaustions.load(std::memory_order_acquire);
+    const std::uint64_t expected =
+        writer_count *
+        ConcurrencyConfig::MUTATIONS_PER_WRITER *
+        ConcurrencyConfig::OPERATIONS_PER_MUTATION_STEP;
+
+    MutationResult status = MutationResult::COMMITTED;
+    if (invalid != 0u)
+        status = MutationResult::INVALID;
+    else if (exhausted != 0u || completed != expected)
+        status = MutationResult::RETRY;
+
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            end - begin).count();
+
+    MutationSweepResult result{};
+    result.Status = status;
+    result.Ok = status != MutationResult::INVALID;
+    result.NsPerSuccess =
+        completed == 0u
+            ? 0.0
+            : static_cast<double>(elapsed) /
+                static_cast<double>(completed);
+    result.Success = completed;
+    result.Retries =
+        retries.load(std::memory_order_acquire);
+    result.InvalidFailures = invalid;
+    result.RetryExhaustions = exhausted;
+    result.RecursionEscalations =
+        recursion_escalations.load(std::memory_order_acquire);
+    result.EscalatedCommits =
+        escalated_commits.load(std::memory_order_acquire);
+
+    return result;
+}
+
 
 template <typename Backend>
 bool VerifyMutationScenario(
