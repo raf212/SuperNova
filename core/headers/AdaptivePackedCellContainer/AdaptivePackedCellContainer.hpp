@@ -13,6 +13,8 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
         bool IsOpenGeneration_() noexcept;
     public:
         static constexpr uint8_t REALTION_FIND_TRIES = 1u;
+        //Do not change wherever it is default until proven
+        static constexpr uint8_t INTERNAL_RECURSION = 1u;
 
         enum class MutationResult : uint8_t
         {
@@ -21,35 +23,40 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
             RETRY = 2
         };
 
-        bool AddParent(
+        MutationResult AddParent(
             AdaptivePackedCellContainer& parent,
             FabricSegments edge_table,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_recursion = INTERNAL_RECURSION
         ) noexcept;
 
-        bool RemoveParent(
+        MutationResult RemoveParent(
             AdaptivePackedCellContainer& parent,
             FabricSegments edge_table,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_recursion = INTERNAL_RECURSION
         ) noexcept;
 
-        bool ReplaceParent(
+        MutationResult ReplaceParent(
             AdaptivePackedCellContainer& old_parent,
             AdaptivePackedCellContainer& new_parent,
             FabricSegments edge_table,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_recursion = INTERNAL_RECURSION
         ) noexcept;
 
-        bool AttachMyChild(
+        MutationResult AttachMyChild(
             AdaptivePackedCellContainer& child,
             FabricSegments edge_table,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_recursion = INTERNAL_RECURSION
         ) noexcept;
 
-        bool DetachMyChild(
+        MutationResult DetachMyChild(
             AdaptivePackedCellContainer& child,
             FabricSegments edge_table,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_recursion = INTERNAL_RECURSION
         ) noexcept;
 
         AdaptivePackedCellContainer FindParent(

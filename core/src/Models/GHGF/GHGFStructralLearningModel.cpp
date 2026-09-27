@@ -200,7 +200,7 @@ namespace BidirectionalInMemGraph
         publication.Context = &context;
         publication.Publish = &GHGFStructralLearningModel::PublishCoupling_;
 
-        bool committed = false;
+        MutationResult committed{};
         switch (mutation.Operation)
         {
         case Operation::ADD_PARENT:
@@ -247,9 +247,16 @@ namespace BidirectionalInMemGraph
             result.Result = Concurrent::STALE;
             return result;
         }
-        if (!committed)
+
+        if (committed == MutationResult::RETRY)
         {
             result.Result = Concurrent::RETRY;
+            return result;
+        }
+
+        if (committed == MutationResult::INVALID)
+        {
+            result.Result = Concurrent::REJECTED;
             return result;
         }
 

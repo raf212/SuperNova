@@ -99,7 +99,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        if (!child.AddParent(parent, connection.Edge))
+        if (child.AddParent(parent, connection.Edge) != MutationResult::COMMITTED)
         {
             return false;
         }
@@ -138,7 +138,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        if (!child.RemoveParent(parent, connection.Edge))
+        if (child.RemoveParent(parent, connection.Edge) != MutationResult::COMMITTED)
         {
             return false;
         }
