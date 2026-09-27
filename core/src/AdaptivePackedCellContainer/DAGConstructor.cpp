@@ -606,7 +606,8 @@ namespace BidirectionalInMemGraph
         uint32_t child_generation,
         FabricSegments edge_table,
         ConditionalParentPublication* publication,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_max_tries
     ) noexcept
     {
         if (
@@ -641,7 +642,7 @@ namespace BidirectionalInMemGraph
                     parent_slot,
                     EdgeBuilder::EdgeDomain::CHILD_LIST
                 ) ||
-                !ReserveAllRows_(transaction, DEFAULT_INTERNAL_TRIES__)
+                !ReserveAllRows_(transaction, internal_max_tries)
             )
             {
                 continue;
@@ -818,7 +819,8 @@ namespace BidirectionalInMemGraph
         uint32_t child_generation,
         FabricSegments edge_table,
         ConditionalParentPublication* publication,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_max_tries
     ) noexcept
     {
         if (
@@ -852,7 +854,7 @@ namespace BidirectionalInMemGraph
                     parent_slot,
                     EdgeBuilder::EdgeDomain::CHILD_LIST
                 ) ||
-                !ReserveAllRows_(transaction, DEFAULT_INTERNAL_TRIES__)
+                !ReserveAllRows_(transaction, internal_max_tries)
             )
             {
                 continue;
@@ -1020,7 +1022,8 @@ namespace BidirectionalInMemGraph
         uint32_t child_generation,
         FabricSegments edge_table,
         ConditionalParentPublication* publication,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_max_tries
     ) noexcept
     {
         if (
@@ -1070,7 +1073,7 @@ namespace BidirectionalInMemGraph
                     new_parent_slot,
                     EdgeBuilder::EdgeDomain::CHILD_LIST
                 ) ||
-                !ReserveAllRows_(transaction, DEFAULT_INTERNAL_TRIES__)
+                !ReserveAllRows_(transaction, internal_max_tries)
             )
             {
                 continue;

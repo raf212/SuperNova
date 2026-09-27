@@ -233,7 +233,8 @@ namespace BidirectionalInMemGraph
             uint32_t child_generation,
             FabricSegments edge_table,
             ConditionalParentPublication* publication = nullptr,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_max_tries = DEFAULT_INTERNAL_TRIES__
         ) noexcept;
 
         bool RemoveParentRelation_(
@@ -243,7 +244,8 @@ namespace BidirectionalInMemGraph
             uint32_t child_generation,
             FabricSegments edge_table,
             ConditionalParentPublication* publication = nullptr,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_max_tries = DEFAULT_INTERNAL_TRIES__
         ) noexcept;
 
         bool ReplaceParentRelation_(
@@ -255,7 +257,8 @@ namespace BidirectionalInMemGraph
             uint32_t child_generation,
             FabricSegments edge_table,
             ConditionalParentPublication* publication = nullptr,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_max_tries = DEFAULT_INTERNAL_TRIES__
         ) noexcept;
 
     };

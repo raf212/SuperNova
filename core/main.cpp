@@ -5,9 +5,5 @@
 #include "TestFiles/SuperNovaTest2ARepeat.hpp"
 int main()
 {
-    return SuperNovaTest2ARepeat::Run(
-        100000,
-        16,
-        "SuperNova_Test2A_LongRun.txt"
-    );
+    return APCDAGTests::RunAll();
 }

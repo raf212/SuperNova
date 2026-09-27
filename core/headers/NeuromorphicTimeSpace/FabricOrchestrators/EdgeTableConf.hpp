@@ -18,6 +18,13 @@ namespace BidirectionalInMemGraph
             REMOVE_PARENT = 1,
             REPLACE_PARENT = 2
         };
+
+        enum class MutationResult : uint8_t
+        {
+            COMMITTED = 0,
+            RETRY = 1,
+            INVALID = 2
+        };
         
         using DirtyRelationMask = uint64_t;
 
