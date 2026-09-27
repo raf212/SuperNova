@@ -14,6 +14,13 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
     public:
         static constexpr uint8_t REALTION_FIND_TRIES = 1u;
 
+        enum class MutationResult : uint8_t
+        {
+            COMMITTED = 0,
+            INVALID = 1,
+            RETRY = 2
+        };
+
         bool AddParent(
             AdaptivePackedCellContainer& parent,
             FabricSegments edge_table,
