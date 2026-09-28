@@ -150,7 +150,7 @@ namespace BidirectionalInMemGraph
             uint32_t relation_locator
         ) noexcept;
 
-        bool ReserveAllRows_(
+        SeqLockedOperation ReserveAllRows_(
             DAGMutationTransaction& transaction,
             uint32_t max_tries
         ) noexcept;
@@ -184,6 +184,8 @@ namespace BidirectionalInMemGraph
         friend class AdaptivePackedCellContainer;
         friend class FabricToAPCLinker;
         friend class GHGFStructralLearningModel;
+    public:
+        using MutationResult = AdaptivePackedCellContainer::MutationResult;
 
     protected:
         static constexpr bool SameHeader_(
@@ -226,27 +228,29 @@ namespace BidirectionalInMemGraph
             ParentRowScan& scan
         ) noexcept;
 
-        bool AddParentRelation_(
+        MutationResult AddParentRelation_(
             uint32_t parent_slot,
             uint32_t parent_generation,
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
             ConditionalParentPublication* publication = nullptr,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_max_tries = DEFAULT_INTERNAL_TRIES__
         ) noexcept;
 
-        bool RemoveParentRelation_(
+        MutationResult RemoveParentRelation_(
             uint32_t parent_slot,
             uint32_t parent_generation,
             uint32_t child_slot,
             uint32_t child_generation,
             FabricSegments edge_table,
             ConditionalParentPublication* publication = nullptr,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_max_tries = DEFAULT_INTERNAL_TRIES__
         ) noexcept;
 
-        bool ReplaceParentRelation_(
+        MutationResult ReplaceParentRelation_(
             uint32_t old_parent_slot,
             uint32_t old_parent_generation,
             uint32_t new_parent_slot,
@@ -255,7 +259,8 @@ namespace BidirectionalInMemGraph
             uint32_t child_generation,
             FabricSegments edge_table,
             ConditionalParentPublication* publication = nullptr,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
+            uint32_t max_tries = DEFAULT_MAX_TRIES,
+            uint32_t internal_max_tries = DEFAULT_INTERNAL_TRIES__
         ) noexcept;
 
     };

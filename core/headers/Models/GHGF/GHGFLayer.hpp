@@ -29,9 +29,9 @@ namespace BidirectionalInMemGraph
         enum class GHGFConcurrentOperation : uint8_t
         {
             SUCCESS = 0,
-            RETRY = 1,
-            STALE = 2,
-            REJECTED = 3
+            REJECTED = 1,
+            RETRY = 2,
+            STALE = 3,
         };
 
         struct GHGFStructureMutation final

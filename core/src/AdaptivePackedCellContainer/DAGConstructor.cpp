@@ -4,6 +4,8 @@
 
 namespace BidirectionalInMemGraph
 {
+    using MutationResult = AdaptivePackedCellContainer::MutationResult;
+
     bool DAGMutationConf::ValidateConditionalParentPublication_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
@@ -290,7 +292,7 @@ namespace BidirectionalInMemGraph
         return nullptr;
     }
 
-    bool DAGMutationConf::ReserveAllRows_(
+    FabricToAPCLinker::SeqLockedOperation DAGMutationConf::ReserveAllRows_(
         DAGMutationTransaction& transaction,
         uint32_t max_tries
     ) noexcept
@@ -298,24 +300,24 @@ namespace BidirectionalInMemGraph
         for (uint8_t i = 0u; i < transaction.RowCount; ++i)
         {
             DAGRowParticipant& row = transaction.Rows[i];
-            if (
-                ReserveEdgeDomain_(
-                    transaction.EdgeTable,
-                    row.Slot,
-                    row.Domain,
-                    EdgeBuilder::EdgeStatus::LIVE,
-                    row.Before,
-                    max_tries
-                ) != SeqLockedOperation::FOUND
-            )
+            SeqLockedOperation op = ReserveEdgeDomain_(
+                transaction.EdgeTable,
+                row.Slot,
+                row.Domain,
+                EdgeBuilder::EdgeStatus::LIVE,
+                row.Before,
+                max_tries
+            );
+
+            if (op != SeqLockedOperation::FOUND)
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return op;
             }
             row.WorkTail = row.Before.TailLocator;
             row.Reserved = true;
         }
-        return true;
+        return SeqLockedOperation::FOUND;
     }
 
     DAGMutationConf::DAGRelationDelta*
@@ -599,14 +601,15 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    bool ConstructDAGOnEachAxis::AddParentRelation_(
+    MutationResult ConstructDAGOnEachAxis::AddParentRelation_(
         uint32_t parent_slot,
         uint32_t parent_generation,
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
         ConditionalParentPublication* publication,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_max_tries
     ) noexcept
     {
         if (
@@ -618,7 +621,7 @@ namespace BidirectionalInMemGraph
             !EdgeBuilder::CanInsertCombinedDAGRelation(parent_slot, child_slot)
         )
         {
-            return false;
+            return MutationResult::INVALID;
         }
 
         const uint64_t parent_handle = EdgeBuilder::MakeParentHandle(
@@ -640,20 +643,30 @@ namespace BidirectionalInMemGraph
                     transaction,
                     parent_slot,
                     EdgeBuilder::EdgeDomain::CHILD_LIST
-                ) ||
-                !ReserveAllRows_(transaction, DEFAULT_INTERNAL_TRIES__)
+                )
             )
+            {
+                return MutationResult::INVALID;
+            }
+            
+            SeqLockedOperation op = ReserveAllRows_(transaction, internal_max_tries);
+            if (op == SeqLockedOperation::RETRY)
             {
                 continue;
             }
 
+            if (op != SeqLockedOperation::FOUND)
+            {
+                return MutationResult::INVALID;
+            }
+            
             if (!ValidateConditionalParentPublication_(
                     transaction,
                     child_slot,
                     publication))
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             if (
@@ -662,7 +675,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             ParentRowScan scan{};
@@ -685,7 +698,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const uint32_t self = EdgeBuilder::PackRelationLocator(
@@ -707,7 +720,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const uint32_t old_tail = parent_list->Before.TailLocator;
@@ -730,7 +743,7 @@ namespace BidirectionalInMemGraph
                 );
 
                 CommitRowTransaction_(transaction);
-                return true;
+                return MutationResult::COMMITTED;
             }
 
             if (!EdgeBuilder::IsValidRelationLocator(
@@ -740,7 +753,7 @@ namespace BidirectionalInMemGraph
             ))
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             DAGRelationDelta* const tail = EditReservedSiblingLocators_(
@@ -755,7 +768,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const uint32_t first = EdgeBuilder::NextLocator(tail->Before);
@@ -766,7 +779,7 @@ namespace BidirectionalInMemGraph
             ))
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
             DAGRelationDelta* const first_delta = EditReservedSiblingLocators_(
                 transaction,
@@ -780,7 +793,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             EdgeBuilder::SetSiblingLocators(
@@ -806,19 +819,20 @@ namespace BidirectionalInMemGraph
                 publication
             );
             CommitRowTransaction_(transaction);
-            return true;
+            return MutationResult::COMMITTED;
         }
-        return false;
+        return MutationResult::RETRY;
     }
 
-    bool ConstructDAGOnEachAxis::RemoveParentRelation_(
+    MutationResult ConstructDAGOnEachAxis::RemoveParentRelation_(
         uint32_t parent_slot,
         uint32_t parent_generation,
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
         ConditionalParentPublication* publication,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_max_tries
     ) noexcept
     {
         if (
@@ -830,7 +844,7 @@ namespace BidirectionalInMemGraph
             !HandleOfAPCStatic::IsGenerationValid(child_generation)
         )
         {
-            return false;
+            return MutationResult::INVALID;
         }
 
         const uint64_t parent_handle = EdgeBuilder::MakeParentHandle(
@@ -851,19 +865,30 @@ namespace BidirectionalInMemGraph
                     transaction,
                     parent_slot,
                     EdgeBuilder::EdgeDomain::CHILD_LIST
-                ) ||
-                !ReserveAllRows_(transaction, DEFAULT_INTERNAL_TRIES__)
+                )
             )
+            {
+                return MutationResult::INVALID;
+            }
+
+            SeqLockedOperation op = ReserveAllRows_(transaction, internal_max_tries);
+            if (op == SeqLockedOperation::RETRY)
             {
                 continue;
             }
+
+            if (op != SeqLockedOperation::FOUND)
+            {
+                return MutationResult::INVALID;
+            }
+
             if (!ValidateConditionalParentPublication_(
                     transaction,
                     child_slot,
                     publication))
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             if (
@@ -872,7 +897,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             ParentRowScan scan{};
@@ -894,7 +919,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const uint32_t self = EdgeBuilder::PackRelationLocator(
@@ -917,7 +942,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const uint32_t previous =
@@ -938,7 +963,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const bool singleton = previous == self && next == self;
@@ -948,7 +973,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             if (!singleton)
@@ -975,7 +1000,7 @@ namespace BidirectionalInMemGraph
                 )
                 {
                     AbortRowTransaction_(transaction);
-                    return false;
+                    return MutationResult::INVALID;
                 }
                 EdgeBuilder::SetSiblingLocators(
                     previous_delta->Work,
@@ -1006,12 +1031,12 @@ namespace BidirectionalInMemGraph
                 publication
             );
             CommitRowTransaction_(transaction);
-            return true;
+            return MutationResult::COMMITTED;
         }
-        return false;
+        return MutationResult::RETRY;
     }
 
-    bool ConstructDAGOnEachAxis::ReplaceParentRelation_(
+    MutationResult ConstructDAGOnEachAxis::ReplaceParentRelation_(
         uint32_t old_parent_slot,
         uint32_t old_parent_generation,
         uint32_t new_parent_slot,
@@ -1020,7 +1045,8 @@ namespace BidirectionalInMemGraph
         uint32_t child_generation,
         FabricSegments edge_table,
         ConditionalParentPublication* publication,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_max_tries
     ) noexcept
     {
         if (
@@ -1038,7 +1064,7 @@ namespace BidirectionalInMemGraph
             )
         )
         {
-            return false;
+            return MutationResult::INVALID;
         }
 
         const uint64_t old_parent_handle = EdgeBuilder::MakeParentHandle(
@@ -1069,11 +1095,21 @@ namespace BidirectionalInMemGraph
                     transaction,
                     new_parent_slot,
                     EdgeBuilder::EdgeDomain::CHILD_LIST
-                ) ||
-                !ReserveAllRows_(transaction, DEFAULT_INTERNAL_TRIES__)
+                ) 
             )
             {
+                return MutationResult::INVALID;
+            }
+
+            SeqLockedOperation op = ReserveAllRows_(transaction, internal_max_tries);
+            if (op == SeqLockedOperation::RETRY)
+            {
                 continue;
+            }
+
+            if (op != SeqLockedOperation::FOUND)
+            {
+                return MutationResult::INVALID;
             }
 
             if (!ValidateConditionalParentPublication_(
@@ -1082,7 +1118,7 @@ namespace BidirectionalInMemGraph
                     publication))
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             if (
@@ -1092,7 +1128,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             ParentRowScan scan{};
@@ -1121,7 +1157,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const uint32_t self = EdgeBuilder::PackRelationLocator(
@@ -1155,7 +1191,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const uint32_t old_previous =
@@ -1176,7 +1212,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             const bool old_singleton =
@@ -1188,7 +1224,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 AbortRowTransaction_(transaction);
-                return false;
+                return MutationResult::INVALID;
             }
 
             if (old_singleton)
@@ -1219,7 +1255,7 @@ namespace BidirectionalInMemGraph
                 )
                 {
                     AbortRowTransaction_(transaction);
-                    return false;
+                    return MutationResult::INVALID;
                 }
                 EdgeBuilder::SetSiblingLocators(
                     previous_delta->Work,
@@ -1255,7 +1291,7 @@ namespace BidirectionalInMemGraph
                 ))
                 {
                     AbortRowTransaction_(transaction);
-                    return false;
+                    return MutationResult::INVALID;
                 }
                 DAGRelationDelta* const tail_delta =
                     EditReservedSiblingLocators_(
@@ -1270,7 +1306,7 @@ namespace BidirectionalInMemGraph
                 )
                 {
                     AbortRowTransaction_(transaction);
-                    return false;
+                    return MutationResult::INVALID;
                 }
                 const uint32_t new_first =
                     EdgeBuilder::NextLocator(tail_delta->Before);
@@ -1281,7 +1317,7 @@ namespace BidirectionalInMemGraph
                 ))
                 {
                     AbortRowTransaction_(transaction);
-                    return false;
+                    return MutationResult::INVALID;
                 }
                 DAGRelationDelta* const first_delta =
                     EditReservedSiblingLocators_(
@@ -1296,7 +1332,7 @@ namespace BidirectionalInMemGraph
                 )
                 {
                     AbortRowTransaction_(transaction);
-                    return false;
+                    return MutationResult::INVALID;
                 }
                 EdgeBuilder::SetSiblingLocators(
                     tail_delta->Work,
@@ -1324,9 +1360,9 @@ namespace BidirectionalInMemGraph
                 publication
             );
             CommitRowTransaction_(transaction);            
-            return true;
+            return MutationResult::COMMITTED;
         }
-        return false;
+        return MutationResult::RETRY;
     }
 
 

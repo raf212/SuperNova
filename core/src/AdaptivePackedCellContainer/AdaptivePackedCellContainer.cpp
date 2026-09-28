@@ -4,6 +4,7 @@
 
 namespace BidirectionalInMemGraph
 {
+    using MutationResult = AdaptivePackedCellContainer::MutationResult;
 
     bool AdaptivePackedCellContainer::IsOpenGeneration_() noexcept
     {
@@ -13,63 +14,82 @@ namespace BidirectionalInMemGraph
         );
     }
 
-    bool AdaptivePackedCellContainer::AddParent(
+    MutationResult AdaptivePackedCellContainer::AddParent(
         AdaptivePackedCellContainer& parent,
         FabricSegments edge_table,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_recursion
     ) noexcept
     {
-        return
-            IsFabricBound_() &&
-            parent.IsFabricBound_() &&
-            APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
-            APCCache_.FabricOwnerPtr_->AddParentRelation_(
+        if (
+            !IsFabricBound_() ||
+            !parent.IsFabricBound_() ||
+            APCCache_.FabricOwnerPtr_ != parent.APCCache_.FabricOwnerPtr_ 
+        )
+        {
+            return MutationResult::INVALID;
+        }
+
+        return APCCache_.FabricOwnerPtr_->AddParentRelation_(
                 parent.APCCache_.APCSlotIdx_,
                 parent.APCCache_.CurrentGeneration_,
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 nullptr,
-                max_tries
+                max_tries,
+                internal_recursion
             );
     }
 
-    bool AdaptivePackedCellContainer::RemoveParent(
+    MutationResult AdaptivePackedCellContainer::RemoveParent(
         AdaptivePackedCellContainer& parent,
         FabricSegments edge_table,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_recursion
     ) noexcept
     {
-        return
-            IsFabricBound_() &&
-            parent.IsFabricBound_() &&
-            APCCache_.FabricOwnerPtr_ == parent.APCCache_.FabricOwnerPtr_ &&
-            APCCache_.FabricOwnerPtr_->RemoveParentRelation_(
+        if (
+            !IsFabricBound_() ||
+            !parent.IsFabricBound_() ||
+            APCCache_.FabricOwnerPtr_ != parent.APCCache_.FabricOwnerPtr_ 
+        )
+        {
+            return MutationResult::INVALID;
+        }
+
+        return APCCache_.FabricOwnerPtr_->RemoveParentRelation_(
                 parent.APCCache_.APCSlotIdx_,
                 parent.APCCache_.CurrentGeneration_,
                 APCCache_.APCSlotIdx_,
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 nullptr,
-                max_tries
+                max_tries,
+                internal_recursion
             );
     }
 
-    bool AdaptivePackedCellContainer::ReplaceParent(
+    MutationResult AdaptivePackedCellContainer::ReplaceParent(
         AdaptivePackedCellContainer& old_parent,
         AdaptivePackedCellContainer& new_parent,
         FabricSegments edge_table,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_recursion
     ) noexcept
     {
-        return
-            &old_parent != &new_parent &&
-            IsFabricBound_() &&
-            old_parent.IsFabricBound_() &&
-            new_parent.IsFabricBound_() &&
-            APCCache_.FabricOwnerPtr_ == old_parent.APCCache_.FabricOwnerPtr_ &&
-            APCCache_.FabricOwnerPtr_ == new_parent.APCCache_.FabricOwnerPtr_ &&
-            APCCache_.FabricOwnerPtr_->ReplaceParentRelation_(
+        if (
+            &old_parent == &new_parent ||
+            !IsFabricBound_() ||
+            !old_parent.IsFabricBound_() ||
+            !new_parent.IsFabricBound_() ||
+            APCCache_.FabricOwnerPtr_ != old_parent.APCCache_.FabricOwnerPtr_ ||
+            APCCache_.FabricOwnerPtr_ != new_parent.APCCache_.FabricOwnerPtr_ 
+        )
+        {
+            return MutationResult::INVALID;
+        }
+        return APCCache_.FabricOwnerPtr_->ReplaceParentRelation_(
                 old_parent.APCCache_.APCSlotIdx_,
                 old_parent.APCCache_.CurrentGeneration_,
                 new_parent.APCCache_.APCSlotIdx_,
@@ -78,26 +98,29 @@ namespace BidirectionalInMemGraph
                 APCCache_.CurrentGeneration_,
                 edge_table,
                 nullptr,
-                max_tries
+                max_tries,
+                internal_recursion
             );
     }
 
-    bool AdaptivePackedCellContainer::AttachMyChild(
+    MutationResult AdaptivePackedCellContainer::AttachMyChild(
         AdaptivePackedCellContainer& child,
         FabricSegments edge_table,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_recursion
     ) noexcept
     {
-        return child.AddParent(*this, edge_table, max_tries);
+        return child.AddParent(*this, edge_table, max_tries, internal_recursion);
     }
 
-    bool AdaptivePackedCellContainer::DetachMyChild(
+    MutationResult AdaptivePackedCellContainer::DetachMyChild(
         AdaptivePackedCellContainer& child,
         FabricSegments edge_table,
-        uint32_t max_tries
+        uint32_t max_tries,
+        uint32_t internal_recursion
     ) noexcept
     {
-        return child.RemoveParent(*this, edge_table, max_tries);
+        return child.RemoveParent(*this, edge_table, max_tries, internal_recursion);
     }
     
     AdaptivePackedCellContainer AdaptivePackedCellContainer::FindParent(

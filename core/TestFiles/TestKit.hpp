@@ -61,6 +61,33 @@ using namespace BidirectionalInMemGraph;
 
 using Clock = std::chrono::steady_clock;
 using ReadOperation = FabricToAPCLinker::SeqLockedOperation;
+using MutationResult = AdaptivePackedCellContainer::MutationResult;
+
+constexpr bool MutationCommitted(MutationResult result) noexcept
+{
+    return result == MutationResult::COMMITTED;
+}
+
+constexpr bool MutationInvalid(MutationResult result) noexcept
+{
+    return result == MutationResult::INVALID;
+}
+
+constexpr bool MutationRetry(MutationResult result) noexcept
+{
+    return result == MutationResult::RETRY;
+}
+
+constexpr const char* MutationResultName(MutationResult result) noexcept
+{
+    switch (result)
+    {
+    case MutationResult::COMMITTED: return "COMMITTED";
+    case MutationResult::INVALID:   return "INVALID";
+    case MutationResult::RETRY:     return "RETRY";
+    default:                        return "UNKNOWN";
+    }
+}
 
 static_assert(ADS::META_CELL_COUNT == 8u);
 static_assert(sizeof(SchemaDefinition::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
@@ -1069,18 +1096,79 @@ public:
         return true;
     }
 
+    MutationResult AddParentResult(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
+    {
+        if (parent >= NodeCount || child >= NodeCount)
+            return MutationResult::INVALID;
+
+        return Nodes_[child].AddParent(
+            Nodes_[parent],
+            EdgeTableForAxis(axis),
+            max_tries,
+            internal_recursion
+        );
+    }
+
+    MutationResult RemoveParentResult(
+        std::size_t parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
+    {
+        if (parent >= NodeCount || child >= NodeCount)
+            return MutationResult::INVALID;
+
+        return Nodes_[child].RemoveParent(
+            Nodes_[parent],
+            EdgeTableForAxis(axis),
+            max_tries,
+            internal_recursion
+        );
+    }
+
+    MutationResult ReplaceParentResult(
+        std::size_t old_parent,
+        std::size_t new_parent,
+        std::size_t child,
+        Axis axis,
+        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
+    {
+        if (
+            old_parent >= NodeCount ||
+            new_parent >= NodeCount ||
+            child >= NodeCount
+        )
+        {
+            return MutationResult::INVALID;
+        }
+
+        return Nodes_[child].ReplaceParent(
+            Nodes_[old_parent],
+            Nodes_[new_parent],
+            EdgeTableForAxis(axis),
+            max_tries,
+            internal_recursion
+        );
+    }
+
     bool AddParent(
         std::size_t parent,
         std::size_t child,
         Axis axis,
         std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
     {
-        return parent < NodeCount && child < NodeCount &&
-            Nodes_[child].AddParent(
-                Nodes_[parent],
-                EdgeTableForAxis(axis),
-                max_tries
-            );
+        return MutationCommitted(
+            AddParentResult(parent, child, axis, max_tries));
     }
 
     bool RemoveParent(
@@ -1089,12 +1177,8 @@ public:
         Axis axis,
         std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
     {
-        return parent < NodeCount && child < NodeCount &&
-            Nodes_[child].RemoveParent(
-                Nodes_[parent],
-                EdgeTableForAxis(axis),
-                max_tries
-            );
+        return MutationCommitted(
+            RemoveParentResult(parent, child, axis, max_tries));
     }
 
     bool ReplaceParent(
@@ -1104,13 +1188,8 @@ public:
         Axis axis,
         std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
     {
-        return old_parent < NodeCount && new_parent < NodeCount && child < NodeCount &&
-            Nodes_[child].ReplaceParent(
-                Nodes_[old_parent],
-                Nodes_[new_parent],
-                EdgeTableForAxis(axis),
-                max_tries
-            );
+        return MutationCommitted(
+            ReplaceParentResult(old_parent, new_parent, child, axis, max_tries));
     }
 
     ReadResult FindParent(
@@ -1622,22 +1701,91 @@ public:
         return true;
     }
 
-    bool AddParent(std::size_t p, std::size_t c, Axis a, std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+    MutationResult AddParentResult(
+        std::size_t p,
+        std::size_t c,
+        Axis a,
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        return p < NodeCount_ && c < NodeCount_ &&
-            Nodes_[c].AddParent(Nodes_[p], EdgeTableForAxis(a), tries);
+        if (p >= NodeCount_ || c >= NodeCount_)
+            return MutationResult::INVALID;
+
+        return Nodes_[c].AddParent(
+            Nodes_[p],
+            EdgeTableForAxis(a),
+            tries,
+            internal_recursion);
     }
 
-    bool RemoveParent(std::size_t p, std::size_t c, Axis a, std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+    MutationResult RemoveParentResult(
+        std::size_t p,
+        std::size_t c,
+        Axis a,
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        return p < NodeCount_ && c < NodeCount_ &&
-            Nodes_[c].RemoveParent(Nodes_[p], EdgeTableForAxis(a), tries);
+        if (p >= NodeCount_ || c >= NodeCount_)
+            return MutationResult::INVALID;
+
+        return Nodes_[c].RemoveParent(
+            Nodes_[p],
+            EdgeTableForAxis(a),
+            tries,
+            internal_recursion);
     }
 
-    bool ReplaceParent(std::size_t old_p, std::size_t new_p, std::size_t c, Axis a, std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+    MutationResult ReplaceParentResult(
+        std::size_t old_p,
+        std::size_t new_p,
+        std::size_t c,
+        Axis a,
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal_recursion =
+            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        return old_p < NodeCount_ && new_p < NodeCount_ && c < NodeCount_ &&
-            Nodes_[c].ReplaceParent(Nodes_[old_p], Nodes_[new_p], EdgeTableForAxis(a), tries);
+        if (old_p >= NodeCount_ || new_p >= NodeCount_ || c >= NodeCount_)
+            return MutationResult::INVALID;
+
+        return Nodes_[c].ReplaceParent(
+            Nodes_[old_p],
+            Nodes_[new_p],
+            EdgeTableForAxis(a),
+            tries,
+            internal_recursion);
+    }
+
+    bool AddParent(
+        std::size_t p,
+        std::size_t c,
+        Axis a,
+        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+    {
+        return MutationCommitted(
+            AddParentResult(p, c, a, tries));
+    }
+
+    bool RemoveParent(
+        std::size_t p,
+        std::size_t c,
+        Axis a,
+        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+    {
+        return MutationCommitted(
+            RemoveParentResult(p, c, a, tries));
+    }
+
+    bool ReplaceParent(
+        std::size_t old_p,
+        std::size_t new_p,
+        std::size_t c,
+        Axis a,
+        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
+    {
+        return MutationCommitted(
+            ReplaceParentResult(old_p, new_p, c, a, tries));
     }
 
     ReadResult FindParent(std::size_t c, Axis a, std::uint8_t ordinal, std::uint32_t tries = 1u) noexcept
@@ -2110,7 +2258,58 @@ GraphProof ProveQuiescentCombinedDAG(Backend& backend)
 }
 
 template <typename Backend>
-bool RetryReplace(
+MutationResult ReplaceParentMutation(
+    Backend& backend,
+    std::size_t old_parent,
+    std::size_t new_parent,
+    std::size_t child,
+    Axis axis,
+    std::uint32_t tries,
+    std::uint32_t internal_recursion =
+        AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
+{
+    if constexpr (requires
+    {
+        backend.ReplaceParentResult(
+            old_parent,
+            new_parent,
+            child,
+            axis,
+            tries,
+            internal_recursion);
+    })
+    {
+        return backend.ReplaceParentResult(
+            old_parent,
+            new_parent,
+            child,
+            axis,
+            tries,
+            internal_recursion);
+    }
+    else if constexpr (requires
+    {
+        backend.ReplaceParentResult(
+            old_parent, new_parent, child, axis, tries);
+    })
+    {
+        // Backends without an internal-reservation budget retain their
+        // existing behavior. The delta-recursion experiment is meaningful
+        // for SuperNova Fabric backends.
+        return backend.ReplaceParentResult(
+            old_parent, new_parent, child, axis, tries);
+    }
+    else
+    {
+        return backend.ReplaceParent(
+            old_parent, new_parent, child, axis, tries)
+            ? MutationResult::COMMITTED
+            : MutationResult::INVALID;
+    }
+}
+
+template <typename Backend>
+MutationResult RetryReplace(
     Backend& backend,
     std::size_t old_parent,
     std::size_t new_parent,
@@ -2122,14 +2321,140 @@ bool RetryReplace(
 {
     for (std::uint32_t attempt = 0u; attempt < attempt_limit; ++attempt)
     {
-        if (backend.ReplaceParent(old_parent, new_parent, child, axis, 1u))
-        {
-            return true;
-        }
+        const MutationResult result = ReplaceParentMutation(
+            backend,
+            old_parent,
+            new_parent,
+            child,
+            axis,
+            1u);
+
+        if (result == MutationResult::COMMITTED)
+            return MutationResult::COMMITTED;
+
+        if (result == MutationResult::INVALID)
+            return MutationResult::INVALID;
+
         ++retry_count;
         PerturbSchedule(attempt);
     }
-    return false;
+
+    return MutationResult::RETRY;
+}
+
+
+template <typename Backend>
+MutationResult RetryReplaceDeltaRecursion(
+    Backend& backend,
+    std::size_t old_parent,
+    std::size_t new_parent,
+    std::size_t child,
+    Axis axis,
+    std::uint64_t& retry_count,
+    std::uint64_t& stage_exhaustions,
+    std::uint64_t& escalated_commits,
+    std::uint32_t& max_internal_recursion,
+    std::uint32_t& max_stage_reached,
+    std::uint32_t delta_recursion = 1u,
+    std::uint32_t transaction_attempt_limit = 1'000u) noexcept
+{
+    constexpr std::uint32_t BASE_INTERNAL_RECURSION =
+        AdaptivePackedCellContainer::INTERNAL_RECURSION;
+
+    if (
+        delta_recursion == 0u ||
+        transaction_attempt_limit == 0u)
+    {
+        return MutationResult::INVALID;
+    }
+
+    std::uint32_t internal_recursion = BASE_INTERNAL_RECURSION;
+    std::uint64_t cumulative_recursion = BASE_INTERNAL_RECURSION;
+    std::uint32_t stage = 1u;
+    bool escalated = false;
+
+    for (;;)
+    {
+        max_internal_recursion =
+            std::max(max_internal_recursion, internal_recursion);
+        max_stage_reached =
+            std::max(max_stage_reached, stage);
+
+        for (
+            std::uint32_t attempt = 0u;
+            attempt < transaction_attempt_limit;
+            ++attempt)
+        {
+            const MutationResult result =
+                ReplaceParentMutation(
+                    backend,
+                    old_parent,
+                    new_parent,
+                    child,
+                    axis,
+                    1u,
+                    internal_recursion);
+
+            if (result == MutationResult::COMMITTED)
+            {
+                if (escalated)
+                    ++escalated_commits;
+                return MutationResult::COMMITTED;
+            }
+
+            if (result == MutationResult::INVALID)
+                return MutationResult::INVALID;
+
+            ++retry_count;
+            PerturbSchedule(attempt);
+        }
+
+        ++stage_exhaustions;
+        escalated = true;
+
+        std::uint64_t next_internal_recursion = 0u;
+
+        if (stage == 1u)
+        {
+            // 1 -> 2 for the default delta_recursion=1.
+            next_internal_recursion =
+                static_cast<std::uint64_t>(internal_recursion) +
+                static_cast<std::uint64_t>(delta_recursion);
+        }
+        else
+        {
+            // Cumulative schedule:
+            // 1,2 -> 3
+            // 1,2,3 -> 6
+            // 1,2,3,6 -> 12
+            // then 24,48,...
+            next_internal_recursion = cumulative_recursion;
+        }
+
+        if (
+            next_internal_recursion == 0u ||
+            next_internal_recursion > UINT32_MAX)
+        {
+            return MutationResult::RETRY;
+        }
+
+        internal_recursion =
+            static_cast<std::uint32_t>(next_internal_recursion);
+
+        if (
+            cumulative_recursion >
+            UINT64_MAX - next_internal_recursion)
+        {
+            return MutationResult::RETRY;
+        }
+
+        cumulative_recursion += next_internal_recursion;
+
+        if (stage == UINT32_MAX)
+            return MutationResult::RETRY;
+
+        ++stage;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -2627,10 +2952,40 @@ bool BuildMutationBackend(
 
 struct MutationSweepResult
 {
-    bool Ok = false;
+    MutationResult Status = MutationResult::COMMITTED;
+
+    // Compatibility flag for callers that still consume a boolean result.
+    // RETRY is a progress/contention outcome, not an INVALID mutation.
+    bool Ok = true;
+
     double NsPerSuccess = 0.0;
     std::uint64_t Success = 0u;
     std::uint64_t Retries = 0u;
+    std::uint64_t InvalidFailures = 0u;
+    std::uint64_t RetryExhaustions = 0u;
+
+    // Delta-recursion experiment only. Existing RunMutationWorkers leaves
+    // these at zero.
+    std::uint64_t RecursionEscalations = 0u;
+    std::uint64_t EscalatedCommits = 0u;
+    std::uint32_t MaxInternalRecursion =
+        AdaptivePackedCellContainer::INTERNAL_RECURSION;
+    std::uint32_t MaxEscalationStage = 1u;
+
+    bool Completed() const noexcept
+    {
+        return Status == MutationResult::COMMITTED;
+    }
+
+    bool Invalid() const noexcept
+    {
+        return Status == MutationResult::INVALID;
+    }
+
+    bool RetriedOut() const noexcept
+    {
+        return Status == MutationResult::RETRY;
+    }
 };
 
 template <typename Backend>
@@ -2649,9 +3004,10 @@ MutationSweepResult RunMutationWorkers(
     std::barrier finish(
         static_cast<std::ptrdiff_t>(writer_count + 1u), end_phase);
 
-    std::atomic<bool> failed{false};
     std::atomic<std::uint64_t> success{0u};
     std::atomic<std::uint64_t> retries{0u};
+    std::atomic<std::uint64_t> invalid_failures{0u};
+    std::atomic<std::uint64_t> retry_exhaustions{0u};
     std::vector<std::thread> writers;
     writers.reserve(writer_count);
 
@@ -2664,52 +3020,319 @@ MutationSweepResult RunMutationWorkers(
             std::size_t v_current = scenario.InitialV(writer);
             std::uint64_t local_success = 0u;
             std::uint64_t local_retries = 0u;
+            std::uint64_t local_invalid = 0u;
+            std::uint64_t local_retry_exhaustions = 0u;
 
             start.arrive_and_wait();
-            for (std::uint32_t step = 0u; step < ConcurrencyConfig::MUTATIONS_PER_WRITER; ++step)
+            for (
+                std::uint32_t step = 0u;
+                step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+                ++step)
             {
                 const MutationStep mutation = schedule[writer][step];
-                if (
-                    !RetryReplace(
-                        backend, h_current, mutation.HParent, child,
-                        Axis::HORIZONTAL, local_retries) ||
-                    !RetryReplace(
-                        backend, v_current, mutation.VParent, child,
-                        Axis::VERTICAL, local_retries)
-                )
+
+                const MutationResult h_result = RetryReplace(
+                    backend,
+                    h_current,
+                    mutation.HParent,
+                    child,
+                    Axis::HORIZONTAL,
+                    local_retries);
+
+                if (h_result != MutationResult::COMMITTED)
                 {
-                    failed.store(true, std::memory_order_release);
+                    if (h_result == MutationResult::INVALID)
+                        ++local_invalid;
+                    else
+                        ++local_retry_exhaustions;
                     break;
                 }
+
                 h_current = mutation.HParent;
+                ++local_success;
+
+                const MutationResult v_result = RetryReplace(
+                    backend,
+                    v_current,
+                    mutation.VParent,
+                    child,
+                    Axis::VERTICAL,
+                    local_retries);
+
+                if (v_result != MutationResult::COMMITTED)
+                {
+                    if (v_result == MutationResult::INVALID)
+                        ++local_invalid;
+                    else
+                        ++local_retry_exhaustions;
+                    break;
+                }
+
                 v_current = mutation.VParent;
-                local_success += ConcurrencyConfig::OPERATIONS_PER_MUTATION_STEP;
+                ++local_success;
             }
+
             success.fetch_add(local_success, std::memory_order_relaxed);
             retries.fetch_add(local_retries, std::memory_order_relaxed);
+            invalid_failures.fetch_add(
+                local_invalid, std::memory_order_relaxed);
+            retry_exhaustions.fetch_add(
+                local_retry_exhaustions, std::memory_order_relaxed);
             finish.arrive_and_wait();
         });
     }
 
     start.arrive_and_wait();
     finish.arrive_and_wait();
-    for (std::thread& writer : writers) writer.join();
+    for (std::thread& writer : writers)
+        writer.join();
 
-    const std::uint64_t completed = success.load(std::memory_order_acquire);
+    const std::uint64_t completed =
+        success.load(std::memory_order_acquire);
+    const std::uint64_t invalid =
+        invalid_failures.load(std::memory_order_acquire);
+    const std::uint64_t exhausted =
+        retry_exhaustions.load(std::memory_order_acquire);
     const std::uint64_t expected =
-        writer_count * ConcurrencyConfig::MUTATIONS_PER_WRITER *
+        writer_count *
+        ConcurrencyConfig::MUTATIONS_PER_WRITER *
         ConcurrencyConfig::OPERATIONS_PER_MUTATION_STEP;
-    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        end - begin).count();
+
+    MutationResult status = MutationResult::COMMITTED;
+    if (invalid != 0u)
+        status = MutationResult::INVALID;
+    else if (exhausted != 0u || completed != expected)
+        status = MutationResult::RETRY;
+
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            end - begin).count();
 
     return {
-        !failed.load(std::memory_order_acquire) && completed == expected,
-        completed == 0u ? 0.0 :
-            static_cast<double>(elapsed) / static_cast<double>(completed),
+        status,
+        status != MutationResult::INVALID,
+        completed == 0u
+            ? 0.0
+            : static_cast<double>(elapsed) /
+                static_cast<double>(completed),
         completed,
-        retries.load(std::memory_order_acquire)
+        retries.load(std::memory_order_acquire),
+        invalid,
+        exhausted
     };
 }
+
+
+template <typename Backend>
+MutationSweepResult RunMutationWorkersDeltaRecursion(
+    Backend& backend,
+    const MutationScenario& scenario,
+    const MutationSchedule& schedule,
+    std::size_t writer_count,
+    std::uint32_t delta_recursion = 1u,
+    std::uint32_t transaction_attempt_limit = 1'000u)
+{
+    Clock::time_point begin{};
+    Clock::time_point end{};
+    auto begin_phase = [&]() noexcept { begin = Clock::now(); };
+    auto end_phase = [&]() noexcept { end = Clock::now(); };
+
+    std::barrier start(
+        static_cast<std::ptrdiff_t>(writer_count + 1u),
+        begin_phase);
+    std::barrier finish(
+        static_cast<std::ptrdiff_t>(writer_count + 1u),
+        end_phase);
+
+    std::atomic<std::uint64_t> success{0u};
+    std::atomic<std::uint64_t> retries{0u};
+    std::atomic<std::uint64_t> invalid_failures{0u};
+    std::atomic<std::uint64_t> retry_exhaustions{0u};
+    std::atomic<std::uint64_t> recursion_escalations{0u};
+    std::atomic<std::uint64_t> escalated_commits{0u};
+    std::atomic<std::uint32_t> max_internal_recursion{
+        AdaptivePackedCellContainer::INTERNAL_RECURSION};
+    std::atomic<std::uint32_t> max_escalation_stage{1u};
+
+    const auto AtomicMax___ =
+        [](std::atomic<std::uint32_t>& destination,
+           std::uint32_t value) noexcept
+    {
+        std::uint32_t observed =
+            destination.load(std::memory_order_relaxed);
+
+        while (
+            observed < value &&
+            !destination.compare_exchange_weak(
+                observed,
+                value,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed))
+        {}
+    };
+
+    std::vector<std::thread> writers;
+    writers.reserve(writer_count);
+
+    for (std::size_t writer = 0u; writer < writer_count; ++writer)
+    {
+        writers.emplace_back([&, writer]() noexcept
+        {
+            const std::size_t child = scenario.Child(writer);
+            std::size_t h_current = scenario.InitialH(writer);
+            std::size_t v_current = scenario.InitialV(writer);
+
+            std::uint64_t local_success = 0u;
+            std::uint64_t local_retries = 0u;
+            std::uint64_t local_invalid = 0u;
+            std::uint64_t local_retry_exhaustions = 0u;
+            std::uint64_t local_stage_exhaustions = 0u;
+            std::uint64_t local_escalated_commits = 0u;
+            std::uint32_t local_max_internal_recursion =
+                AdaptivePackedCellContainer::INTERNAL_RECURSION;
+            std::uint32_t local_max_stage = 1u;
+
+            start.arrive_and_wait();
+
+            for (
+                std::uint32_t step = 0u;
+                step < ConcurrencyConfig::MUTATIONS_PER_WRITER;
+                ++step)
+            {
+                const MutationStep mutation = schedule[writer][step];
+
+                const MutationResult h_result =
+                    RetryReplaceDeltaRecursion(
+                        backend,
+                        h_current,
+                        mutation.HParent,
+                        child,
+                        Axis::HORIZONTAL,
+                        local_retries,
+                        local_stage_exhaustions,
+                        local_escalated_commits,
+                        local_max_internal_recursion,
+                        local_max_stage,
+                        delta_recursion,
+                        transaction_attempt_limit);
+
+                if (h_result != MutationResult::COMMITTED)
+                {
+                    if (h_result == MutationResult::INVALID)
+                        ++local_invalid;
+                    else
+                        ++local_retry_exhaustions;
+                    break;
+                }
+
+                h_current = mutation.HParent;
+                ++local_success;
+
+                const MutationResult v_result =
+                    RetryReplaceDeltaRecursion(
+                        backend,
+                        v_current,
+                        mutation.VParent,
+                        child,
+                        Axis::VERTICAL,
+                        local_retries,
+                        local_stage_exhaustions,
+                        local_escalated_commits,
+                        local_max_internal_recursion,
+                        local_max_stage,
+                        delta_recursion,
+                        transaction_attempt_limit);
+
+                if (v_result != MutationResult::COMMITTED)
+                {
+                    if (v_result == MutationResult::INVALID)
+                        ++local_invalid;
+                    else
+                        ++local_retry_exhaustions;
+                    break;
+                }
+
+                v_current = mutation.VParent;
+                ++local_success;
+            }
+
+            success.fetch_add(local_success, std::memory_order_relaxed);
+            retries.fetch_add(local_retries, std::memory_order_relaxed);
+            invalid_failures.fetch_add(local_invalid, std::memory_order_relaxed);
+            retry_exhaustions.fetch_add(
+                local_retry_exhaustions,
+                std::memory_order_relaxed);
+            recursion_escalations.fetch_add(
+                local_stage_exhaustions,
+                std::memory_order_relaxed);
+            escalated_commits.fetch_add(
+                local_escalated_commits,
+                std::memory_order_relaxed);
+
+            AtomicMax___(
+                max_internal_recursion,
+                local_max_internal_recursion);
+            AtomicMax___(
+                max_escalation_stage,
+                local_max_stage);
+
+            finish.arrive_and_wait();
+        });
+    }
+
+    start.arrive_and_wait();
+    finish.arrive_and_wait();
+
+    for (std::thread& writer : writers)
+        writer.join();
+
+    const std::uint64_t completed =
+        success.load(std::memory_order_acquire);
+    const std::uint64_t invalid =
+        invalid_failures.load(std::memory_order_acquire);
+    const std::uint64_t exhausted =
+        retry_exhaustions.load(std::memory_order_acquire);
+
+    const std::uint64_t expected =
+        writer_count *
+        ConcurrencyConfig::MUTATIONS_PER_WRITER *
+        ConcurrencyConfig::OPERATIONS_PER_MUTATION_STEP;
+
+    MutationResult status = MutationResult::COMMITTED;
+
+    if (invalid != 0u)
+        status = MutationResult::INVALID;
+    else if (exhausted != 0u || completed != expected)
+        status = MutationResult::RETRY;
+
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            end - begin).count();
+
+    MutationSweepResult result{};
+    result.Status = status;
+    result.Ok = status != MutationResult::INVALID;
+    result.NsPerSuccess =
+        completed == 0u
+            ? 0.0
+            : static_cast<double>(elapsed) /
+                static_cast<double>(completed);
+    result.Success = completed;
+    result.Retries = retries.load(std::memory_order_acquire);
+    result.InvalidFailures = invalid;
+    result.RetryExhaustions = exhausted;
+    result.RecursionEscalations =
+        recursion_escalations.load(std::memory_order_acquire);
+    result.EscalatedCommits =
+        escalated_commits.load(std::memory_order_acquire);
+    result.MaxInternalRecursion =
+        max_internal_recursion.load(std::memory_order_acquire);
+    result.MaxEscalationStage =
+        max_escalation_stage.load(std::memory_order_acquire);
+
+    return result;
+}
+
 
 template <typename Backend>
 bool VerifyMutationScenario(
@@ -3003,32 +3626,49 @@ ReaderSweepResult RunReadersWithWriters(
             std::size_t current = spec.InitialParent;
             std::size_t schedule_index = 0u;
 
-            auto mutate_once = [&]() noexcept -> bool
+            auto mutate_once = [&]() noexcept -> MutationResult
             {
-                for (std::size_t guard = 0u; guard < schedule[writer].size(); ++guard)
+                for (
+                    std::size_t guard = 0u;
+                    guard < schedule[writer].size();
+                    ++guard)
                 {
                     const std::size_t target =
                         schedule[writer][schedule_index++ % schedule[writer].size()];
-                    if (target == current) continue;
+                    if (target == current)
+                        continue;
 
                     std::uint64_t local_retries = 0u;
-                    if (!RetryReplace(
-                        backend, current, target, spec.Child,
-                        spec.RelationAxis, local_retries))
+                    const MutationResult result = RetryReplace(
+                        backend,
+                        current,
+                        target,
+                        spec.Child,
+                        spec.RelationAxis,
+                        local_retries);
+
+                    if (result == MutationResult::RETRY)
                     {
-                        writer_exhaustions.fetch_add(1u, std::memory_order_relaxed);
-                        return false;
+                        writer_exhaustions.fetch_add(
+                            1u, std::memory_order_relaxed);
+                        return MutationResult::RETRY;
                     }
+
+                    if (result == MutationResult::INVALID)
+                        return MutationResult::INVALID;
 
                     current = target;
                     if (measure_writers.load(std::memory_order_acquire))
                     {
-                        writer_success.fetch_add(1u, std::memory_order_relaxed);
-                        writer_retries.fetch_add(local_retries, std::memory_order_relaxed);
+                        writer_success.fetch_add(
+                            1u, std::memory_order_relaxed);
+                        writer_retries.fetch_add(
+                            local_retries, std::memory_order_relaxed);
                     }
-                    return true;
+                    return MutationResult::COMMITTED;
                 }
-                return false;
+
+                return MutationResult::INVALID;
             };
 
             writer_start.arrive_and_wait();
@@ -3040,9 +3680,15 @@ ReaderSweepResult RunReadersWithWriters(
                 ++i
             )
             {
-                if (!mutate_once())
+                const MutationResult mutation = mutate_once();
+                if (mutation != MutationResult::COMMITTED)
                 {
-                    progress_failed.store(true, std::memory_order_release);
+                    if (mutation == MutationResult::INVALID)
+                        correctness_failed.store(
+                            true, std::memory_order_release);
+                    else
+                        progress_failed.store(
+                            true, std::memory_order_release);
                     break;
                 }
             }
@@ -3054,9 +3700,15 @@ ReaderSweepResult RunReadersWithWriters(
                 !abort_requested()
             )
             {
-                if (!mutate_once())
+                const MutationResult mutation = mutate_once();
+                if (mutation != MutationResult::COMMITTED)
                 {
-                    progress_failed.store(true, std::memory_order_release);
+                    if (mutation == MutationResult::INVALID)
+                        correctness_failed.store(
+                            true, std::memory_order_release);
+                    else
+                        progress_failed.store(
+                            true, std::memory_order_release);
                     break;
                 }
             }
@@ -3464,6 +4116,9 @@ inline bool RunCase(
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_ns{};
         std::array<double, ConcurrencyConfig::MEASURED_RUNS> retry_rate{};
         bool row_ok = true;
+        bool fabric_had_retry_exhaustion = false;
+        std::uint64_t fabric_invalid_count = 0u;
+        std::uint64_t fabric_retry_exhaustions = 0u;
 
         for (std::size_t run = 0u; run < ConcurrencyConfig::MEASURED_RUNS; ++run)
         {
@@ -3494,13 +4149,40 @@ inline bool RunCase(
                     row_backend, scenario, schedule, writer_count);
             }
 
-            const bool integrity =
-                row_result.Ok && fabric_result.Ok &&
+            const bool row_integrity =
+                row_result.Completed() &&
                 VerifyMutationScenario(
-                    row_backend, scenario, schedule, writer_count) &&
-                VerifyMutationScenario(
-                    fabric_backend, scenario, schedule, writer_count);
-            row_ok = row_ok && integrity;
+                    row_backend, scenario, schedule, writer_count);
+
+            const bool fabric_invalid = fabric_result.Invalid();
+
+            // A RETRY exhaustion is a progress/contention result, not an
+            // INVALID mutation. The exact final schedule cannot be verified
+            // after an incomplete run, so expected-state verification is only
+            // performed for a fully committed Fabric sample.
+            const bool fabric_integrity =
+                fabric_result.Completed()
+                    ? VerifyMutationScenario(
+                        fabric_backend,
+                        scenario,
+                        schedule,
+                        writer_count)
+                    : !fabric_invalid;
+
+            row_ok = row_ok &&
+                row_integrity &&
+                !fabric_invalid &&
+                fabric_integrity;
+
+            fabric_had_retry_exhaustion =
+                fabric_had_retry_exhaustion ||
+                fabric_result.RetriedOut();
+
+            fabric_invalid_count +=
+                fabric_result.InvalidFailures;
+            fabric_retry_exhaustions +=
+                fabric_result.RetryExhaustions;
+
             row_ns[run] = row_result.NsPerSuccess;
             fabric_ns[run] = fabric_result.NsPerSuccess;
             retry_rate[run] = fabric_result.Success == 0u ? 0.0 :
@@ -3529,7 +4211,13 @@ inline bool RunCase(
             << Ratio(fabric_median, row_median) << "x"
             << "  retry/success=" << std::setw(8) << std::setprecision(4)
             << retries
-            << "  " << (row_ok ? "PASS" : "FAIL") << '\n';
+            << "  invalid=" << fabric_invalid_count
+            << "  retry-exhaust=" << fabric_retry_exhaustions
+            << "  "
+            << (!row_ok
+                ? "FAIL"
+                : (fabric_had_retry_exhaustion ? "RETRY" : "PASS"))
+            << '\n';
     }
     return all_ok;
 }
@@ -3778,9 +4466,11 @@ inline Result Run()
 
     bool ok = true;
     ok = backend.AddParent(0u, 5u, Axis::HORIZONTAL) && ok;
-    ok = backend.Node(1u).AttachMyChild(
-        backend.Node(5u),
-        FabricSegments::VALUE_PARENT_EDGE_TABLE_H
+    ok = MutationCommitted(
+        backend.Node(1u).AttachMyChild(
+            backend.Node(5u),
+            FabricSegments::VALUE_PARENT_EDGE_TABLE_H
+        )
     ) && ok;
     ok = ParentSetEquals(backend, 5u, Axis::HORIZONTAL, {0u, 1u}, 2u) && ok;
 
@@ -3791,9 +4481,11 @@ inline Result Run()
     ok = backend.RemoveParent(0u, 5u, Axis::HORIZONTAL) && ok;
     ok = ParentSetEquals(backend, 5u, Axis::HORIZONTAL, {1u, 0u}, 1u) && ok;
     ok = backend.AddParent(2u, 5u, Axis::HORIZONTAL) && ok;
-    ok = backend.Node(1u).DetachMyChild(
-        backend.Node(5u),
-        FabricSegments::VALUE_PARENT_EDGE_TABLE_H
+    ok = MutationCommitted(
+        backend.Node(1u).DetachMyChild(
+            backend.Node(5u),
+            FabricSegments::VALUE_PARENT_EDGE_TABLE_H
+        )
     ) && ok;
     ok = ParentSetEquals(backend, 5u, Axis::HORIZONTAL, {2u, 0u}, 1u) && ok;
 
@@ -3803,16 +4495,16 @@ inline Result Run()
     ok = ParentSetEquals(backend, 5u, Axis::VERTICAL, {1u, 2u}, 2u) && ok;
 
     const bool same_parent_replace_rejected =
-        !backend.Node(5u).ReplaceParent(
+        backend.Node(5u).ReplaceParent(
             backend.Node(1u),
             backend.Node(1u),
             FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V
-        );
+        ) == MutationResult::INVALID;
     const bool invalid_table_rejected =
-        !backend.Node(5u).AddParent(
+        backend.Node(5u).AddParent(
             backend.Node(0u),
             FabricSegments::SEGMENT_POOL
-        );
+        ) == MutationResult::INVALID;
 
     const GraphProof proof = ProveQuiescentCombinedDAG<8u, 2u>(backend);
     ok = ok && same_parent_replace_rejected && invalid_table_rejected && proof.Passed();
@@ -5016,15 +5708,28 @@ inline bool MixedAxisStress(std::uint64_t& retries_out)
             {
                 const std::size_t h_next = h_current == 0u ? 1u : 0u;
                 const std::size_t v_next = v_current == 2u ? 3u : 2u;
+                const MutationResult h_result = RetryReplace(
+                    backend,
+                    h_current,
+                    h_next,
+                    child,
+                    Axis::HORIZONTAL,
+                    local_retries);
+
+                const MutationResult v_result =
+                    h_result == MutationResult::COMMITTED
+                        ? RetryReplace(
+                            backend,
+                            v_current,
+                            v_next,
+                            child,
+                            Axis::VERTICAL,
+                            local_retries)
+                        : h_result;
+
                 if (
-                    !RetryReplace(
-                        backend, h_current, h_next, child,
-                        Axis::HORIZONTAL, local_retries
-                    ) ||
-                    !RetryReplace(
-                        backend, v_current, v_next, child,
-                        Axis::VERTICAL, local_retries
-                    )
+                    h_result != MutationResult::COMMITTED ||
+                    v_result != MutationResult::COMMITTED
                 )
                 {
                     failed.store(true, std::memory_order_release);
@@ -5097,13 +5802,25 @@ inline bool RetirementAndABA()
 
     const std::uint32_t child_slot = child.GetThisSlotIdx();
     if (
-        !child.AddParent(parent, FabricSegments::VALUE_PARENT_EDGE_TABLE_H) ||
-        !child.AddParent(parent, FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V) ||
+        !MutationCommitted(
+            child.AddParent(
+                parent,
+                FabricSegments::VALUE_PARENT_EDGE_TABLE_H)) ||
+        !MutationCommitted(
+            child.AddParent(
+                parent,
+                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V)) ||
         parent.Retire() ||
         child.Retire() ||
-        !child.RemoveParent(parent, FabricSegments::VALUE_PARENT_EDGE_TABLE_H) ||
+        !MutationCommitted(
+            child.RemoveParent(
+                parent,
+                FabricSegments::VALUE_PARENT_EDGE_TABLE_H)) ||
         child.Retire() ||
-        !child.RemoveParent(parent, FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V)
+        !MutationCommitted(
+            child.RemoveParent(
+                parent,
+                FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V))
     )
     {
         return false;
@@ -5598,10 +6315,12 @@ inline Result Run()
             IsGenerationValid(
                 child_generation
             ) &&
-        source_child.AddParent(
-            source_parent,
-            FabricSegments::
-                VALUE_PARENT_EDGE_TABLE_H
+        MutationCommitted(
+            source_child.AddParent(
+                source_parent,
+                FabricSegments::
+                    VALUE_PARENT_EDGE_TABLE_H
+            )
         ) &&
         WritePayload(
             source_parent,
@@ -6097,8 +6816,3 @@ inline int RunAll(
 }
 
 } // namespace APCDAGTests
-
-
-
-
-
