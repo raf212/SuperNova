@@ -5,5 +5,5 @@
 #include "TestFiles/SuperNovaTest2ARepeat.hpp"
 int main()
 {
-    return APCDAGTests::RunAll() + GHGFTestKit::RunAll();
+    return SuperNovaTest2ARepeat::RunDeltaRecursion(10000);
 }

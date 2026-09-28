@@ -297,26 +297,24 @@ inline int Run(
 }
 
 
+
 inline int RunDeltaRecursion(
     std::size_t repeat_count = 10u,
     std::size_t max_writers = 0u,
-    const char* output_file =
-        "SuperNovaTest2ARepeat_delta_recursion_results.txt",
-    std::uint32_t delta_recursion = 1u)
+    std::uint32_t delta_recursion = 1u,
+    std::uint32_t transaction_attempt_limit = 1'000u)
 {
     constexpr std::uint32_t BASE_INTERNAL_RECURSION =
-        BidirectionalInMemGraph::AdaptivePackedCellContainer::INTERNAL_RECURSION;
+        BidirectionalInMemGraph::
+        AdaptivePackedCellContainer::
+        INTERNAL_RECURSION;
 
     if (
         delta_recursion == 0u ||
-        BASE_INTERNAL_RECURSION >
-            UINT32_MAX - delta_recursion)
+        transaction_attempt_limit == 0u)
     {
         return 3;
     }
-
-    const std::uint32_t escalated_internal_recursion =
-        BASE_INTERNAL_RECURSION + delta_recursion;
 
     const std::size_t hardware_threads =
         static_cast<std::size_t>(
@@ -330,7 +328,11 @@ inline int RunDeltaRecursion(
                 hardware_threads - 2u)
             : 1u;
     }
+    // Creates a standard std::string
+    std::string output_file_str = "SuperNovaTest2ARepeat_dl_recursion_LowerBound" + std::to_string(repeat_count) + ".txt";
 
+    // If you absolutely need a const char* for an older API:
+    const char* output_file = output_file_str.c_str();
     std::ofstream out(
         output_file,
         std::ios::out | std::ios::trunc);
@@ -354,28 +356,30 @@ inline int RunDeltaRecursion(
     std::uint64_t committed_cases = 0u;
     std::uint64_t escalated_cases = 0u;
 
-    std::uint64_t total_recursion_escalations = 0u;
+    std::uint64_t total_stage_exhaustions = 0u;
     std::uint64_t total_escalated_commits = 0u;
-    std::uint64_t total_final_retry_exhaustions = 0u;
+    std::uint64_t total_terminal_retries = 0u;
+
+    std::uint32_t global_max_internal_recursion =
+        BASE_INTERNAL_RECURSION;
+    std::uint32_t global_max_stage = 1u;
 
     out
-        << "SUPERNOVA FABRIC TEST 2A DELTA-RECURSION REPEAT TEST\n"
+        << "SUPERNOVA FABRIC TEST 2A CUMULATIVE DELTA-RECURSION TEST\n"
         << "repeats=" << repeat_count << '\n'
         << "writer_sweep=1.." << max_writers << '\n'
         << "measured_runs_per_point="
         << T::ConcurrencyConfig::MEASURED_RUNS << '\n'
-        << "attempts_per_stage="
-        << T::ConcurrencyConfig::TRANSACTION_ATTEMPT_LIMIT << '\n'
+        << "transaction_attempt_limit_per_stage="
+        << transaction_attempt_limit << '\n'
         << "base_internal_recursion="
         << BASE_INTERNAL_RECURSION << '\n'
         << "delta_recursion="
         << delta_recursion << '\n'
-        << "stage2_internal_recursion="
-        << escalated_internal_recursion << '\n'
-        << "policy=STAGE1_EXHAUST_THEN_ONE_DELTA_ESCALATION\n"
+        << "default_sequence=1,2,3,6,12,24,48,...\n"
         << "INVALID=FAIL\n"
-        << "FINAL_RETRY=COUNTED_NOT_FAILURE\n"
-        << "ESCALATED=STAGE1_EXHAUSTED_AND_STAGE2_WAS_USED\n\n";
+        << "RETRY=ARITHMETIC_SAFETY_EXIT_ONLY\n\n";
+
     out.flush();
 
     for (
@@ -432,8 +436,7 @@ inline int RunDeltaRecursion(
             {
                 for (
                     std::size_t sample = 1u;
-                    sample <=
-                        T::ConcurrencyConfig::MEASURED_RUNS;
+                    sample <= T::ConcurrencyConfig::MEASURED_RUNS;
                     ++sample)
                 {
                     T::RuntimeAPCFabricBackend backend{};
@@ -468,14 +471,24 @@ inline int RunDeltaRecursion(
                             scenario,
                             schedule,
                             writers,
-                            delta_recursion);
+                            delta_recursion,
+                            transaction_attempt_limit);
 
-                    total_recursion_escalations +=
+                    total_stage_exhaustions +=
                         result.RecursionEscalations;
                     total_escalated_commits +=
                         result.EscalatedCommits;
-                    total_final_retry_exhaustions +=
+                    total_terminal_retries +=
                         result.RetryExhaustions;
+
+                    global_max_internal_recursion =
+                        std::max(
+                            global_max_internal_recursion,
+                            result.MaxInternalRecursion);
+                    global_max_stage =
+                        std::max(
+                            global_max_stage,
+                            result.MaxEscalationStage);
 
                     if (result.RecursionEscalations != 0u)
                     {
@@ -510,13 +523,16 @@ inline int RunDeltaRecursion(
                             << " sample=" << sample
                             << " success=" << result.Success
                             << " retries=" << result.Retries
-                            << " invalid="
-                            << result.InvalidFailures
-                            << " stage1-exhaust="
+                            << " invalid=" << result.InvalidFailures
+                            << " stage-exhaustions="
                             << result.RecursionEscalations
-                            << " rescued-stage2="
+                            << " escalated-commits="
                             << result.EscalatedCommits
-                            << " final-retry-exhaust="
+                            << " max-internal-recursion="
+                            << result.MaxInternalRecursion
+                            << " max-stage="
+                            << result.MaxEscalationStage
+                            << " terminal-retry="
                             << result.RetryExhaustions
                             << " retry/success="
                             << std::fixed
@@ -547,13 +563,16 @@ inline int RunDeltaRecursion(
                             << " sample=" << sample
                             << " success=" << result.Success
                             << " retries=" << result.Retries
-                            << " invalid="
-                            << result.InvalidFailures
-                            << " stage1-exhaust="
+                            << " invalid=" << result.InvalidFailures
+                            << " stage-exhaustions="
                             << result.RecursionEscalations
-                            << " rescued-stage2="
+                            << " escalated-commits="
                             << result.EscalatedCommits
-                            << " final-retry-exhaust="
+                            << " max-internal-recursion="
+                            << result.MaxInternalRecursion
+                            << " max-stage="
+                            << result.MaxEscalationStage
+                            << " terminal-retry="
                             << result.RetryExhaustions
                             << " retry/success="
                             << std::fixed
@@ -590,10 +609,10 @@ inline int RunDeltaRecursion(
                             << " reason=FINAL_VERIFY_FAILED"
                             << " success=" << result.Success
                             << " retries=" << result.Retries
-                            << " stage1-exhaust="
-                            << result.RecursionEscalations
-                            << " rescued-stage2="
-                            << result.EscalatedCommits
+                            << " max-internal-recursion="
+                            << result.MaxInternalRecursion
+                            << " max-stage="
+                            << result.MaxEscalationStage
                             << '\n';
 
                         out.flush();
@@ -616,11 +635,15 @@ inline int RunDeltaRecursion(
                             << " sample=" << sample
                             << " success=" << result.Success
                             << " retries=" << result.Retries
-                            << " stage1-exhaust="
+                            << " stage-exhaustions="
                             << result.RecursionEscalations
-                            << " rescued-stage2="
+                            << " escalated-commits="
                             << result.EscalatedCommits
-                            << " final-retry-exhaust=0"
+                            << " max-internal-recursion="
+                            << result.MaxInternalRecursion
+                            << " max-stage="
+                            << result.MaxEscalationStage
+                            << " terminal-retry=0"
                             << " retry/success="
                             << std::fixed
                             << std::setprecision(4)
@@ -635,10 +658,8 @@ inline int RunDeltaRecursion(
 
         if (repeat_invalid)
             ++invalid_repetitions;
-
         if (repeat_retry)
             ++retry_repetitions;
-
         if (repeat_escalated)
             ++escalated_repetitions;
     }
@@ -647,12 +668,12 @@ inline int RunDeltaRecursion(
         << "\n============================================================\n"
         << "FINAL SUMMARY\n"
         << "repeats=" << repeat_count << '\n'
+        << "transaction_attempt_limit_per_stage="
+        << transaction_attempt_limit << '\n'
         << "base_internal_recursion="
         << BASE_INTERNAL_RECURSION << '\n'
         << "delta_recursion="
         << delta_recursion << '\n'
-        << "stage2_internal_recursion="
-        << escalated_internal_recursion << '\n'
         << "invalid_repetitions="
         << invalid_repetitions << '\n'
         << "retry_repetitions="
@@ -667,12 +688,16 @@ inline int RunDeltaRecursion(
         << retry_cases << '\n'
         << "escalated_cases="
         << escalated_cases << '\n'
-        << "stage1_exhaustions="
-        << total_recursion_escalations << '\n'
-        << "rescued_by_stage2="
+        << "total_stage_exhaustions="
+        << total_stage_exhaustions << '\n'
+        << "total_escalated_commits="
         << total_escalated_commits << '\n'
-        << "final_retry_exhaustions="
-        << total_final_retry_exhaustions << '\n'
+        << "terminal_retry_exhaustions="
+        << total_terminal_retries << '\n'
+        << "max_internal_recursion_reached="
+        << global_max_internal_recursion << '\n'
+        << "max_escalation_stage_reached="
+        << global_max_stage << '\n'
         << "result="
         << (invalid_cases == 0u ? "PASS" : "FAIL")
         << '\n'
@@ -680,8 +705,6 @@ inline int RunDeltaRecursion(
 
     out.flush();
 
-    // As with Run(), only INVALID / structural verification failure is a
-    // test failure. Final RETRY remains a measured progress event.
     return invalid_cases == 0u ? 0 : 1;
 }
 

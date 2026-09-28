@@ -1,4 +1,3 @@
-
 #pragma once
 
 // SuperNova APC/Fabric paper-quality systems test kit (C++20)
@@ -2343,6 +2342,7 @@ MutationResult RetryReplace(
     return MutationResult::RETRY;
 }
 
+
 template <typename Backend>
 MutationResult RetryReplaceDeltaRecursion(
     Backend& backend,
@@ -2351,29 +2351,38 @@ MutationResult RetryReplaceDeltaRecursion(
     std::size_t child,
     Axis axis,
     std::uint64_t& retry_count,
-    std::uint64_t& recursion_escalations,
+    std::uint64_t& stage_exhaustions,
     std::uint64_t& escalated_commits,
+    std::uint32_t& max_internal_recursion,
+    std::uint32_t& max_stage_reached,
     std::uint32_t delta_recursion = 1u,
-    std::uint32_t attempt_limit =
-        ConcurrencyConfig::TRANSACTION_ATTEMPT_LIMIT) noexcept
+    std::uint32_t transaction_attempt_limit = 1'000u) noexcept
 {
     constexpr std::uint32_t BASE_INTERNAL_RECURSION =
         AdaptivePackedCellContainer::INTERNAL_RECURSION;
 
     if (
         delta_recursion == 0u ||
-        BASE_INTERNAL_RECURSION >
-            UINT32_MAX - delta_recursion)
+        transaction_attempt_limit == 0u)
     {
         return MutationResult::INVALID;
     }
 
-    const auto RunStage___ =
-        [&](std::uint32_t internal_recursion) noexcept -> MutationResult
+    std::uint32_t internal_recursion = BASE_INTERNAL_RECURSION;
+    std::uint64_t cumulative_recursion = BASE_INTERNAL_RECURSION;
+    std::uint32_t stage = 1u;
+    bool escalated = false;
+
+    for (;;)
     {
+        max_internal_recursion =
+            std::max(max_internal_recursion, internal_recursion);
+        max_stage_reached =
+            std::max(max_stage_reached, stage);
+
         for (
             std::uint32_t attempt = 0u;
-            attempt < attempt_limit;
+            attempt < transaction_attempt_limit;
             ++attempt)
         {
             const MutationResult result =
@@ -2387,7 +2396,11 @@ MutationResult RetryReplaceDeltaRecursion(
                     internal_recursion);
 
             if (result == MutationResult::COMMITTED)
+            {
+                if (escalated)
+                    ++escalated_commits;
                 return MutationResult::COMMITTED;
+            }
 
             if (result == MutationResult::INVALID)
                 return MutationResult::INVALID;
@@ -2396,30 +2409,52 @@ MutationResult RetryReplaceDeltaRecursion(
             PerturbSchedule(attempt);
         }
 
-        return MutationResult::RETRY;
-    };
+        ++stage_exhaustions;
+        escalated = true;
 
-    // Stage 1 is the existing control behavior:
-    // max_tries=1, internal recursion=1.
-    const MutationResult first =
-        RunStage___(BASE_INTERNAL_RECURSION);
+        std::uint64_t next_internal_recursion = 0u;
 
-    if (first != MutationResult::RETRY)
-        return first;
+        if (stage == 1u)
+        {
+            // 1 -> 2 for the default delta_recursion=1.
+            next_internal_recursion =
+                static_cast<std::uint64_t>(internal_recursion) +
+                static_cast<std::uint64_t>(delta_recursion);
+        }
+        else
+        {
+            // Cumulative schedule:
+            // 1,2 -> 3
+            // 1,2,3 -> 6
+            // 1,2,3,6 -> 12
+            // then 24,48,...
+            next_internal_recursion = cumulative_recursion;
+        }
 
-    // Only a complete 100,000-attempt exhaustion escalates the internal
-    // row-reservation budget. With delta_recursion=1 this becomes 1 -> 2.
-    ++recursion_escalations;
+        if (
+            next_internal_recursion == 0u ||
+            next_internal_recursion > UINT32_MAX)
+        {
+            return MutationResult::RETRY;
+        }
 
-    const MutationResult second =
-        RunStage___(
-            BASE_INTERNAL_RECURSION +
-            delta_recursion);
+        internal_recursion =
+            static_cast<std::uint32_t>(next_internal_recursion);
 
-    if (second == MutationResult::COMMITTED)
-        ++escalated_commits;
+        if (
+            cumulative_recursion >
+            UINT64_MAX - next_internal_recursion)
+        {
+            return MutationResult::RETRY;
+        }
 
-    return second;
+        cumulative_recursion += next_internal_recursion;
+
+        if (stage == UINT32_MAX)
+            return MutationResult::RETRY;
+
+        ++stage;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -2933,6 +2968,9 @@ struct MutationSweepResult
     // these at zero.
     std::uint64_t RecursionEscalations = 0u;
     std::uint64_t EscalatedCommits = 0u;
+    std::uint32_t MaxInternalRecursion =
+        AdaptivePackedCellContainer::INTERNAL_RECURSION;
+    std::uint32_t MaxEscalationStage = 1u;
 
     bool Completed() const noexcept
     {
@@ -3084,22 +3122,27 @@ MutationSweepResult RunMutationWorkers(
     };
 }
 
+
 template <typename Backend>
 MutationSweepResult RunMutationWorkersDeltaRecursion(
     Backend& backend,
     const MutationScenario& scenario,
     const MutationSchedule& schedule,
     std::size_t writer_count,
-    std::uint32_t delta_recursion = 1u)
+    std::uint32_t delta_recursion = 1u,
+    std::uint32_t transaction_attempt_limit = 1'000u)
 {
     Clock::time_point begin{};
     Clock::time_point end{};
     auto begin_phase = [&]() noexcept { begin = Clock::now(); };
     auto end_phase = [&]() noexcept { end = Clock::now(); };
+
     std::barrier start(
-        static_cast<std::ptrdiff_t>(writer_count + 1u), begin_phase);
+        static_cast<std::ptrdiff_t>(writer_count + 1u),
+        begin_phase);
     std::barrier finish(
-        static_cast<std::ptrdiff_t>(writer_count + 1u), end_phase);
+        static_cast<std::ptrdiff_t>(writer_count + 1u),
+        end_phase);
 
     std::atomic<std::uint64_t> success{0u};
     std::atomic<std::uint64_t> retries{0u};
@@ -3107,6 +3150,26 @@ MutationSweepResult RunMutationWorkersDeltaRecursion(
     std::atomic<std::uint64_t> retry_exhaustions{0u};
     std::atomic<std::uint64_t> recursion_escalations{0u};
     std::atomic<std::uint64_t> escalated_commits{0u};
+    std::atomic<std::uint32_t> max_internal_recursion{
+        AdaptivePackedCellContainer::INTERNAL_RECURSION};
+    std::atomic<std::uint32_t> max_escalation_stage{1u};
+
+    const auto AtomicMax___ =
+        [](std::atomic<std::uint32_t>& destination,
+           std::uint32_t value) noexcept
+    {
+        std::uint32_t observed =
+            destination.load(std::memory_order_relaxed);
+
+        while (
+            observed < value &&
+            !destination.compare_exchange_weak(
+                observed,
+                value,
+                std::memory_order_relaxed,
+                std::memory_order_relaxed))
+        {}
+    };
 
     std::vector<std::thread> writers;
     writers.reserve(writer_count);
@@ -3123,8 +3186,11 @@ MutationSweepResult RunMutationWorkersDeltaRecursion(
             std::uint64_t local_retries = 0u;
             std::uint64_t local_invalid = 0u;
             std::uint64_t local_retry_exhaustions = 0u;
-            std::uint64_t local_recursion_escalations = 0u;
+            std::uint64_t local_stage_exhaustions = 0u;
             std::uint64_t local_escalated_commits = 0u;
+            std::uint32_t local_max_internal_recursion =
+                AdaptivePackedCellContainer::INTERNAL_RECURSION;
+            std::uint32_t local_max_stage = 1u;
 
             start.arrive_and_wait();
 
@@ -3143,9 +3209,12 @@ MutationSweepResult RunMutationWorkersDeltaRecursion(
                         child,
                         Axis::HORIZONTAL,
                         local_retries,
-                        local_recursion_escalations,
+                        local_stage_exhaustions,
                         local_escalated_commits,
-                        delta_recursion);
+                        local_max_internal_recursion,
+                        local_max_stage,
+                        delta_recursion,
+                        transaction_attempt_limit);
 
                 if (h_result != MutationResult::COMMITTED)
                 {
@@ -3167,9 +3236,12 @@ MutationSweepResult RunMutationWorkersDeltaRecursion(
                         child,
                         Axis::VERTICAL,
                         local_retries,
-                        local_recursion_escalations,
+                        local_stage_exhaustions,
                         local_escalated_commits,
-                        delta_recursion);
+                        local_max_internal_recursion,
+                        local_max_stage,
+                        delta_recursion,
+                        transaction_attempt_limit);
 
                 if (v_result != MutationResult::COMMITTED)
                 {
@@ -3184,24 +3256,25 @@ MutationSweepResult RunMutationWorkersDeltaRecursion(
                 ++local_success;
             }
 
-            success.fetch_add(
-                local_success,
-                std::memory_order_relaxed);
-            retries.fetch_add(
-                local_retries,
-                std::memory_order_relaxed);
-            invalid_failures.fetch_add(
-                local_invalid,
-                std::memory_order_relaxed);
+            success.fetch_add(local_success, std::memory_order_relaxed);
+            retries.fetch_add(local_retries, std::memory_order_relaxed);
+            invalid_failures.fetch_add(local_invalid, std::memory_order_relaxed);
             retry_exhaustions.fetch_add(
                 local_retry_exhaustions,
                 std::memory_order_relaxed);
             recursion_escalations.fetch_add(
-                local_recursion_escalations,
+                local_stage_exhaustions,
                 std::memory_order_relaxed);
             escalated_commits.fetch_add(
                 local_escalated_commits,
                 std::memory_order_relaxed);
+
+            AtomicMax___(
+                max_internal_recursion,
+                local_max_internal_recursion);
+            AtomicMax___(
+                max_escalation_stage,
+                local_max_stage);
 
             finish.arrive_and_wait();
         });
@@ -3219,12 +3292,14 @@ MutationSweepResult RunMutationWorkersDeltaRecursion(
         invalid_failures.load(std::memory_order_acquire);
     const std::uint64_t exhausted =
         retry_exhaustions.load(std::memory_order_acquire);
+
     const std::uint64_t expected =
         writer_count *
         ConcurrencyConfig::MUTATIONS_PER_WRITER *
         ConcurrencyConfig::OPERATIONS_PER_MUTATION_STEP;
 
     MutationResult status = MutationResult::COMMITTED;
+
     if (invalid != 0u)
         status = MutationResult::INVALID;
     else if (exhausted != 0u || completed != expected)
@@ -3243,14 +3318,17 @@ MutationSweepResult RunMutationWorkersDeltaRecursion(
             : static_cast<double>(elapsed) /
                 static_cast<double>(completed);
     result.Success = completed;
-    result.Retries =
-        retries.load(std::memory_order_acquire);
+    result.Retries = retries.load(std::memory_order_acquire);
     result.InvalidFailures = invalid;
     result.RetryExhaustions = exhausted;
     result.RecursionEscalations =
         recursion_escalations.load(std::memory_order_acquire);
     result.EscalatedCommits =
         escalated_commits.load(std::memory_order_acquire);
+    result.MaxInternalRecursion =
+        max_internal_recursion.load(std::memory_order_acquire);
+    result.MaxEscalationStage =
+        max_escalation_stage.load(std::memory_order_acquire);
 
     return result;
 }
