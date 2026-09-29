@@ -7167,7 +7167,8 @@ template<class Backend> Numbers Execute(Backend& backend, const Geometry& g,
                 (static_cast<std::uint64_t>(w + 1u) * ConcurrencyConfig::RANDOM_STREAM_STEP);
             const Axis axis = w % 2u ? Axis::VERTICAL : Axis::HORIZONTAL;
             const std::size_t first = g.Distributed
-                ? g.FirstChild + g.ChildCount * w / writers : g.FirstChild + (readers ? 0u : w);
+                ? g.FirstChild + g.ChildCount * w / writers
+                : g.FirstChild + (g.ChildCount == 1u || readers ? 0u : w);
             const std::size_t count = g.Distributed
                 ? g.FirstChild + g.ChildCount * (w + 1u) / writers - first : 1u;
             std::vector<std::size_t> current(count);
