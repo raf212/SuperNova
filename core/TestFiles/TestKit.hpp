@@ -1,3 +1,7 @@
+// FILE: TestKit.hpp
+// ------------------------------------------------------------
+
+
 #pragma once
 
 // SuperNova APC/Fabric paper-quality systems test kit (C++20)
@@ -6816,3 +6820,648 @@ inline int RunAll(
 }
 
 } // namespace APCDAGTests
+
+// -----------------------------------------------------------------------------
+// Five-file, raw-sample comparison. Include the external adapters AFTER this
+// header, then instantiate RunAll<LiveGraphBackend, SortledtonBidirBackend>.
+// Only contract-matched bidirectional external adapters belong in this suite.
+// The older text-report entry points above remain available.
+// -----------------------------------------------------------------------------
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <cmath>
+#include <map>
+#include <sstream>
+
+namespace APCDAGTests::PaperCSV
+{
+using namespace BenchmarkCore;
+using namespace std::chrono_literals;
+
+struct Settings
+{
+    std::size_t SmallN, LargeN, SmallK, LargeK, Threads, Runs;
+    std::string Prefix;
+    std::chrono::milliseconds Interval{1000};
+};
+
+inline std::array<const char*, 5> TestNames{
+    "test1_bulk_read", "test2a_hotspot_mutation", "test2b_distributed_mutation",
+    "test3a_hotspot_read_write", "test3b_distributed_read_write"};
+
+struct Files
+{
+    std::array<std::ofstream, 5> Stream{};
+    explicit Files(const std::string& prefix)
+    {
+        for (std::size_t i = 0; i < Stream.size(); ++i)
+        {
+            Stream[i].open(prefix + "_" + TestNames[i] + ".csv", std::ios::trunc);
+            Stream[i] << "test,backend,contract,run,node_count,parent_capacity,writer_threads,reader_threads,mode,distribution,"
+                         "duration_seconds,successful_replacements,successful_reads,mutation_retries,read_retries,"
+                         "unfinished_mutations,invalid_mutations,invalid_reads,mutation_retries_per_success,read_retries_per_success,"
+                         "distinct_child_rows_written,minimum_child_row_line_bytes,quiescent_reads_per_second,write_only_per_second,"
+                         "mixed_reads_per_second,mixed_writes_per_second,read_retention,write_retention,"
+                         "aggregate_logical_ops_per_second,payload_words_per_node,construction_seconds,valid,sample_count\n";
+        }
+    }
+    bool Good() const
+    {
+        for (const auto& f : Stream) if (!f.good()) return false;
+        return true;
+    }
+};
+
+struct Numbers
+{
+    double Seconds = 0;
+    std::uint64_t Writes = 0, Reads = 0, MutationRetries = 0, ReadRetries = 0;
+    std::uint64_t Unfinished = 0, InvalidMutations = 0, InvalidReads = 0;
+    std::uint64_t DistinctChildren = 0;
+    bool Valid = true;
+    double WritesPerSecond() const { return Seconds > 0 ? Writes / Seconds : 0; }
+    double ReadsPerSecond() const { return Seconds > 0 ? Reads / Seconds : 0; }
+};
+
+inline void Row(std::ofstream& f, const char* test, const char* backend,
+    const char* contract, std::size_t run, BenchmarkCase c, std::size_t writers,
+    std::size_t readers, const char* mode, const char* distribution,
+    const Numbers& result, double read_only = 0, double write_only = 0,
+    double mixed_read = 0, double mixed_write = 0, std::size_t payload_words = 1,
+    double construction_seconds = 0)
+{
+    const auto retention = [](double mixed, double baseline) {
+        return baseline > 0 ? mixed / baseline : std::numeric_limits<double>::quiet_NaN();
+    };
+    f << test << ',' << backend << ',' << contract << ',' << run << ','
+      << c.NodeCount << ',' << unsigned(c.ParentCapacity) << ',' << writers << ','
+      << readers << ',' << mode << ',' << distribution << ','
+      << std::setprecision(12) << result.Seconds << ',' << result.Writes << ','
+      << result.Reads << ',' << result.MutationRetries << ',' << result.ReadRetries
+      << ',' << result.Unfinished << ',' << result.InvalidMutations << ','
+      << result.InvalidReads << ','
+      << (result.Writes ? double(result.MutationRetries) / result.Writes : 0.0) << ','
+      << (result.Reads ? double(result.ReadRetries) / result.Reads : 0.0) << ','
+      << result.DistinctChildren << ',' << result.DistinctChildren * 64u << ','
+      << read_only << ',' << write_only << ','
+      << mixed_read << ',' << mixed_write << ','
+      << retention(mixed_read, read_only) << ','
+      << retention(mixed_write, write_only) << ','
+      << mixed_read + mixed_write << ',' << payload_words << ','
+      << construction_seconds << ',' << (result.Valid ? "PASS" : "FAIL") << ",1\n";
+}
+
+// Append one MEDIAN row per exact test/backend/N/K/thread/mode/distribution
+// group. Every requested repetition must be present and PASS; otherwise the
+// group median is FAIL with nan metrics, so failures cannot disappear in a plot.
+inline bool AppendMedians(const std::string& path, std::size_t expected_runs)
+{
+    std::ifstream input(path);
+    if (!input) return false;
+    std::string header;
+    if (!std::getline(input, header)) return false;
+    std::map<std::string, std::vector<std::vector<std::string>>> groups;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        if (line.empty()) continue;
+        std::vector<std::string> fields;
+        std::stringstream stream(line);
+        std::string field;
+        while (std::getline(stream, field, ',')) fields.push_back(field);
+        if (fields.size() != 33u || fields[3] == "MEDIAN") return false;
+        std::string key;
+        for (std::size_t col : {0u, 1u, 2u, 4u, 5u, 6u, 7u, 8u, 9u, 29u})
+        { key += fields[col]; key.push_back('\x1f'); }
+        groups[key].push_back(std::move(fields));
+    }
+    input.close();
+    std::ofstream output(path, std::ios::app);
+    if (!output) return false;
+    bool all_valid = true;
+    for (auto& [key, rows] : groups)
+    {
+        auto summary = rows.front();
+        summary[3] = "MEDIAN";
+        summary[32] = std::to_string(rows.size());
+        bool valid = rows.size() == expected_runs;
+        std::vector<bool> observed(expected_runs + 1u, false);
+        for (const auto& row : rows)
+        {
+            if (row[31] != "PASS") valid = false;
+            try
+            {
+                const auto run = std::stoull(row[3]);
+                if (run == 0u || run > expected_runs || observed[run]) valid = false;
+                else observed[run] = true;
+            }
+            catch (...) { valid = false; }
+        }
+        for (std::size_t col = 10u; col <= 30u; ++col)
+        {
+            std::vector<double> values;
+            if (valid)
+            {
+                for (const auto& row : rows)
+                {
+                    try { values.push_back(std::stod(row[col])); }
+                    catch (...) { valid = false; break; }
+                }
+            }
+            if (!valid) { summary[col] = "nan"; continue; }
+            std::sort(values.begin(), values.end(), [](double a, double b) {
+                if (std::isnan(a)) return false;
+                if (std::isnan(b)) return true;
+                return a < b;
+            });
+            const std::size_t mid = values.size() / 2u;
+            const double median = values.size() % 2u
+                ? values[mid] : (values[mid - 1u] / 2.0 + values[mid] / 2.0);
+            std::ostringstream cell;
+            cell << std::setprecision(12) << median;
+            summary[col] = cell.str();
+        }
+        if (!valid)
+        {
+            all_valid = false;
+            for (std::size_t col = 10u; col <= 30u; ++col) summary[col] = "nan";
+        }
+        summary[31] = valid ? "PASS" : "FAIL";
+        for (std::size_t col = 0; col < summary.size(); ++col)
+            output << (col ? "," : "") << summary[col];
+        output << '\n';
+    }
+    output.flush();
+    return all_valid && output.good();
+}
+
+template<class Backend> struct Registration
+{
+    Backend& Value;
+    std::size_t Id;
+    bool Ok = true;
+    Registration(Backend& backend, std::size_t id) : Value(backend), Id(id)
+    {
+        if constexpr (requires { backend.RegisterThread(id); }) Ok = backend.RegisterThread(id);
+    }
+    ~Registration()
+    {
+        if constexpr (requires { Value.DeregisterThread(Id); })
+            if (Ok) Value.DeregisterThread(Id);
+    }
+};
+
+template<class Backend> bool Healthy(Backend& backend)
+{
+    if constexpr (requires { backend.Healthy(); }) return backend.Healthy();
+    return true;
+}
+
+template<class Backend> bool Prepare(Backend& backend, BenchmarkCase c, std::size_t words,
+                                    bool stable_guard = false)
+{
+    if (!InitializeBackend(backend, c, words, words == TEST1_PAYLOAD_WORDS)) return false;
+    if constexpr (requires { backend.PrimePayloadStorage(); })
+        if (!backend.PrimePayloadStorage()) return false;
+    if (stable_guard)
+    {
+        if constexpr (requires { backend.EnableStableReadGuard(); })
+            if (!backend.EnableStableReadGuard()) return false;
+    }
+    return Healthy(backend);
+}
+
+enum class Attempt { COMMITTED, RETRY, INVALID };
+template<class Backend> Attempt ReplaceOnce(Backend& backend, std::size_t oldp,
+    std::size_t newp, std::size_t child, Axis axis)
+{
+    if constexpr (requires { backend.ReplaceParentResult(oldp, newp, child, axis, 1u); })
+    {
+        const auto r = backend.ReplaceParentResult(oldp, newp, child, axis, 1u);
+        return MutationCommitted(r) ? Attempt::COMMITTED :
+            (MutationInvalid(r) ? Attempt::INVALID : Attempt::RETRY);
+    }
+    else
+    {
+        if (backend.ReplaceParent(oldp, newp, child, axis, 1u)) return Attempt::COMMITTED;
+        return Healthy(backend) ? Attempt::RETRY : Attempt::INVALID;
+    }
+}
+
+inline std::size_t ParentSeed(std::size_t child, std::size_t parents, Axis axis)
+{
+    return (child + (axis == Axis::VERTICAL ? parents / 2u : 0u)) % parents;
+}
+inline std::size_t NextParent(std::uint64_t& state, std::size_t parents,
+                              std::size_t current, bool skew)
+{
+    if (!skew || parents < 100u) return DifferentRandomParent(state, parents, current);
+    // 80% from the first 1% of parents; remainder from the entire population.
+    const bool hot = NextRandom(state) % 10u < 8u;
+    const std::size_t limit = hot ? std::max<std::size_t>(2u, parents / 100u) : parents;
+    std::size_t next = NextRandom(state) % limit;
+    if (next == current) next = (next + 1u) % limit;
+    return next;
+}
+
+struct Geometry
+{
+    BenchmarkCase Case{};
+    bool Distributed = false, Skew = false;
+    std::size_t ParentCount = 0, FirstChild = 0, ChildCount = 0;
+    std::size_t Child(std::size_t writer, std::uint64_t step,
+                      std::size_t writers) const
+    {
+        if (!Distributed) return FirstChild + writer;
+        const std::size_t first = FirstChild + ChildCount * writer / writers;
+        const std::size_t last = FirstChild + ChildCount * (writer + 1u) / writers;
+        return first + step % (last - first);
+    }
+    std::size_t Initial(std::size_t child, Axis axis) const
+    {
+        if (Distributed) return ParentSeed(child, ParentCount, axis);
+        return axis == Axis::HORIZONTAL ? 0u : 2u;
+    }
+    std::size_t Next(std::uint64_t& state, std::size_t current, Axis axis) const
+    {
+        if (Distributed) return NextParent(state, ParentCount, current, Skew);
+        return axis == Axis::HORIZONTAL ? (current == 0u ? 1u : 0u)
+                                        : (current == 2u ? 3u : 2u);
+    }
+};
+inline Geometry MakeGeometry(BenchmarkCase c, bool distributed,
+                             std::size_t worker_count, bool skew)
+{
+    if (distributed)
+    {
+        const std::size_t p = c.NodeCount / 2u;
+        return {c, true, skew, p, p, c.NodeCount - p};
+    }
+    return {c, false, false, 4u, 4u, worker_count};
+}
+
+template<class Backend> bool Build(Backend& backend, const Geometry& g,
+                                   std::size_t workers, bool mixed)
+{
+    if (!Prepare(backend, g.Case, 1u, mixed)) return false;
+    if (!g.Distributed)
+    {
+        for (std::size_t w = 0; w < (mixed ? 1u : workers); ++w)
+        {
+            const std::size_t c = g.FirstChild + w;
+            if (!backend.AddParent(0u, c, Axis::HORIZONTAL) ||
+                !backend.AddParent(2u, c, Axis::VERTICAL)) return false;
+        }
+    }
+    else
+    {
+        for (std::size_t c = g.FirstChild; c < g.FirstChild + g.ChildCount; ++c)
+            for (Axis a : {Axis::HORIZONTAL, Axis::VERTICAL})
+                if (!backend.AddParent(g.Initial(c, a), c, a)) return false;
+    }
+    return Healthy(backend);
+}
+
+// An operation has no retry-count ceiling: it retries until commit, an invalid
+// outcome, or the SAMPLE deadline. A deadline hit is recorded as unfinished.
+// This prevents a permanently stalled operation from hanging the entire suite.
+template<class Backend> Attempt CommitUntilDeadline(Backend& backend, std::size_t oldp,
+    std::size_t newp, std::size_t child, Axis axis, Clock::time_point deadline,
+    std::uint64_t& retries)
+{
+    for (std::uint64_t attempt = 0;; ++attempt)
+    {
+        if (Clock::now() >= deadline) return Attempt::RETRY;
+        const Attempt result = ReplaceOnce(backend, oldp, newp, child, axis);
+        if (result != Attempt::RETRY) return result;
+        ++retries;
+        PerturbSchedule(static_cast<std::uint32_t>(attempt));
+    }
+}
+
+template<class Backend> Numbers Execute(Backend& backend, const Geometry& g,
+    std::size_t writers, std::size_t readers, std::chrono::milliseconds interval)
+{
+    // There is one primary writer per child/axis. In 3A writers use H and V
+    // on the same child; in 3B their child shards are disjoint.
+    const std::size_t participants = writers + readers;
+    std::atomic<std::uint64_t> done_w{0}, done_r{0}, retry_w{0}, retry_r{0};
+    std::atomic<std::uint64_t> unfinished{0}, bad_w{0}, bad_r{0}, distinct{0};
+    std::atomic<bool> ready{true};
+    struct FinalState { std::size_t Child = 0, Parent = 0; Axis Relation = Axis::HORIZONTAL; bool Seen = false; };
+    std::vector<FinalState> final(writers);
+    Clock::time_point start{};
+    std::barrier gate(static_cast<std::ptrdiff_t>(participants + 1u), [&] { start = Clock::now(); });
+    const auto deadline = [&] { return start + interval; };
+    std::vector<std::thread> threads;
+    threads.reserve(participants);
+    for (std::size_t w = 0; w < writers; ++w)
+        threads.emplace_back([&, w]
+        {
+            Registration registration(backend, w + 1u);
+            if (!registration.Ok) ready.store(false);
+            std::uint64_t local_w = 0, local_retry = 0, local_unfinished = 0, local_bad = 0;
+            std::uint64_t step = 0;
+            std::uint64_t state = ConcurrencyConfig::RANDOM_SEED ^
+                (static_cast<std::uint64_t>(w + 1u) * ConcurrencyConfig::RANDOM_STREAM_STEP);
+            const Axis axis = w % 2u ? Axis::VERTICAL : Axis::HORIZONTAL;
+            const std::size_t first = g.Distributed
+                ? g.FirstChild + g.ChildCount * w / writers : g.FirstChild + (readers ? 0u : w);
+            const std::size_t count = g.Distributed
+                ? g.FirstChild + g.ChildCount * (w + 1u) / writers - first : 1u;
+            std::vector<std::size_t> current(count);
+            for (std::size_t i = 0; i < count; ++i)
+                current[i] = g.Initial(first + i, axis);
+            gate.arrive_and_wait();
+            if (registration.Ok)
+                while (Clock::now() < deadline() && !bad_w.load())
+                {
+                    const std::size_t offset = step++ % count;
+                    const std::size_t child = first + offset;
+                    const std::size_t old = current[offset];
+                    const std::size_t next = g.Next(state, old, axis);
+                    const Attempt a = CommitUntilDeadline(
+                        backend, old, next, child, axis, deadline(), local_retry);
+                    if (a == Attempt::COMMITTED)
+                    {
+                        current[offset] = next;
+                        final[w] = {child, next, axis, true};
+                        ++local_w;
+                    }
+                    else if (a == Attempt::INVALID) { ++local_bad; break; }
+                    else { ++local_unfinished; break; }
+                }
+            distinct.fetch_add(g.Distributed ? std::min<std::uint64_t>(local_w, count)
+                : (local_w ? 1u : 0u));
+            done_w.fetch_add(local_w); retry_w.fetch_add(local_retry);
+            unfinished.fetch_add(local_unfinished); bad_w.fetch_add(local_bad);
+        });
+    for (std::size_t r = 0; r < readers; ++r)
+        threads.emplace_back([&, r]
+        {
+            Registration registration(backend, writers + r + 1u);
+            if (!registration.Ok) ready.store(false);
+            std::uint64_t local_reads = 0, local_retry = 0, local_bad = 0;
+            std::uint64_t step = r;
+            gate.arrive_and_wait();
+            if (registration.Ok)
+                while (Clock::now() < deadline() && !bad_r.load())
+                {
+                    const std::size_t child = g.Distributed
+                        ? g.FirstChild + ((++step * 1315423911ull + r) % g.ChildCount)
+                        : g.FirstChild;
+                    const Axis axis = g.Distributed
+                        ? ((child - g.FirstChild) < g.ChildCount / 2u
+                            ? Axis::HORIZONTAL : Axis::VERTICAL)
+                        : ((++step & 1u) ? Axis::HORIZONTAL : Axis::VERTICAL);
+                    const ReadResult read = backend.StableFindParent(child, axis, 0u, 1u);
+                    if (read.IsRetry()) { ++local_retry; continue; }
+                    if (!read.ContractValid() || !read.IsFound() || read.Node >= g.ParentCount ||
+                        (!g.Distributed && (axis == Axis::HORIZONTAL ? read.Node > 1u :
+                            (read.Node != 2u && read.Node != 3u))))
+                    { ++local_bad; break; }
+                    ++local_reads;
+                }
+            done_r.fetch_add(local_reads); retry_r.fetch_add(local_retry);
+            bad_r.fetch_add(local_bad);
+        });
+    gate.arrive_and_wait();
+    for (auto& thread : threads) thread.join();
+    Numbers out;
+    out.Seconds = std::chrono::duration<double>(Clock::now() - start).count();
+    out.Writes = done_w.load(); out.Reads = done_r.load();
+    out.MutationRetries = retry_w.load(); out.ReadRetries = retry_r.load();
+    out.Unfinished = unfinished.load(); out.DistinctChildren = distinct.load();
+    if (!g.Distributed && readers && out.DistinctChildren) out.DistinctChildren = 1u;
+    out.InvalidMutations = bad_w.load();
+    out.InvalidReads = bad_r.load();
+    out.Valid = ready.load() && Healthy(backend) && !out.InvalidMutations && !out.InvalidReads;
+    for (const auto& expected : final)
+    {
+        if (!expected.Seen) continue;
+        const auto observed = backend.StableFindParent(
+            expected.Child, expected.Relation, 0u, DEFAULT_MAX_TRIES);
+        if (!observed.IsFound() || !observed.ContractValid() ||
+            observed.Node != expected.Parent ||
+            !ReverseContains(backend, expected.Parent, expected.Child,
+                expected.Relation, g.Case.NodeCount)) out.Valid = false;
+    }
+    // Sample deadlines are explicitly counted, never mislabelled as corruption.
+    return out;
+}
+
+template<class Backend> bool OneTest1(std::ofstream& file, const char* label,
+    const char* contract, BenchmarkCase c, std::size_t run)
+{
+    Backend backend;
+    const auto begin = Clock::now();
+    if (!BuildFullTest1Graph(backend, c))
+    {
+        Row(file, TestNames[0], label, contract, run, c, 0, 0,
+            "setup_failed", "full_DAG", Numbers{.Valid = false}, 0, 0, 0, 0,
+            TEST1_PAYLOAD_WORDS);
+        return false;
+    }
+    const double construction = std::chrono::duration<double>(Clock::now() - begin).count();
+    Numbers out{};
+    const auto scan_start = Clock::now();
+    std::uint64_t checksum = 0;
+    for (std::size_t child = 0; child < c.NodeCount; ++child)
+        for (std::uint8_t ordinal = 0; ordinal < c.ParentCapacity; ++ordinal)
+        {
+            const auto read = backend.FindParent(child, Axis::HORIZONTAL, ordinal, 1u);
+            if (!read.ContractValid() || read.IsRetry()) out.InvalidReads++;
+            checksum += read.IsFound() ? read.Node : 0u;
+            out.Reads++;
+        }
+    for (std::size_t node = 0; node < c.NodeCount; ++node)
+    {
+        std::uint64_t word = 0;
+        if (!backend.LoadPayload(node, 0u, word, false)) out.InvalidReads++;
+        checksum += word;
+        out.Reads++;
+    }
+    Consume(checksum);
+    out.Seconds = std::chrono::duration<double>(Clock::now() - scan_start).count();
+    out.Valid = out.InvalidReads == 0u && Healthy(backend);
+    Row(file, TestNames[0], label, contract, run, c, 0, 0,
+        "full_DAG_parent_and_payload_scan", "sequential", out,
+        out.ReadsPerSecond(), 0, 0, 0, TEST1_PAYLOAD_WORDS, construction);
+    return out.Valid;
+}
+
+template<class Backend> bool OneMutation(std::ofstream& file, const char* test,
+    const char* label, const char* contract, BenchmarkCase c, std::size_t run,
+    std::size_t writers, bool distributed, bool skew,
+    std::chrono::milliseconds interval)
+{
+    const Geometry g = MakeGeometry(c, distributed, writers, skew);
+    Backend backend;
+    if (!Build(backend, g, writers, false))
+    {
+        Row(file, test, label, contract, run, c, writers, 0,
+            "setup_failed", skew ? "80pct_hot_1pct_parents" : "uniform",
+            Numbers{.Valid = false});
+        return false;
+    }
+    const Numbers x = Execute(backend, g, writers, 0, interval);
+    Row(file, test, label, contract, run, c, writers, 0, "writers_only",
+        distributed ? (skew ? "80pct_hot_1pct_parents" : "uniform_full_half") : "hotspot",
+        x, 0, x.WritesPerSecond());
+    return x.Valid && x.Writes > 0;
+}
+
+template<class Backend> bool OneMixed(std::ofstream& file, const char* test,
+    const char* label, const char* contract, BenchmarkCase c, std::size_t run,
+    std::size_t readers, bool distributed, bool skew,
+    std::chrono::milliseconds interval)
+{
+    Geometry g = MakeGeometry(c, distributed, 2u, skew);
+    if (!distributed) g.ChildCount = 1u;
+    auto sample = [&](std::size_t writers, std::size_t nreaders) {
+        Backend backend;
+        if (!Build(backend, g, 2u, true)) return Numbers{.Valid = false};
+        return Execute(backend, g, writers, nreaders, interval);
+    };
+    const Numbers read_only = sample(0u, readers);
+    const Numbers write_only = sample(2u, 0u);
+    const Numbers mixed = sample(2u, readers);
+    const bool valid = read_only.Valid && write_only.Valid && mixed.Valid &&
+        read_only.Reads > 0 && write_only.Writes > 0 && mixed.Reads > 0 && mixed.Writes > 0;
+    Row(file, test, label, contract, run, c, 0, readers, "quiescent_read_only",
+        distributed ? (skew ? "80pct_hot_1pct_parents" : "uniform_full_half") : "hotspot",
+        read_only, read_only.ReadsPerSecond());
+    Row(file, test, label, contract, run, c, 2, 0, "write_only",
+        distributed ? (skew ? "80pct_hot_1pct_parents" : "uniform_full_half") : "hotspot",
+        write_only, 0, write_only.WritesPerSecond());
+    Numbers marked_mixed = mixed;
+    marked_mixed.Valid = valid;
+    Row(file, test, label, contract, run, c, 2, readers, "mixed",
+        distributed ? (skew ? "80pct_hot_1pct_parents" : "uniform_full_half") : "hotspot",
+        marked_mixed, read_only.ReadsPerSecond(), write_only.WritesPerSecond(),
+        mixed.ReadsPerSecond(), mixed.WritesPerSecond());
+    return valid;
+}
+
+template<class LiveGraphBidir, class SortledtonBidir>
+int RunAll(std::size_t lower_node_count = 100u,
+    std::size_t higher_node_count = 10'000u,
+    std::size_t lower_parent_capacity = 4u,
+    std::size_t higher_parent_capacity = 32u,
+    std::size_t usable_thread_count = 18u,
+    std::size_t run_count = 9u,
+    const std::string& filename_prefix = "SuperNova_comparison")
+{
+    if (!ValidateRunArguments(lower_node_count, higher_node_count,
+        lower_parent_capacity, higher_parent_capacity, usable_thread_count) ||
+        run_count == 0u || filename_prefix.empty() || usable_thread_count > 63u)
+        return 1;
+    Files files(filename_prefix);
+    if (!files.Good()) { std::cerr << "Cannot create five CSV files\n"; return 1; }
+    using Fabric = RuntimeAPCFabricBackend;
+    using RowLock = RowLockedVectorDAG<std::shared_mutex, true>;
+    using RowLockWrite = RowLockedVectorDAG<std::mutex, false>;
+    const std::array<BenchmarkCase, 4> cases = MakeBenchmarkCases(lower_node_count,
+        higher_node_count, static_cast<std::uint8_t>(lower_parent_capacity),
+        static_cast<std::uint8_t>(higher_parent_capacity));
+    const std::size_t sweep = usable_thread_count - 2u;
+    bool all_ok = true;
+    // The expensive 1 KiB full-DAG Test 1 uses the small N. Structural scale
+    // tests use all four (N,K) cases and the one-word structural payload.
+    for (std::size_t rep = 1; rep <= run_count; ++rep)
+    {
+        std::cout << "Whole-suite repetition " << rep << '/' << run_count << '\n';
+        for (const auto& c : cases)
+        {
+            if (c.NodeCount == lower_node_count)
+            {
+#define PAPER_TEST1(T, NAME, CONTRACT) all_ok = OneTest1<T>(files.Stream[0], NAME, CONTRACT, c, rep) && all_ok
+                PAPER_TEST1(Fabric, "SuperNova", "bounded_bidirectional_DAG");
+                PAPER_TEST1(RowLock, "RowLock", "bounded_bidirectional_DAG");
+                PAPER_TEST1(LiveGraphBidir, "LiveGraph_bidirectional", "adapter_bidirectional_transaction");
+                PAPER_TEST1(SortledtonBidir, "Sortledton_bidirectional", "guarded_adapter_bidirectional_transaction");
+#undef PAPER_TEST1
+            }
+            for (std::size_t count = 1; count <= sweep; ++count)
+            {
+                for (int test = 1; test <= 2; ++test)
+                {
+                    const bool distributed = test == 2;
+                    // Uniform is the principal scale result. A second skewed
+                    // distribution exposes parent contention at large N.
+                    for (int distribution = 0; distribution < (distributed ? 2 : 1); ++distribution)
+                    {
+                        const bool skew = distribution == 1;
+#define PAPER_MUT(T, NAME, CONTRACT) all_ok = OneMutation<T>(files.Stream[test], TestNames[test], NAME, CONTRACT, c, rep, count, distributed, skew, 1000ms) && all_ok
+                        PAPER_MUT(Fabric, "SuperNova", "bounded_bidirectional_DAG");
+                        PAPER_MUT(RowLockWrite, "RowLock", "bounded_bidirectional_DAG");
+                        PAPER_MUT(LiveGraphBidir, "LiveGraph_bidirectional", "adapter_bidirectional_transaction");
+                        PAPER_MUT(SortledtonBidir, "Sortledton_bidirectional", "guarded_adapter_bidirectional_transaction");
+#undef PAPER_MUT
+                    }
+                }
+                for (int test = 3; test <= 4; ++test)
+                {
+                    const bool distributed = test == 4;
+                    for (int distribution = 0; distribution < (distributed ? 2 : 1); ++distribution)
+                    {
+                        const bool skew = distribution == 1;
+#define PAPER_MIX(T, NAME, CONTRACT) all_ok = OneMixed<T>(files.Stream[test], TestNames[test], NAME, CONTRACT, c, rep, count, distributed, skew, 1000ms) && all_ok
+                        PAPER_MIX(Fabric, "SuperNova", "bounded_bidirectional_DAG");
+                        PAPER_MIX(RowLock, "RowLock", "bounded_bidirectional_DAG");
+                        PAPER_MIX(LiveGraphBidir, "LiveGraph_bidirectional", "adapter_bidirectional_transaction");
+                        PAPER_MIX(SortledtonBidir, "Sortledton_bidirectional", "guarded_adapter_bidirectional_transaction");
+#undef PAPER_MIX
+                    }
+                }
+            }
+        }
+        // Intermediate large-set points are structural-only: Test 1's 1 KiB
+        // Sortledton payload encoding would change the purpose of the scale test.
+        for (std::size_t n : {65'536u, 262'144u, 524'288u, 1'048'576u})
+        {
+            if (n <= lower_node_count || n >= higher_node_count) continue;
+            const BenchmarkCase c{n, static_cast<std::uint8_t>(higher_parent_capacity)};
+            for (std::size_t count = 1; count <= sweep; ++count)
+                for (bool skew : {false, true})
+                {
+#define PAPER_SCALE_MUT(T, NAME, CONTRACT) all_ok = OneMutation<T>(files.Stream[2], TestNames[2], NAME, CONTRACT, c, rep, count, true, skew, 1000ms) && all_ok
+                    PAPER_SCALE_MUT(Fabric, "SuperNova", "bounded_bidirectional_DAG");
+                    PAPER_SCALE_MUT(RowLockWrite, "RowLock", "bounded_bidirectional_DAG");
+                    PAPER_SCALE_MUT(LiveGraphBidir, "LiveGraph_bidirectional", "adapter_bidirectional_transaction");
+                    PAPER_SCALE_MUT(SortledtonBidir, "Sortledton_bidirectional", "guarded_adapter_bidirectional_transaction");
+#undef PAPER_SCALE_MUT
+#define PAPER_SCALE_MIX(T, NAME, CONTRACT) all_ok = OneMixed<T>(files.Stream[4], TestNames[4], NAME, CONTRACT, c, rep, count, true, skew, 1000ms) && all_ok
+                    PAPER_SCALE_MIX(Fabric, "SuperNova", "bounded_bidirectional_DAG");
+                    PAPER_SCALE_MIX(RowLock, "RowLock", "bounded_bidirectional_DAG");
+                    PAPER_SCALE_MIX(LiveGraphBidir, "LiveGraph_bidirectional", "adapter_bidirectional_transaction");
+                    PAPER_SCALE_MIX(SortledtonBidir, "Sortledton_bidirectional", "guarded_adapter_bidirectional_transaction");
+#undef PAPER_SCALE_MIX
+                }
+        }
+    }
+    for (auto& f : files.Stream) { f.flush(); if (!f.good()) all_ok = false; f.close(); }
+    for (const char* test : TestNames)
+        all_ok = AppendMedians(filename_prefix + "_" + test + ".csv", run_count) && all_ok;
+    return all_ok ? 0 : 1;
+}
+} // namespace APCDAGTests::PaperCSV
+
+// Usage after including BOTH external adapters:
+// return APCDAGTests::RunAll<LiveGraphVsSuperNova::LiveGraphBackend,
+//     SortledtonVsSuperNova::SortledtonBidirBackend>(
+//         100, 524288, 4, 32, 18, 9, "results/study");
+namespace APCDAGTests
+{
+template<class LiveGraphBidir, class SortledtonBidir>
+int RunAll(std::size_t lower_node_count, std::size_t higher_node_count,
+    std::size_t lower_parent_capacity, std::size_t higher_parent_capacity,
+    std::size_t usable_thread_count, std::size_t run_count,
+    const std::string& filename_prefix)
+{
+    return PaperCSV::RunAll<LiveGraphBidir, SortledtonBidir>(lower_node_count,
+        higher_node_count, lower_parent_capacity, higher_parent_capacity,
+        usable_thread_count, run_count, filename_prefix);
+}
+}
