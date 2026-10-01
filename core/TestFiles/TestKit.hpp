@@ -1,7 +1,3 @@
-// FILE: TestKit.hpp
-// ------------------------------------------------------------
-
-
 #pragma once
 
 // SuperNova APC/Fabric paper-quality systems test kit (C++20)
@@ -12,11 +8,11 @@
 //   3) the same row-local DAG with shared-reader/exclusive-writer locks for Test 3,
 //   4) APC/Fabric with public generation/transaction/read contracts.
 //
-// Tests 1-3 share one runtime (N,K) case matrix and reusable backend adapters.
-// Test 1 uses one 128 x 8-byte payload region per node and minimum valid Fabric
-// geometry. Tests 2A/2B sweep every writer count through usable_threads-2; Tests
-// 3A/3B keep exactly two active writers and sweep every reader count through the
-// remaining usable threads. Baselines do not emulate Fabric relocation, generation
+// Tests 1-3 share reusable backend adapters. Test 1 keeps its repeated four-case
+// benchmark. Internal Tests 2-3 use the exact duration-based PaperCSV workload
+// engine on the four (lower/upper N) x (lower/upper K) corners, but take one sample
+// per point. Tests 2A/2B sweep writers; Tests 3A/3B use two writers and sweep readers.
+// Baselines do not emulate Fabric relocation, generation
 // handles, retirement, or schema semantics; those properties are tested separately.
 //
 // Put this file in core/TestFiles and compile a tiny runner:
@@ -25,10 +21,9 @@
 //   int main() { return APCDAGTests::Run(); }
 //
 // Add core/headers to the compiler include path and link the production .cpp files.
-// Tests 1-5 and 7 use only public APC/Fabric operations. Correctness paths resolve
-// returned APC facades by slab slot identity; they never compare host-object addresses.
-// Timed traversal in Test 1 deliberately excludes this TestKit-only facade->index
-// conversion so adapter bookkeeping is not charged to APC/Fabric traversal.
+// Tests 1-5 and 7 use public APC/Fabric operations. Performance mutation paths call
+// the public handle APIs directly; correctness-only tests use a tiny fixed fixture.
+// Returned relations are compared by slab slot identity, never host-object address.
 // Test 6 uses a read-only derived Fabric probe to verify the compact schema-table
 // geometry and protocol storage. Test 8 exercises whole-slab Save/Attach/Detach
 // relocation without involving GHGF.
@@ -913,6 +908,21 @@ public:
         APCUseScope use = AcquireAPCUse_();
         return use ? APCCache_.CurrentGeneration_ : 0u;
     }
+
+    std::uint64_t HandleForTest() noexcept
+    {
+        APCUseScope use = AcquireAPCUse_();
+        return use
+            ? EdgeBuilder::MakeParentHandle(
+                APCCache_.APCSlotIdx_,
+                APCCache_.CurrentGeneration_)
+            : FABRIC_CELL_SENTINAL;
+    }
+
+    std::byte* RawAPCBaseForTest() noexcept
+    {
+        return IsFabricBound_() ? APCCache_.RawAPCBasePtr_ : nullptr;
+    }
 };
 
 class ResolverTestFabric final : public APCFinilizer
@@ -935,207 +945,294 @@ public:
     {
         return GetExistingAPC_(slot, apc, use, expected_generation);
     }
+
+    std::byte* RawAPCBaseForSlotForTest(std::uint32_t slot) const noexcept
+    {
+        if (!FabCache_ || slot >= FabCache_->CountOfAPC_)
+        {
+            return nullptr;
+        }
+        return reinterpret_cast<std::byte*>(
+            SlabBasePtr_ +
+            FabCache_->SegmentPoolBegin_ +
+            static_cast<std::size_t>(slot) *
+                FabCache_->PerAPCRuntimeCellCount_);
+    }
+
+    ReadResult FindParentByHandleForTest(
+        std::uint64_t child_handle,
+        FabricSegments edge_table,
+        std::uint8_t ordinal,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindParent_(
+            TwinU32ToU64::ExtractLow32Of64(child_handle),
+            TwinU32ToU64::ExtractHigh32Of64(child_handle),
+            edge_table, ordinal, &op, max_tries);
+        return ReadConvert_(found, op);
+    }
+
+    ReadResult FindFirstChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindFirstChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, &op, max_tries);
+        return ReadConvert_(found, op);
+    }
+
+    ReadResult FindLastChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindLastChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, &op, max_tries);
+        return ReadConvert_(found, op);
+    }
+
+    ReadResult FindNextChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t locator,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindNextChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, locator, &op, max_tries);
+        return ReadConvert_(found, op);
+    }
+
+    ReadResult FindPreviousChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t locator,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindPreviousChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, locator, &op, max_tries);
+        return ReadConvert_(found, op);
+    }
+
+    BenchmarkReadResult BenchmarkFindParentByHandleForTest(
+        std::uint64_t child_handle,
+        FabricSegments edge_table,
+        std::uint8_t ordinal,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindParent_(
+            TwinU32ToU64::ExtractLow32Of64(child_handle),
+            TwinU32ToU64::ExtractHigh32Of64(child_handle),
+            edge_table, ordinal, &op, max_tries);
+        (void)found;
+        return BenchmarkConvert_(op, BenchmarkReadResult::NO_NODE);
+    }
+
+    BenchmarkReadResult BenchmarkFindFirstChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindFirstChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, &op, max_tries);
+        (void)found;
+        return BenchmarkChildConvert_(op);
+    }
+
+    BenchmarkReadResult BenchmarkFindLastChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindLastChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, &op, max_tries);
+        (void)found;
+        return BenchmarkChildConvert_(op);
+    }
+
+    BenchmarkReadResult BenchmarkFindNextChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t locator,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindNextChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, locator, &op, max_tries);
+        (void)found;
+        return BenchmarkChildConvert_(op);
+    }
+
+    BenchmarkReadResult BenchmarkFindPreviousChildByHandleForTest(
+        std::uint64_t parent_handle,
+        FabricSegments edge_table,
+        std::uint32_t locator,
+        std::uint32_t max_tries = 1u) noexcept
+    {
+        TestAPC::RelationOperationForTest op{};
+        AdaptivePackedCellContainer found = FindPreviousChild_(
+            TwinU32ToU64::ExtractLow32Of64(parent_handle),
+            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            edge_table, locator, &op, max_tries);
+        (void)found;
+        return BenchmarkChildConvert_(op);
+    }
+
+private:
+    static ReadResult ReadConvert_(
+        AdaptivePackedCellContainer& found,
+        const TestAPC::RelationOperationForTest& op) noexcept
+    {
+        std::size_t node = ReadResult::NO_NODE;
+        bool present = false;
+        if (op.MutationOP_ == ReadOperation::FOUND)
+        {
+            const std::uint32_t slot = found.GetThisSlotIdx();
+            if (ADS::IsValid32BitAPCUnit(slot))
+            {
+                node = static_cast<std::size_t>(slot);
+                present = true;
+            }
+        }
+        return ReadResult{
+            node, op.RelationLocator_, op.MutationOP_, present};
+    }
+
+    static BenchmarkReadResult BenchmarkConvert_(
+        const TestAPC::RelationOperationForTest& op,
+        std::size_t node_hint) noexcept
+    {
+        const bool present = op.MutationOP_ == ReadOperation::FOUND;
+        return BenchmarkReadResult{
+            present ? node_hint : BenchmarkReadResult::NO_NODE,
+            op.RelationLocator_, op.MutationOP_, present};
+    }
+
+    static BenchmarkReadResult BenchmarkChildConvert_(
+        const TestAPC::RelationOperationForTest& op) noexcept
+    {
+        const std::size_t node_hint =
+            op.MutationOP_ == ReadOperation::FOUND &&
+            op.RelationLocator_ != UINT32_MAX
+                ? static_cast<std::size_t>(
+                    EdgeBuilder::RelationSlot(op.RelationLocator_))
+                : BenchmarkReadResult::NO_NODE;
+        return BenchmarkConvert_(op, node_hint);
+    }
 };
 
-template <
-    std::size_t NodeCount,
-    std::size_t PayloadWords,
-    std::uint8_t ParentCapacity,
-    bool SinglePayloadRegion = false
->
-class APCFabricBackend
+// -----------------------------------------------------------------------------
+// Small correctness fixture used only by Tests 4, 5 and the structural part of
+// Test 7.  It is intentionally not a benchmark backend: the real representation
+// remains inside Fabric, mutations go through the public *ByHandle API, and the
+// few APC facade objects exist only because Test 4 explicitly checks the public
+// object-side AttachMyChild/DetachMyChild symmetry.
+// -----------------------------------------------------------------------------
+
+template <std::size_t NodeCount, std::uint8_t ParentCapacity>
+class SmallFabricFixture
 {
 public:
     using SD = SchemaDefinition;
-    static_assert(PayloadWords <= UINT32_MAX);
-
-    static constexpr std::uint32_t FABRIC_SLOT_COUNT =
-        static_cast<std::uint32_t>(NodeCount);
-    static constexpr std::uint8_t PARENT_CAPACITY = ParentCapacity;
-
-    static constexpr std::uint32_t MINIMAL_SINGLE_REGION_SLOT_WORDS = []() constexpr
-    {
-        const std::uint32_t payload_words =
-            PayloadWords == 0u ? 1u : static_cast<std::uint32_t>(PayloadWords);
-
-        const std::uint32_t payload_cells =
-            SD::AlignRegionCells(payload_words);
-
-        const std::uint32_t required =
-            SD::AlignRegionCells(
-                SD::AlignRegionCells(ADS::META_CELL_COUNT) +
-                payload_cells
-            );
-
-        return required < MINIMUM_APC_CELL_COUNT
-            ? static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT)
-            : required;
-    }();
-
-    static constexpr std::uint32_t SLOT_WORDS =
-        SinglePayloadRegion
-            ? MINIMAL_SINGLE_REGION_SLOT_WORDS
-            : static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT);
 
     bool Initialize() noexcept
     {
-        Slots_.fill(ADS::APC_INDEX_BOUND_SENTINAL);
+        static_assert(NodeCount > 0u && NodeCount <= UINT32_MAX);
+        static_assert(ParentCapacity > 0u);
 
-        constexpr std::uint32_t matrix_width =
-            PayloadWords == 0u ? 1u : static_cast<std::uint32_t>(PayloadWords);
-
-        constexpr std::uint16_t active_region_mask =
-            static_cast<std::uint16_t>(
-                ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT) |
-                (
-                    SinglePayloadRegion
-                        ? 0u
-                        : ADS::RegionBit(MacroColumnOfAPC::TOP_DOWN_SLOT)
-                )
-            );
-
-        const SD::FabricRegionConfig region_config{
-            active_region_mask,
-            0u,
-            matrix_width
-        };
-
+        const SD::FabricRegionConfig config{
+            ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT), 0u, 1u};
         if (!Fabric_.InitializeFabric(
-            FABRIC_SLOT_COUNT,
-            SLOT_WORDS,
-            region_config,
-            ParentCapacity
-        ))
+            static_cast<std::uint32_t>(NodeCount),
+            MINIMUM_APC_CELL_COUNT,
+            config,
+            ParentCapacity))
         {
             return false;
         }
 
         SD::RegionSchemaTable schemas{};
         SD::MakeDisabledSchemaTable(schemas);
-
-
-
-        SD::RegionSchemaRecord& ff_schema_prop =
+        SD::RegionSchemaRecord& region =
             schemas[static_cast<std::size_t>(MacroColumnOfAPC::BOTTOM_UP_SLOT)];
-
-        ff_schema_prop.Region = MacroColumnOfAPC::BOTTOM_UP_SLOT;
-        ff_schema_prop.Dtype = SD::DataTypeOfMacroColumn::UINT64_T;
-        ff_schema_prop.Protocol = SD::SchemaProtocols::PRIVATE_REGION;
-        ff_schema_prop.MatrixHeight = 1u;
-        ff_schema_prop.MatrixWidth = matrix_width;
-        ff_schema_prop.Flags = SD::SchemaFlags::BATCHED_LAST_DIM;
-
-        if (!SD::SealDesiredSchema(ff_schema_prop, 0u))
-        {
-            return false;
-        }
-
-        if constexpr (!SinglePayloadRegion)
-        {
-            SD::RegionSchemaRecord& fb_schema =
-                schemas[static_cast<std::size_t>(MacroColumnOfAPC::TOP_DOWN_SLOT)];
-
-            fb_schema = ff_schema_prop;
-            fb_schema.Region = MacroColumnOfAPC::TOP_DOWN_SLOT;
-            fb_schema.Protocol = SD::SchemaProtocols::ATOMIC_WORD_ARRAY;
-
-            if (!SD::SealDesiredSchema(fb_schema, 0u))
-            {
-                return false;
-            }
-        }
+        region.Region = MacroColumnOfAPC::BOTTOM_UP_SLOT;
+        region.Dtype = SD::DataTypeOfMacroColumn::UINT64_T;
+        region.Protocol = SD::SchemaProtocols::PRIVATE_REGION;
+        region.MatrixHeight = 1u;
+        region.MatrixWidth = 1u;
+        region.Flags = SD::SchemaFlags::BATCHED_LAST_DIM;
+        if (!SD::SealDesiredSchema(region, 0u)) return false;
 
         for (std::size_t i = 0u; i < NodeCount; ++i)
         {
-            if (!Fabric_.CreateAPC(
-                Nodes_[i],
-                schemas
-            ))
+            if (!Fabric_.CreateAPC(Nodes_[i], schemas)) return false;
+            Handles_[i] = Nodes_[i].HandleForTest();
+            if (
+                Nodes_[i].GetThisSlotIdx() != i ||
+                Handles_[i] == FABRIC_CELL_SENTINAL)
             {
                 return false;
-            }
-
-            const std::uint32_t slot = Nodes_[i].GetThisSlotIdx();
-            if (slot != i)
-            {
-                return false;
-            }
-            Slots_[i] = slot;
-
-            if constexpr (PayloadWords > 0u)
-            {
-                auto direct = Nodes_[i].template BuildAViewOverRegion<std::uint64_t>(
-                    MacroColumnOfAPC::BOTTOM_UP_SLOT
-                );
-
-                if (
-                    !direct.has_value() ||
-                    direct->Size() < PayloadWords ||
-                    !direct->RawMutableSpan().has_value()
-                )
-                {
-                    return false;
-                }
-
-                DirectViews_[i] = std::move(direct.value());
-
-                if constexpr (!SinglePayloadRegion)
-                {
-                    auto atomic = Nodes_[i].template BuildAViewOverRegion<std::uint64_t>(
-                        MacroColumnOfAPC::TOP_DOWN_SLOT
-                    );
-
-                    if (
-                        !atomic.has_value() ||
-                        atomic->Size() < PayloadWords
-                    )
-                    {
-                        return false;
-                    }
-
-                    AtomicViews_[i] = std::move(atomic.value());
-                }
             }
         }
         return true;
     }
 
+    std::uint64_t Handle(std::size_t node) const noexcept
+    {
+        return node < NodeCount ? Handles_[node] : FABRIC_CELL_SENTINAL;
+    }
+
+    TestAPC& Node(std::size_t node) noexcept { return Nodes_[node]; }
+    ResolverTestFabric& Fabric() noexcept { return Fabric_; }
+
     MutationResult AddParentResult(
         std::size_t parent,
         std::size_t child,
         Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
-        std::uint32_t internal_recursion =
-            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal = AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        if (parent >= NodeCount || child >= NodeCount)
-            return MutationResult::INVALID;
-
-        return Nodes_[child].AddParent(
-            Nodes_[parent],
-            EdgeTableForAxis(axis),
-            max_tries,
-            internal_recursion
-        );
+        return Valid_(parent) && Valid_(child)
+            ? Fabric_.AddParenByHandle(
+                Handles_[parent], Handles_[child], EdgeTableForAxis(axis),
+                tries, internal)
+            : MutationResult::INVALID;
     }
 
     MutationResult RemoveParentResult(
         std::size_t parent,
         std::size_t child,
         Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
-        std::uint32_t internal_recursion =
-            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal = AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        if (parent >= NodeCount || child >= NodeCount)
-            return MutationResult::INVALID;
-
-        return Nodes_[child].RemoveParent(
-            Nodes_[parent],
-            EdgeTableForAxis(axis),
-            max_tries,
-            internal_recursion
-        );
+        return Valid_(parent) && Valid_(child)
+            ? Fabric_.RemoveParentByHandle(
+                Handles_[parent], Handles_[child], EdgeTableForAxis(axis),
+                tries, internal)
+            : MutationResult::INVALID;
     }
 
     MutationResult ReplaceParentResult(
@@ -1143,462 +1240,111 @@ public:
         std::size_t new_parent,
         std::size_t child,
         Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES,
-        std::uint32_t internal_recursion =
-            AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
+        std::uint32_t tries = DEFAULT_MAX_TRIES,
+        std::uint32_t internal = AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        if (
-            old_parent >= NodeCount ||
-            new_parent >= NodeCount ||
-            child >= NodeCount
-        )
-        {
-            return MutationResult::INVALID;
-        }
-
-        return Nodes_[child].ReplaceParent(
-            Nodes_[old_parent],
-            Nodes_[new_parent],
-            EdgeTableForAxis(axis),
-            max_tries,
-            internal_recursion
-        );
+        return Valid_(old_parent) && Valid_(new_parent) && Valid_(child)
+            ? Fabric_.ReplaceParentByHandle(
+                Handles_[old_parent], Handles_[new_parent], Handles_[child],
+                EdgeTableForAxis(axis), tries, internal)
+            : MutationResult::INVALID;
     }
 
     bool AddParent(
-        std::size_t parent,
-        std::size_t child,
-        Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
+        std::size_t parent, std::size_t child, Axis axis,
+        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
     {
-        return MutationCommitted(
-            AddParentResult(parent, child, axis, max_tries));
+        return MutationCommitted(AddParentResult(parent, child, axis, tries));
     }
 
     bool RemoveParent(
-        std::size_t parent,
-        std::size_t child,
-        Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
+        std::size_t parent, std::size_t child, Axis axis,
+        std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
     {
-        return MutationCommitted(
-            RemoveParentResult(parent, child, axis, max_tries));
+        return MutationCommitted(RemoveParentResult(parent, child, axis, tries));
     }
 
     bool ReplaceParent(
-        std::size_t old_parent,
-        std::size_t new_parent,
-        std::size_t child,
-        Axis axis,
-        std::uint32_t max_tries = DEFAULT_MAX_TRIES) noexcept
+        std::size_t old_parent, std::size_t new_parent, std::size_t child,
+        Axis axis, std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
     {
         return MutationCommitted(
-            ReplaceParentResult(old_parent, new_parent, child, axis, max_tries));
+            ReplaceParentResult(old_parent, new_parent, child, axis, tries));
     }
 
     ReadResult FindParent(
-        std::size_t child,
-        Axis axis,
-        std::uint8_t ordinal,
-        std::uint32_t max_tries = 1u) noexcept
+        std::size_t child, Axis axis, std::uint8_t ordinal,
+        std::uint32_t tries = 1u) noexcept
     {
-        if (child >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[child].FindParent(
-            EdgeTableForAxis(axis),
-            ordinal,
-            &operation,
-            max_tries
-        );
-        return Convert_(found, operation);
+        return Valid_(child)
+            ? Fabric_.FindParentByHandleForTest(
+                Handles_[child], EdgeTableForAxis(axis), ordinal, tries)
+            : ReadResult{};
     }
 
     ReadResult StableFindParent(
-        std::size_t child,
-        Axis axis,
-        std::uint8_t ordinal,
-        std::uint32_t max_tries = 1u) noexcept
+        std::size_t child, Axis axis, std::uint8_t ordinal,
+        std::uint32_t tries = 1u) noexcept
     {
-        return FindParent(child, axis, ordinal, max_tries);
+        return FindParent(child, axis, ordinal, tries);
     }
 
     ReadResult FindFirstChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t max_tries = 1u) noexcept
+        std::size_t parent, Axis axis, std::uint32_t tries = 1u) noexcept
     {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindFirstChild(
-            EdgeTableForAxis(axis),
-            &operation,
-            max_tries
-        );
-        return Convert_(found, operation);
+        return Valid_(parent)
+            ? Fabric_.FindFirstChildByHandleForTest(
+                Handles_[parent], EdgeTableForAxis(axis), tries)
+            : ReadResult{};
     }
 
     ReadResult FindLastChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t max_tries = 1u) noexcept
+        std::size_t parent, Axis axis, std::uint32_t tries = 1u) noexcept
     {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindLastChild(
-            EdgeTableForAxis(axis),
-            &operation,
-            max_tries
-        );
-        return Convert_(found, operation);
+        return Valid_(parent)
+            ? Fabric_.FindLastChildByHandleForTest(
+                Handles_[parent], EdgeTableForAxis(axis), tries)
+            : ReadResult{};
     }
 
     ReadResult FindNextChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t locator,
-        std::uint32_t max_tries = 1u) noexcept
+        std::size_t parent, Axis axis, std::uint32_t locator,
+        std::uint32_t tries = 1u) noexcept
     {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindNextChild(
-            EdgeTableForAxis(axis),
-            locator,
-            &operation,
-            max_tries
-        );
-        return Convert_(found, operation);
+        return Valid_(parent)
+            ? Fabric_.FindNextChildByHandleForTest(
+                Handles_[parent], EdgeTableForAxis(axis), locator, tries)
+            : ReadResult{};
     }
 
     ReadResult FindPreviousChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t locator,
-        std::uint32_t max_tries = 1u) noexcept
+        std::size_t parent, Axis axis, std::uint32_t locator,
+        std::uint32_t tries = 1u) noexcept
     {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindPreviousChild(
-            EdgeTableForAxis(axis),
-            locator,
-            &operation,
-            max_tries
-        );
-        return Convert_(found, operation);
+        return Valid_(parent)
+            ? Fabric_.FindPreviousChildByHandleForTest(
+                Handles_[parent], EdgeTableForAxis(axis), locator, tries)
+            : ReadResult{};
     }
 
-    BenchmarkReadResult BenchmarkFindParent(
-        std::size_t child,
-        Axis axis,
-        std::uint8_t ordinal,
-        std::uint32_t max_tries = 1u) noexcept
+private:
+    bool Valid_(std::size_t node) const noexcept
     {
-        if (child >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[child].FindParent(
-            EdgeTableForAxis(axis),
-            ordinal,
-            &operation,
-            max_tries
-        );
-        (void)found;
-        return BenchmarkConvert_(operation, BenchmarkReadResult::NO_NODE);
-    }
-
-    BenchmarkReadResult BenchmarkFindFirstChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t max_tries = 1u) noexcept
-    {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindFirstChild(
-            EdgeTableForAxis(axis),
-            &operation,
-            max_tries
-        );
-        (void)found;
-        return BenchmarkChildConvert_(operation);
-    }
-
-    BenchmarkReadResult BenchmarkFindLastChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t max_tries = 1u) noexcept
-    {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindLastChild(
-            EdgeTableForAxis(axis),
-            &operation,
-            max_tries
-        );
-        (void)found;
-        return BenchmarkChildConvert_(operation);
-    }
-
-    BenchmarkReadResult BenchmarkFindNextChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t locator,
-        std::uint32_t max_tries = 1u) noexcept
-    {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindNextChild(
-            EdgeTableForAxis(axis),
-            locator,
-            &operation,
-            max_tries
-        );
-        (void)found;
-        return BenchmarkChildConvert_(operation);
-    }
-
-    BenchmarkReadResult BenchmarkFindPreviousChild(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t locator,
-        std::uint32_t max_tries = 1u) noexcept
-    {
-        if (parent >= NodeCount)
-        {
-            return {};
-        }
-
-        TestAPC::RelationOperationForTest operation{};
-        AdaptivePackedCellContainer found = Nodes_[parent].FindPreviousChild(
-            EdgeTableForAxis(axis),
-            locator,
-            &operation,
-            max_tries
-        );
-        (void)found;
-        return BenchmarkChildConvert_(operation);
-    }
-
-    bool StorePayload(
-        std::size_t node,
-        std::uint32_t word,
-        std::uint64_t value,
-        bool atomic) noexcept
-    {
-        if constexpr (PayloadWords == 0u)
-        {
-            (void)node; (void)word; (void)value; (void)atomic;
-            return false;
-        }
-        else
-        {
-            if (node >= NodeCount || word >= PayloadWords)
-            {
-                return false;
-            }
-
-            if (atomic)
-            {
-                if constexpr (SinglePayloadRegion)
-                {
-                    auto span = DirectViews_[node].RawMutableSpan();
-                    if (!span.has_value())
-                    {
-                        return false;
-                    }
-
-                    std::atomic_ref<std::uint64_t>(span.value()[word]).store(
-                        value,
-                        std::memory_order_release
-                    );
-                    return true;
-                }
-                else
-                {
-                    return AtomicViews_[node].AtomicStore(
-                        word,
-                        value,
-                        std::memory_order_release
-                    );
-                }
-            }
-
-            auto span = DirectViews_[node].RawMutableSpan();
-            if (!span.has_value())
-            {
-                return false;
-            }
-            span.value()[word] = value;
-            return true;
-        }
-    }
-
-    bool LoadPayload(
-        std::size_t node,
-        std::uint32_t word,
-        std::uint64_t& value,
-        bool atomic) noexcept
-    {
-        if constexpr (PayloadWords == 0u)
-        {
-            (void)node; (void)word; (void)value; (void)atomic;
-            return false;
-        }
-        else
-        {
-            if (node >= NodeCount || word >= PayloadWords)
-            {
-                return false;
-            }
-
-            if (atomic)
-            {
-                if constexpr (SinglePayloadRegion)
-                {
-                    auto span = DirectViews_[node].RawMutableSpan();
-                    if (!span.has_value())
-                    {
-                        return false;
-                    }
-
-                    value = std::atomic_ref<std::uint64_t>(span.value()[word]).load(
-                        std::memory_order_acquire
-                    );
-                    return true;
-                }
-                else
-                {
-                    value = AtomicViews_[node].AtomicLoad(
-                        word,
-                        std::memory_order_acquire
-                    );
-                    return true;
-                }
-            }
-
-            auto span = DirectViews_[node].RawMutableSpan();
-            if (!span.has_value())
-            {
-                return false;
-            }
-            value = span.value()[word];
-            return true;
-        }
-    }
-
-    AdaptivePackedCellContainer& Node(std::size_t index) noexcept
-    {
-        return Nodes_[index];
-    }
-
-    std::size_t ApproxStorageBytes() const noexcept
-    {
-        return Fabric_.SlabBytesForTest();
+        return node < NodeCount && Handles_[node] != FABRIC_CELL_SENTINAL;
     }
 
     ResolverTestFabric Fabric_{};
-
-private:
     std::array<TestAPC, NodeCount> Nodes_{};
-    std::array<std::uint32_t, NodeCount> Slots_{};
-    std::array<RegionView<std::uint64_t>, NodeCount> DirectViews_{};
-    std::array<RegionView<std::uint64_t>, NodeCount> AtomicViews_{};
-
-    std::size_t IndexOfSlot_(std::uint32_t slot) const noexcept
-    {
-        // Initialize() requires the benchmark's logical node i to occupy Fabric slot i.
-        // Therefore correctness conversion can be O(1); no linear scan is necessary.
-        return
-            slot < NodeCount && Slots_[slot] == slot
-                ? static_cast<std::size_t>(slot)
-                : ReadResult::NO_NODE;
-    }
-
-    static BenchmarkReadResult BenchmarkConvert_(
-        const TestAPC::RelationOperationForTest& operation,
-        std::size_t node_hint
-    ) noexcept
-    {
-        const bool present =
-            operation.MutationOP_ == ReadOperation::FOUND;
-
-        return BenchmarkReadResult{
-            present ? node_hint : BenchmarkReadResult::NO_NODE,
-            operation.RelationLocator_,
-            operation.MutationOP_,
-            present
-        };
-    }
-
-    static BenchmarkReadResult BenchmarkChildConvert_(
-        const TestAPC::RelationOperationForTest& operation
-    ) noexcept
-    {
-        const std::size_t node_hint =
-            operation.MutationOP_ == ReadOperation::FOUND &&
-            operation.RelationLocator_ != UINT32_MAX
-                ? static_cast<std::size_t>(
-                    EdgeBuilder::RelationSlot(operation.RelationLocator_)
-                )
-                : BenchmarkReadResult::NO_NODE;
-
-        return BenchmarkConvert_(operation, node_hint);
-    }
-
-    ReadResult Convert_(
-        AdaptivePackedCellContainer& found,
-        const TestAPC::RelationOperationForTest& operation
-    ) const noexcept
-    {
-        const std::uint32_t slot = found.GetThisSlotIdx();
-        const std::size_t node = IndexOfSlot_(slot);
-        const bool node_present = node != ReadResult::NO_NODE;
-
-        return ReadResult{
-            node,
-            operation.RelationLocator_,
-            operation.MutationOP_,
-            node_present
-        };
-    }
+    std::array<std::uint64_t, NodeCount> Handles_{};
 };
 
 // -----------------------------------------------------------------------------
-// Runtime APC/Fabric adapter used by configurable Tests 1-3.
-// The fixed-size APCFabricBackend below remains available to Tests 4-8.
+// Runtime APC/Fabric adapter used by performance Tests 1-3.
+// Runtime state is intentionally minimal: one packed 64-bit handle per node.
+// APC bases are derived from slab geometry; no persistent APC facade, slot table,
+// raw-pointer table, or RegionView array is kept. Mutation timing therefore reaches
+// the production public AddParenByHandle/RemoveParentByHandle/ReplaceParentByHandle
+// APIs after only bounds checks and three compact handle loads.
 // -----------------------------------------------------------------------------
 
 class RuntimeAPCFabricBackend
@@ -1616,8 +1362,7 @@ public:
             node_count == 0u || node_count > UINT32_MAX ||
             payload_words == 0u || payload_words > UINT32_MAX ||
             parent_capacity == 0u ||
-            parent_capacity > ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS
-        )
+            parent_capacity > ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS)
         {
             return false;
         }
@@ -1625,20 +1370,18 @@ public:
         NodeCount_ = node_count;
         PayloadWords_ = payload_words;
         SinglePayloadRegion_ = single_payload_region;
-        Nodes_ = std::make_unique<TestAPC[]>(NodeCount_);
-        Slots_ = std::make_unique<std::uint32_t[]>(NodeCount_);
-        DirectViews_ = std::make_unique<RegionView<std::uint64_t>[]>(NodeCount_);
-        if (!SinglePayloadRegion_)
-        {
-            AtomicViews_ = std::make_unique<RegionView<std::uint64_t>[]>(NodeCount_);
-        }
+        Handles_ = std::make_unique<std::uint64_t[]>(NodeCount_);
 
-        const std::uint32_t matrix_width = static_cast<std::uint32_t>(PayloadWords_);
+        const std::uint32_t matrix_width =
+            static_cast<std::uint32_t>(PayloadWords_);
         const std::uint16_t active_mask = static_cast<std::uint16_t>(
             ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT) |
-            (SinglePayloadRegion_ ? 0u : ADS::RegionBit(MacroColumnOfAPC::TOP_DOWN_SLOT)));
+            (SinglePayloadRegion_
+                ? 0u
+                : ADS::RegionBit(MacroColumnOfAPC::TOP_DOWN_SLOT)));
 
-        const SD::FabricRegionConfig config{active_mask, 0u, matrix_width};
+        const SD::FabricRegionConfig config{
+            active_mask, 0u, matrix_width};
         if (!Fabric_.InitializeFabric(
             static_cast<std::uint32_t>(NodeCount_),
             SlotWords_(matrix_width, SinglePayloadRegion_),
@@ -1652,57 +1395,90 @@ public:
         SD::MakeDisabledSchemaTable(schemas);
 
         SD::RegionSchemaRecord& direct =
-            schemas[static_cast<std::size_t>(MacroColumnOfAPC::BOTTOM_UP_SLOT)];
+            schemas[static_cast<std::size_t>(
+                MacroColumnOfAPC::BOTTOM_UP_SLOT)];
         direct.Region = MacroColumnOfAPC::BOTTOM_UP_SLOT;
         direct.Dtype = SD::DataTypeOfMacroColumn::UINT64_T;
         direct.Protocol = SD::SchemaProtocols::PRIVATE_REGION;
         direct.MatrixHeight = 1u;
         direct.MatrixWidth = matrix_width;
         direct.Flags = SD::SchemaFlags::BATCHED_LAST_DIM;
-        if (!SD::SealDesiredSchema(direct, 0u)) return false;
+        if (!SD::SealDesiredSchema(direct, 0u))
+        {
+            return false;
+        }
 
         if (!SinglePayloadRegion_)
         {
             SD::RegionSchemaRecord& atomic =
-                schemas[static_cast<std::size_t>(MacroColumnOfAPC::TOP_DOWN_SLOT)];
+                schemas[static_cast<std::size_t>(
+                    MacroColumnOfAPC::TOP_DOWN_SLOT)];
             atomic = direct;
             atomic.Region = MacroColumnOfAPC::TOP_DOWN_SLOT;
             atomic.Protocol = SD::SchemaProtocols::ATOMIC_WORD_ARRAY;
-            if (!SD::SealDesiredSchema(atomic, 0u)) return false;
+            if (!SD::SealDesiredSchema(atomic, 0u))
+            {
+                return false;
+            }
         }
 
         for (std::size_t node = 0u; node < NodeCount_; ++node)
         {
-            if (!Fabric_.CreateAPC(Nodes_[node], schemas)) return false;
-
-            const std::uint32_t slot = Nodes_[node].GetThisSlotIdx();
-            if (slot != node) return false;
-            Slots_[node] = slot;
-
-            auto direct_view = Nodes_[node].BuildAViewOverRegion<std::uint64_t>(
-                MacroColumnOfAPC::BOTTOM_UP_SLOT);
-            if (
-                !direct_view.has_value() ||
-                direct_view->Size() < PayloadWords_ ||
-                !direct_view->RawMutableSpan().has_value()
-            )
+            TestAPC apc{};
+            if (!Fabric_.CreateAPC(apc, schemas))
             {
                 return false;
             }
-            DirectViews_[node] = std::move(direct_view.value());
 
-            if (!SinglePayloadRegion_)
+            const std::uint32_t slot = apc.GetThisSlotIdx();
+            const std::uint32_t generation = apc.GenerationForTest();
+            const std::uint64_t handle = apc.HandleForTest();
+            std::byte* const raw_apc =
+                Fabric_.RawAPCBaseForSlotForTest(slot);
+
+            if (
+                slot != node ||
+                !HandleOfAPCStatic::IsGenerationValid(generation) ||
+                handle == FABRIC_CELL_SENTINAL ||
+                TwinU32ToU64::ExtractLow32Of64(handle) != slot ||
+                TwinU32ToU64::ExtractHigh32Of64(handle) != generation ||
+                !raw_apc)
             {
-                auto atomic_view = Nodes_[node].BuildAViewOverRegion<std::uint64_t>(
-                    MacroColumnOfAPC::TOP_DOWN_SLOT);
-                if (!atomic_view.has_value() || atomic_view->Size() < PayloadWords_)
+                return false;
+            }
+
+            Handles_[node] = handle;
+
+            // Test 1 uses one PRIVATE_REGION per APC. Cache only its byte offset;
+            // the node base is derived directly from slab geometry. No per-node
+            // APC facade, raw-pointer table, or RegionView survives initialization.
+            if (SinglePayloadRegion_ && !DirectPayloadOffsetValid_)
+            {
+                auto view = apc.BuildAViewOverRegion<std::uint64_t>(
+                    MacroColumnOfAPC::BOTTOM_UP_SLOT);
+                if (!view.has_value() || view->Size() < PayloadWords_)
                 {
                     return false;
                 }
-                AtomicViews_[node] = std::move(atomic_view.value());
+                auto span = view->RawMutableSpan();
+                if (!span.has_value() || span->size() < PayloadWords_)
+                {
+                    return false;
+                }
+
+                std::byte* const payload =
+                    reinterpret_cast<std::byte*>(span->data());
+                if (payload < raw_apc)
+                {
+                    return false;
+                }
+                DirectPayloadByteOffset_ =
+                    static_cast<std::size_t>(payload - raw_apc);
+                DirectPayloadOffsetValid_ = true;
             }
         }
-        return true;
+
+        return !SinglePayloadRegion_ || DirectPayloadOffsetValid_;
     }
 
     MutationResult AddParentResult(
@@ -1713,11 +1489,14 @@ public:
         std::uint32_t internal_recursion =
             AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        if (p >= NodeCount_ || c >= NodeCount_)
+        if (!ValidNode_(p) || !ValidNode_(c))
+        {
             return MutationResult::INVALID;
+        }
 
-        return Nodes_[c].AddParent(
-            Nodes_[p],
+        return Fabric_.AddParenByHandle(
+            Handle_(p),
+            Handle_(c),
             EdgeTableForAxis(a),
             tries,
             internal_recursion);
@@ -1731,11 +1510,14 @@ public:
         std::uint32_t internal_recursion =
             AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        if (p >= NodeCount_ || c >= NodeCount_)
+        if (!ValidNode_(p) || !ValidNode_(c))
+        {
             return MutationResult::INVALID;
+        }
 
-        return Nodes_[c].RemoveParent(
-            Nodes_[p],
+        return Fabric_.RemoveParentByHandle(
+            Handle_(p),
+            Handle_(c),
             EdgeTableForAxis(a),
             tries,
             internal_recursion);
@@ -1750,12 +1532,18 @@ public:
         std::uint32_t internal_recursion =
             AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
-        if (old_p >= NodeCount_ || new_p >= NodeCount_ || c >= NodeCount_)
+        if (
+            !ValidNode_(old_p) ||
+            !ValidNode_(new_p) ||
+            !ValidNode_(c))
+        {
             return MutationResult::INVALID;
+        }
 
-        return Nodes_[c].ReplaceParent(
-            Nodes_[old_p],
-            Nodes_[new_p],
+        return Fabric_.ReplaceParentByHandle(
+            Handle_(old_p),
+            Handle_(new_p),
+            Handle_(c),
             EdgeTableForAxis(a),
             tries,
             internal_recursion);
@@ -1767,8 +1555,7 @@ public:
         Axis a,
         std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
     {
-        return MutationCommitted(
-            AddParentResult(p, c, a, tries));
+        return MutationCommitted(AddParentResult(p, c, a, tries));
     }
 
     bool RemoveParent(
@@ -1777,8 +1564,7 @@ public:
         Axis a,
         std::uint32_t tries = DEFAULT_MAX_TRIES) noexcept
     {
-        return MutationCommitted(
-            RemoveParentResult(p, c, a, tries));
+        return MutationCommitted(RemoveParentResult(p, c, a, tries));
     }
 
     bool ReplaceParent(
@@ -1792,203 +1578,342 @@ public:
             ReplaceParentResult(old_p, new_p, c, a, tries));
     }
 
-    ReadResult FindParent(std::size_t c, Axis a, std::uint8_t ordinal, std::uint32_t tries = 1u) noexcept
+    ReadResult FindParent(
+        std::size_t c,
+        Axis a,
+        std::uint8_t ordinal,
+        std::uint32_t tries = 1u) noexcept
     {
-        if (c >= NodeCount_) return {};
-        TestAPC::RelationOperationForTest op{};
-        AdaptivePackedCellContainer found = Nodes_[c].FindParent(
-            EdgeTableForAxis(a), ordinal, &op, tries);
-        return Convert_(found, op);
+        return ValidNode_(c)
+            ? Fabric_.FindParentByHandleForTest(
+                Handle_(c), EdgeTableForAxis(a), ordinal, tries)
+            : ReadResult{};
     }
 
-    ReadResult StableFindParent(std::size_t c, Axis a, std::uint8_t ordinal, std::uint32_t tries = 1u) noexcept
+    ReadResult StableFindParent(
+        std::size_t c,
+        Axis a,
+        std::uint8_t ordinal,
+        std::uint32_t tries = 1u) noexcept
     {
         return FindParent(c, a, ordinal, tries);
     }
 
-    ReadResult FindFirstChild(std::size_t p, Axis a, std::uint32_t tries = 1u) noexcept
+    ReadResult FindFirstChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t tries = 1u) noexcept
     {
-        return ChildRead_(p, a, tries, 0u, ChildOperation::FIRST);
+        return ValidNode_(p)
+            ? Fabric_.FindFirstChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), tries)
+            : ReadResult{};
     }
 
-    ReadResult FindLastChild(std::size_t p, Axis a, std::uint32_t tries = 1u) noexcept
+    ReadResult FindLastChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t tries = 1u) noexcept
     {
-        return ChildRead_(p, a, tries, 0u, ChildOperation::LAST);
+        return ValidNode_(p)
+            ? Fabric_.FindLastChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), tries)
+            : ReadResult{};
     }
 
-    ReadResult FindNextChild(std::size_t p, Axis a, std::uint32_t locator, std::uint32_t tries = 1u) noexcept
+    ReadResult FindNextChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t locator,
+        std::uint32_t tries = 1u) noexcept
     {
-        return ChildRead_(p, a, tries, locator, ChildOperation::NEXT);
+        return ValidNode_(p)
+            ? Fabric_.FindNextChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            : ReadResult{};
     }
 
-    ReadResult FindPreviousChild(std::size_t p, Axis a, std::uint32_t locator, std::uint32_t tries = 1u) noexcept
+    ReadResult FindPreviousChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t locator,
+        std::uint32_t tries = 1u) noexcept
     {
-        return ChildRead_(p, a, tries, locator, ChildOperation::PREVIOUS);
+        return ValidNode_(p)
+            ? Fabric_.FindPreviousChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            : ReadResult{};
     }
 
-    BenchmarkReadResult BenchmarkFindParent(std::size_t c, Axis a, std::uint8_t ordinal, std::uint32_t tries = 1u) noexcept
+    BenchmarkReadResult BenchmarkFindParent(
+        std::size_t c,
+        Axis a,
+        std::uint8_t ordinal,
+        std::uint32_t tries = 1u) noexcept
     {
-        if (c >= NodeCount_) return {};
-        TestAPC::RelationOperationForTest op{};
-        AdaptivePackedCellContainer found = Nodes_[c].FindParent(
-            EdgeTableForAxis(a), ordinal, &op, tries);
-        (void)found;
-        return BenchmarkConvert_(op, BenchmarkReadResult::NO_NODE);
+        return ValidNode_(c)
+            ? Fabric_.BenchmarkFindParentByHandleForTest(
+                Handle_(c), EdgeTableForAxis(a), ordinal, tries)
+            : BenchmarkReadResult{};
     }
 
-    BenchmarkReadResult BenchmarkFindFirstChild(std::size_t p, Axis a, std::uint32_t tries = 1u) noexcept
-    { return BenchmarkChildRead_(p, a, tries, 0u, ChildOperation::FIRST); }
-    BenchmarkReadResult BenchmarkFindLastChild(std::size_t p, Axis a, std::uint32_t tries = 1u) noexcept
-    { return BenchmarkChildRead_(p, a, tries, 0u, ChildOperation::LAST); }
-    BenchmarkReadResult BenchmarkFindNextChild(std::size_t p, Axis a, std::uint32_t l, std::uint32_t tries = 1u) noexcept
-    { return BenchmarkChildRead_(p, a, tries, l, ChildOperation::NEXT); }
-    BenchmarkReadResult BenchmarkFindPreviousChild(std::size_t p, Axis a, std::uint32_t l, std::uint32_t tries = 1u) noexcept
-    { return BenchmarkChildRead_(p, a, tries, l, ChildOperation::PREVIOUS); }
-
-    bool StorePayload(std::size_t node, std::uint32_t word, std::uint64_t value, bool atomic) noexcept
+    BenchmarkReadResult BenchmarkFindFirstChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t tries = 1u) noexcept
     {
-        if (node >= NodeCount_ || word >= PayloadWords_) return false;
-        if (atomic && !SinglePayloadRegion_)
+        return ValidNode_(p)
+            ? Fabric_.BenchmarkFindFirstChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), tries)
+            : BenchmarkReadResult{};
+    }
+
+    BenchmarkReadResult BenchmarkFindLastChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t tries = 1u) noexcept
+    {
+        return ValidNode_(p)
+            ? Fabric_.BenchmarkFindLastChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), tries)
+            : BenchmarkReadResult{};
+    }
+
+    BenchmarkReadResult BenchmarkFindNextChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t locator,
+        std::uint32_t tries = 1u) noexcept
+    {
+        return ValidNode_(p)
+            ? Fabric_.BenchmarkFindNextChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            : BenchmarkReadResult{};
+    }
+
+    BenchmarkReadResult BenchmarkFindPreviousChild(
+        std::size_t p,
+        Axis a,
+        std::uint32_t locator,
+        std::uint32_t tries = 1u) noexcept
+    {
+        return ValidNode_(p)
+            ? Fabric_.BenchmarkFindPreviousChildByHandleForTest(
+                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            : BenchmarkReadResult{};
+    }
+
+    bool StorePayload(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t value,
+        bool atomic) noexcept
+    {
+        if (!ValidNode_(node) || word >= PayloadWords_)
         {
-            return AtomicViews_[node].AtomicStore(word, value, std::memory_order_release);
+            return false;
         }
 
-        auto span = DirectViews_[node].RawMutableSpan();
-        if (!span.has_value()) return false;
-        if (atomic)
-            std::atomic_ref<std::uint64_t>(span.value()[word]).store(value, std::memory_order_release);
-        else
-            span.value()[word] = value;
-        return true;
-    }
-
-    bool LoadPayload(std::size_t node, std::uint32_t word, std::uint64_t& value, bool atomic) noexcept
-    {
-        if (node >= NodeCount_ || word >= PayloadWords_) return false;
-        if (atomic && !SinglePayloadRegion_)
+        if (SinglePayloadRegion_)
         {
-            value = AtomicViews_[node].AtomicLoad(word, std::memory_order_acquire);
+            std::uint64_t* const payload = DirectPayload_(node);
+            if (!payload)
+            {
+                return false;
+            }
+            if (atomic)
+            {
+                std::atomic_ref<std::uint64_t>(payload[word]).store(
+                    value, std::memory_order_release);
+            }
+            else
+            {
+                payload[word] = value;
+            }
             return true;
         }
 
-        auto span = DirectViews_[node].RawMutableSpan();
-        if (!span.has_value()) return false;
-        value = atomic
-            ? std::atomic_ref<std::uint64_t>(span.value()[word]).load(std::memory_order_acquire)
-            : span.value()[word];
-        return true;
+        return StorePayloadViaTemporaryView_(node, word, value, atomic);
     }
 
-    std::size_t ApproxStorageBytes() const noexcept { return Fabric_.SlabBytesForTest(); }
+    bool LoadPayload(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t& value,
+        bool atomic) noexcept
+    {
+        if (!ValidNode_(node) || word >= PayloadWords_)
+        {
+            return false;
+        }
+
+        if (SinglePayloadRegion_)
+        {
+            std::uint64_t* const payload = DirectPayload_(node);
+            if (!payload)
+            {
+                return false;
+            }
+            value = atomic
+                ? std::atomic_ref<std::uint64_t>(payload[word]).load(
+                    std::memory_order_acquire)
+                : payload[word];
+            return true;
+        }
+
+        return LoadPayloadViaTemporaryView_(node, word, value, atomic);
+    }
+
+    std::size_t ApproxStorageBytes() const noexcept
+    {
+        return Fabric_.SlabBytesForTest();
+    }
 
 private:
-    enum class ChildOperation : std::uint8_t { FIRST, LAST, NEXT, PREVIOUS };
-
     std::size_t NodeCount_ = 0u;
     std::size_t PayloadWords_ = 0u;
     bool SinglePayloadRegion_ = false;
+    bool DirectPayloadOffsetValid_ = false;
+    std::size_t DirectPayloadByteOffset_ = 0u;
     ResolverTestFabric Fabric_{};
-    std::unique_ptr<TestAPC[]> Nodes_{};
-    std::unique_ptr<std::uint32_t[]> Slots_{};
-    std::unique_ptr<RegionView<std::uint64_t>[]> DirectViews_{};
-    std::unique_ptr<RegionView<std::uint64_t>[]> AtomicViews_{};
+    std::unique_ptr<std::uint64_t[]> Handles_{};
 
-    static std::uint32_t SlotWords_(std::uint32_t payload_words, bool single) noexcept
+    static std::uint32_t SlotWords_(
+        std::uint32_t payload_words,
+        bool single) noexcept
     {
-        if (!single) return static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT);
-        const std::uint32_t payload_cells = SD::AlignRegionCells(payload_words);
+        if (!single)
+        {
+            return static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT);
+        }
+        const std::uint32_t payload_cells =
+            SD::AlignRegionCells(payload_words);
         const std::uint32_t required = SD::AlignRegionCells(
             SD::AlignRegionCells(ADS::META_CELL_COUNT) + payload_cells);
-        return std::max(required, static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT));
+        return std::max(
+            required,
+            static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT));
     }
 
-    std::size_t IndexOfSlot_(std::uint32_t slot) const noexcept
+    bool ValidNode_(std::size_t node) const noexcept
     {
-        return slot < NodeCount_ && Slots_[slot] == slot
-            ? static_cast<std::size_t>(slot)
-            : ReadResult::NO_NODE;
+        return
+            node < NodeCount_ &&
+            Handles_ &&
+            Handles_[node] != FABRIC_CELL_SENTINAL;
     }
 
-    ReadResult Convert_(
-        AdaptivePackedCellContainer& found,
-        const TestAPC::RelationOperationForTest& op) const noexcept
+    std::uint64_t Handle_(std::size_t node) const noexcept
     {
-        const std::size_t node = IndexOfSlot_(found.GetThisSlotIdx());
-        return ReadResult{
-            node,
-            op.RelationLocator_,
-            op.MutationOP_,
-            node != ReadResult::NO_NODE
-        };
+        return Handles_[node];
     }
 
-    static BenchmarkReadResult BenchmarkConvert_(
-        const TestAPC::RelationOperationForTest& op,
-        std::size_t node_hint) noexcept
+    std::uint64_t* DirectPayload_(std::size_t node) const noexcept
     {
-        const bool present = op.MutationOP_ == ReadOperation::FOUND;
-        return BenchmarkReadResult{
-            present ? node_hint : BenchmarkReadResult::NO_NODE,
-            op.RelationLocator_, op.MutationOP_, present};
-    }
-
-    static BenchmarkReadResult BenchmarkChildConvert_(
-        const TestAPC::RelationOperationForTest& op) noexcept
-    {
-        const std::size_t node_hint =
-            op.MutationOP_ == ReadOperation::FOUND && op.RelationLocator_ != UINT32_MAX
-                ? static_cast<std::size_t>(EdgeBuilder::RelationSlot(op.RelationLocator_))
-                : BenchmarkReadResult::NO_NODE;
-        return BenchmarkConvert_(op, node_hint);
-    }
-
-    ReadResult ChildRead_(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t tries,
-        std::uint32_t locator,
-        ChildOperation operation) noexcept
-    {
-        if (parent >= NodeCount_) return {};
-        TestAPC::RelationOperationForTest op{};
-        AdaptivePackedCellContainer found{};
-        switch (operation)
+        if (!DirectPayloadOffsetValid_)
         {
-        case ChildOperation::FIRST:
-            found = Nodes_[parent].FindFirstChild(EdgeTableForAxis(axis), &op, tries); break;
-        case ChildOperation::LAST:
-            found = Nodes_[parent].FindLastChild(EdgeTableForAxis(axis), &op, tries); break;
-        case ChildOperation::NEXT:
-            found = Nodes_[parent].FindNextChild(EdgeTableForAxis(axis), locator, &op, tries); break;
-        case ChildOperation::PREVIOUS:
-            found = Nodes_[parent].FindPreviousChild(EdgeTableForAxis(axis), locator, &op, tries); break;
+            return nullptr;
         }
-        return Convert_(found, op);
+        std::byte* const raw_apc =
+            Fabric_.RawAPCBaseForSlotForTest(
+                static_cast<std::uint32_t>(node));
+        return raw_apc
+            ? reinterpret_cast<std::uint64_t*>(
+                raw_apc + DirectPayloadByteOffset_)
+            : nullptr;
     }
 
-    BenchmarkReadResult BenchmarkChildRead_(
-        std::size_t parent,
-        Axis axis,
-        std::uint32_t tries,
-        std::uint32_t locator,
-        ChildOperation operation) noexcept
+    bool ResolveTemporaryAPC_(
+        std::size_t node,
+        TestAPC& apc,
+        APCUseScope& use) noexcept
     {
-        if (parent >= NodeCount_) return {};
-        TestAPC::RelationOperationForTest op{};
-        AdaptivePackedCellContainer found{};
-        switch (operation)
+        return Fabric_.ResolveExistingForTest(
+            TwinU32ToU64::ExtractLow32Of64(Handle_(node)),
+            apc,
+            use,
+            TwinU32ToU64::ExtractHigh32Of64(Handle_(node)));
+    }
+
+    bool StorePayloadViaTemporaryView_(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t value,
+        bool atomic) noexcept
+    {
+        TestAPC apc{};
+        APCUseScope use{};
+        if (!ResolveTemporaryAPC_(node, apc, use))
         {
-        case ChildOperation::FIRST:
-            found = Nodes_[parent].FindFirstChild(EdgeTableForAxis(axis), &op, tries); break;
-        case ChildOperation::LAST:
-            found = Nodes_[parent].FindLastChild(EdgeTableForAxis(axis), &op, tries); break;
-        case ChildOperation::NEXT:
-            found = Nodes_[parent].FindNextChild(EdgeTableForAxis(axis), locator, &op, tries); break;
-        case ChildOperation::PREVIOUS:
-            found = Nodes_[parent].FindPreviousChild(EdgeTableForAxis(axis), locator, &op, tries); break;
+            return false;
         }
-        (void)found;
-        return BenchmarkChildConvert_(op);
+        use.Release();
+
+        if (atomic)
+        {
+            auto view = apc.BuildAViewOverRegion<std::uint64_t>(
+                MacroColumnOfAPC::TOP_DOWN_SLOT);
+            return
+                view.has_value() &&
+                view->Size() > word &&
+                view->AtomicStore(
+                    word, value, std::memory_order_release);
+        }
+
+        auto view = apc.BuildAViewOverRegion<std::uint64_t>(
+            MacroColumnOfAPC::BOTTOM_UP_SLOT);
+        if (!view.has_value() || view->Size() <= word)
+        {
+            return false;
+        }
+        auto span = view->RawMutableSpan();
+        if (!span.has_value())
+        {
+            return false;
+        }
+        span.value()[word] = value;
+        return true;
+    }
+
+    bool LoadPayloadViaTemporaryView_(
+        std::size_t node,
+        std::uint32_t word,
+        std::uint64_t& value,
+        bool atomic) noexcept
+    {
+        TestAPC apc{};
+        APCUseScope use{};
+        if (!ResolveTemporaryAPC_(node, apc, use))
+        {
+            return false;
+        }
+        use.Release();
+
+        if (atomic)
+        {
+            auto view = apc.BuildAViewOverRegion<std::uint64_t>(
+                MacroColumnOfAPC::TOP_DOWN_SLOT);
+            if (!view.has_value() || view->Size() <= word)
+            {
+                return false;
+            }
+            value = view->AtomicLoad(word, std::memory_order_acquire);
+            return true;
+        }
+
+        auto view = apc.BuildAViewOverRegion<std::uint64_t>(
+            MacroColumnOfAPC::BOTTOM_UP_SLOT);
+        if (!view.has_value() || view->Size() <= word)
+        {
+            return false;
+        }
+        auto span = view->RawMutableSpan();
+        if (!span.has_value())
+        {
+            return false;
+        }
+        value = span.value()[word];
+        return true;
     }
 };
 
@@ -1996,9 +1921,9 @@ private:
 // -----------------------------------------------------------------------------
 // Benchmark call adapters.
 //
-// Vector baselines simply project their normal read result. APCFabricBackend has
-// dedicated BenchmarkFind* methods that execute the same public APC Find* call but
-// do not perform TestKit-only facade->logical-index conversion afterward.
+// Vector baselines project their normal read result. RuntimeAPCFabricBackend has
+// dedicated BenchmarkFind* methods that use the same Fabric read core without any
+// per-node facade lookup or TestKit logical-index conversion.
 // -----------------------------------------------------------------------------
 
 template <typename Backend>
@@ -4089,140 +4014,381 @@ inline Result Run(const std::array<BenchmarkCase, 4u>& cases)
 } // namespace Test01_Baseline
 
 // -----------------------------------------------------------------------------
+// Shared duration-based scale engine used by internal Tests 2-3 and PaperCSV.
+// This is the single implementation of the timed mutation/read-write workload.
+// -----------------------------------------------------------------------------
+
+namespace BenchmarkCore::TimedScale
+{
+struct Numbers
+{
+    double Seconds = 0;
+    std::uint64_t Writes = 0, Reads = 0, MutationRetries = 0, ReadRetries = 0;
+    std::uint64_t Unfinished = 0, InvalidMutations = 0, InvalidReads = 0;
+    std::uint64_t DistinctChildren = 0;
+    bool Valid = true;
+    double WritesPerSecond() const { return Seconds > 0 ? Writes / Seconds : 0; }
+    double ReadsPerSecond() const { return Seconds > 0 ? Reads / Seconds : 0; }
+};
+
+template<class Backend> struct Registration
+{
+    Backend& Value;
+    std::size_t Id;
+    bool Ok = true;
+    Registration(Backend& backend, std::size_t id) : Value(backend), Id(id)
+    {
+        if constexpr (requires { backend.RegisterThread(id); }) Ok = backend.RegisterThread(id);
+    }
+    ~Registration()
+    {
+        if constexpr (requires { Value.DeregisterThread(Id); })
+            if (Ok) Value.DeregisterThread(Id);
+    }
+};
+
+template<class Backend> bool Healthy(Backend& backend)
+{
+    if constexpr (requires { backend.Healthy(); }) return backend.Healthy();
+    return true;
+}
+
+template<class Backend> bool Prepare(Backend& backend, BenchmarkCase c, std::size_t words,
+                                    bool stable_guard = false)
+{
+    if (!InitializeBackend(backend, c, words, words == TEST1_PAYLOAD_WORDS)) return false;
+    if constexpr (requires { backend.PrimePayloadStorage(); })
+        if (!backend.PrimePayloadStorage()) return false;
+    if (stable_guard)
+    {
+        if constexpr (requires { backend.EnableStableReadGuard(); })
+            if (!backend.EnableStableReadGuard()) return false;
+    }
+    return Healthy(backend);
+}
+
+enum class Attempt { COMMITTED, RETRY, INVALID };
+template<class Backend> Attempt ReplaceOnce(Backend& backend, std::size_t oldp,
+    std::size_t newp, std::size_t child, Axis axis)
+{
+    if constexpr (requires { backend.ReplaceParentResult(oldp, newp, child, axis, 1u); })
+    {
+        const auto r = backend.ReplaceParentResult(oldp, newp, child, axis, 1u);
+        return MutationCommitted(r) ? Attempt::COMMITTED :
+            (MutationInvalid(r) ? Attempt::INVALID : Attempt::RETRY);
+    }
+    else
+    {
+        if (backend.ReplaceParent(oldp, newp, child, axis, 1u)) return Attempt::COMMITTED;
+        return Healthy(backend) ? Attempt::RETRY : Attempt::INVALID;
+    }
+}
+
+inline std::size_t ParentSeed(std::size_t child, std::size_t parents, Axis axis)
+{
+    return (child + (axis == Axis::VERTICAL ? parents / 2u : 0u)) % parents;
+}
+inline std::size_t NextParent(std::uint64_t& state, std::size_t parents,
+                              std::size_t current, bool skew)
+{
+    if (!skew || parents < 100u) return DifferentRandomParent(state, parents, current);
+    // 80% from the first 1% of parents; remainder from the entire population.
+    const bool hot = NextRandom(state) % 10u < 8u;
+    const std::size_t limit = hot ? std::max<std::size_t>(2u, parents / 100u) : parents;
+    std::size_t next = NextRandom(state) % limit;
+    if (next == current) next = (next + 1u) % limit;
+    return next;
+}
+
+struct Geometry
+{
+    BenchmarkCase Case{};
+    bool Distributed = false, Skew = false;
+    std::size_t ParentCount = 0, FirstChild = 0, ChildCount = 0;
+    std::size_t Child(std::size_t writer, std::uint64_t step,
+                      std::size_t writers) const
+    {
+        if (!Distributed) return FirstChild + writer;
+        const std::size_t first = FirstChild + ChildCount * writer / writers;
+        const std::size_t last = FirstChild + ChildCount * (writer + 1u) / writers;
+        return first + step % (last - first);
+    }
+    std::size_t Initial(std::size_t child, Axis axis) const
+    {
+        if (Distributed) return ParentSeed(child, ParentCount, axis);
+        return axis == Axis::HORIZONTAL ? 0u : 2u;
+    }
+    std::size_t Next(std::uint64_t& state, std::size_t current, Axis axis) const
+    {
+        if (Distributed) return NextParent(state, ParentCount, current, Skew);
+        return axis == Axis::HORIZONTAL ? (current == 0u ? 1u : 0u)
+                                        : (current == 2u ? 3u : 2u);
+    }
+};
+inline Geometry MakeGeometry(BenchmarkCase c, bool distributed,
+                             std::size_t worker_count, bool skew)
+{
+    if (distributed)
+    {
+        const std::size_t p = c.NodeCount / 2u;
+        return {c, true, skew, p, p, c.NodeCount - p};
+    }
+    return {c, false, false, 4u, 4u, worker_count};
+}
+
+template<class Backend> bool Build(Backend& backend, const Geometry& g,
+                                   std::size_t workers, bool mixed)
+{
+    if (!Prepare(backend, g.Case, 1u, mixed)) return false;
+    if (!g.Distributed)
+    {
+        for (std::size_t w = 0; w < (mixed ? 1u : workers); ++w)
+        {
+            const std::size_t c = g.FirstChild + w;
+            if (!backend.AddParent(0u, c, Axis::HORIZONTAL) ||
+                !backend.AddParent(2u, c, Axis::VERTICAL)) return false;
+        }
+    }
+    else
+    {
+        for (std::size_t c = g.FirstChild; c < g.FirstChild + g.ChildCount; ++c)
+            for (Axis a : {Axis::HORIZONTAL, Axis::VERTICAL})
+                if (!backend.AddParent(g.Initial(c, a), c, a)) return false;
+    }
+    return Healthy(backend);
+}
+
+// An operation has no retry-count ceiling: it retries until commit, an invalid
+// outcome, or the SAMPLE deadline. A deadline hit is recorded as unfinished.
+// This prevents a permanently stalled operation from hanging the entire suite.
+template<class Backend> Attempt CommitUntilDeadline(Backend& backend, std::size_t oldp,
+    std::size_t newp, std::size_t child, Axis axis, Clock::time_point deadline,
+    std::uint64_t& retries)
+{
+    for (std::uint64_t attempt = 0;; ++attempt)
+    {
+        if (Clock::now() >= deadline) return Attempt::RETRY;
+        const Attempt result = ReplaceOnce(backend, oldp, newp, child, axis);
+        if (result != Attempt::RETRY) return result;
+        ++retries;
+        PerturbSchedule(static_cast<std::uint32_t>(attempt));
+    }
+}
+
+template<class Backend> Numbers Execute(Backend& backend, const Geometry& g,
+    std::size_t writers, std::size_t readers, std::chrono::milliseconds interval)
+{
+    // There is one primary writer per child/axis. In 3A writers use H and V
+    // on the same child; in 3B their child shards are disjoint.
+    const std::size_t participants = writers + readers;
+    std::atomic<std::uint64_t> done_w{0}, done_r{0}, retry_w{0}, retry_r{0};
+    std::atomic<std::uint64_t> unfinished{0}, bad_w{0}, bad_r{0}, distinct{0};
+    std::atomic<bool> ready{true};
+    struct FinalState { std::size_t Child = 0, Parent = 0; Axis Relation = Axis::HORIZONTAL; bool Seen = false; };
+    std::vector<FinalState> final(writers);
+    Clock::time_point start{};
+    std::barrier gate(static_cast<std::ptrdiff_t>(participants + 1u), [&] { start = Clock::now(); });
+    const auto deadline = [&] { return start + interval; };
+    std::vector<std::thread> threads;
+    threads.reserve(participants);
+    for (std::size_t w = 0; w < writers; ++w)
+        threads.emplace_back([&, w]
+        {
+            Registration registration(backend, w + 1u);
+            if (!registration.Ok) ready.store(false);
+            std::uint64_t local_w = 0, local_retry = 0, local_unfinished = 0, local_bad = 0;
+            std::uint64_t step = 0;
+            std::uint64_t state = ConcurrencyConfig::RANDOM_SEED ^
+                (static_cast<std::uint64_t>(w + 1u) * ConcurrencyConfig::RANDOM_STREAM_STEP);
+            const Axis axis = w % 2u ? Axis::VERTICAL : Axis::HORIZONTAL;
+            const std::size_t first = g.Distributed
+                ? g.FirstChild + g.ChildCount * w / writers
+                : g.FirstChild + (g.ChildCount == 1u || readers ? 0u : w);
+            const std::size_t count = g.Distributed
+                ? g.FirstChild + g.ChildCount * (w + 1u) / writers - first : 1u;
+            std::vector<std::size_t> current(count);
+            for (std::size_t i = 0; i < count; ++i)
+                current[i] = g.Initial(first + i, axis);
+            gate.arrive_and_wait();
+            if (registration.Ok)
+                while (Clock::now() < deadline() && !bad_w.load())
+                {
+                    const std::size_t offset = step++ % count;
+                    const std::size_t child = first + offset;
+                    const std::size_t old = current[offset];
+                    const std::size_t next = g.Next(state, old, axis);
+                    const Attempt a = CommitUntilDeadline(
+                        backend, old, next, child, axis, deadline(), local_retry);
+                    if (a == Attempt::COMMITTED)
+                    {
+                        current[offset] = next;
+                        final[w] = {child, next, axis, true};
+                        ++local_w;
+                    }
+                    else if (a == Attempt::INVALID) { ++local_bad; break; }
+                    else { ++local_unfinished; break; }
+                }
+            distinct.fetch_add(g.Distributed ? std::min<std::uint64_t>(local_w, count)
+                : (local_w ? 1u : 0u));
+            done_w.fetch_add(local_w); retry_w.fetch_add(local_retry);
+            unfinished.fetch_add(local_unfinished); bad_w.fetch_add(local_bad);
+        });
+    for (std::size_t r = 0; r < readers; ++r)
+        threads.emplace_back([&, r]
+        {
+            Registration registration(backend, writers + r + 1u);
+            if (!registration.Ok) ready.store(false);
+            std::uint64_t local_reads = 0, local_retry = 0, local_bad = 0;
+            std::uint64_t step = r;
+            gate.arrive_and_wait();
+            if (registration.Ok)
+                while (Clock::now() < deadline() && !bad_r.load())
+                {
+                    const std::size_t child = g.Distributed
+                        ? g.FirstChild + ((++step * 1315423911ull + r) % g.ChildCount)
+                        : g.FirstChild;
+                    const Axis axis = g.Distributed
+                        ? ((child - g.FirstChild) < g.ChildCount / 2u
+                            ? Axis::HORIZONTAL : Axis::VERTICAL)
+                        : ((++step & 1u) ? Axis::HORIZONTAL : Axis::VERTICAL);
+                    const ReadResult read = backend.StableFindParent(child, axis, 0u, 1u);
+                    if (read.IsRetry()) { ++local_retry; continue; }
+                    if (!read.ContractValid() || !read.IsFound() || read.Node >= g.ParentCount ||
+                        (!g.Distributed && (axis == Axis::HORIZONTAL ? read.Node > 1u :
+                            (read.Node != 2u && read.Node != 3u))))
+                    { ++local_bad; break; }
+                    ++local_reads;
+                }
+            done_r.fetch_add(local_reads); retry_r.fetch_add(local_retry);
+            bad_r.fetch_add(local_bad);
+        });
+    gate.arrive_and_wait();
+    for (auto& thread : threads) thread.join();
+    Numbers out;
+    out.Seconds = std::chrono::duration<double>(Clock::now() - start).count();
+    out.Writes = done_w.load(); out.Reads = done_r.load();
+    out.MutationRetries = retry_w.load(); out.ReadRetries = retry_r.load();
+    out.Unfinished = unfinished.load(); out.DistinctChildren = distinct.load();
+    if (!g.Distributed && readers && out.DistinctChildren) out.DistinctChildren = 1u;
+    out.InvalidMutations = bad_w.load();
+    out.InvalidReads = bad_r.load();
+    out.Valid = ready.load() && Healthy(backend) && !out.InvalidMutations && !out.InvalidReads;
+    for (const auto& expected : final)
+    {
+        if (!expected.Seen) continue;
+        const auto observed = backend.StableFindParent(
+            expected.Child, expected.Relation, 0u, DEFAULT_MAX_TRIES);
+        if (!observed.IsFound() || !observed.ContractValid() ||
+            observed.Node != expected.Parent ||
+            !ReverseContains(backend, expected.Parent, expected.Child,
+                expected.Relation, g.Case.NodeCount)) out.Valid = false;
+    }
+    // Sample deadlines are explicitly counted, never mislabelled as corruption.
+    return out;
+}
+} // namespace BenchmarkCore::TimedScale
+
+// -----------------------------------------------------------------------------
 // Test 2: row-local-lock vs optimistic structural mutation.
 // -----------------------------------------------------------------------------
 
 namespace Test02_Contention
 {
 using namespace BenchmarkCore;
+using namespace BenchmarkCore::TimedScale;
+
+constexpr std::chrono::milliseconds INTERNAL_INTERVAL{1000};
+
+inline double NsPerOperation(double operations_per_second) noexcept
+{
+    return operations_per_second > 0.0
+        ? 1.0e9 / operations_per_second
+        : 0.0;
+}
+
+template<class Backend>
+Numbers Measure(
+    const BenchmarkCase& config,
+    bool distributed,
+    std::size_t writers)
+{
+    const Geometry geometry = MakeGeometry(
+        config, distributed, writers, false);
+    Backend backend{};
+    if (!Build(backend, geometry, writers, false))
+        return Numbers{.Valid = false};
+    return Execute(
+        backend, geometry, writers, 0u, INTERNAL_INTERVAL);
+}
 
 inline bool RunCase(
     const BenchmarkCase& config,
-    MutationLocality locality,
+    bool distributed,
     std::size_t max_writers,
     std::size_t case_index)
 {
-    const auto maybe_scenario = MakeMutationScenario(config, locality, max_writers);
-    if (!maybe_scenario.has_value()) return false;
-    const MutationScenario scenario = maybe_scenario.value();
-    const MutationSchedule schedule = BuildMutationSchedule(scenario);
+    const Geometry geometry = MakeGeometry(
+        config, distributed, max_writers, false);
 
     std::cout
         << "\n  CASE " << case_index << "/4"
         << "  N=" << config.NodeCount
         << "  K=" << static_cast<unsigned>(config.ParentCapacity)
-        << "  parent-pool=" << scenario.ParentCount << '\n';
+        << "  parent-pool=" << geometry.ParentCount
+        << "  active-children=" << geometry.ChildCount << '\n';
 
     bool all_ok = true;
-    for (std::size_t writer_count = 1u; writer_count <= max_writers; ++writer_count)
+    for (std::size_t writers = 1u; writers <= max_writers; ++writers)
     {
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> row_ns{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_ns{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> retry_rate{};
-        bool row_ok = true;
-        bool fabric_had_retry_exhaustion = false;
-        std::uint64_t fabric_invalid_count = 0u;
-        std::uint64_t fabric_retry_exhaustions = 0u;
+        Numbers row{};
+        Numbers fabric{};
 
-        for (std::size_t run = 0u; run < ConcurrencyConfig::MEASURED_RUNS; ++run)
+        // With one sample there is no median to remove order bias. Alternate
+        // backend order deterministically across points instead.
+        if (((case_index + writers) & 1u) == 0u)
         {
-            RowLockedVectorDAG<std::mutex, false> row_backend{};
-            RuntimeAPCFabricBackend fabric_backend{};
-            if (
-                !BuildMutationBackend(row_backend, scenario, writer_count) ||
-                !BuildMutationBackend(fabric_backend, scenario, writer_count)
-            )
-            {
-                return false;
-            }
-
-            MutationSweepResult row_result{};
-            MutationSweepResult fabric_result{};
-            if ((run & 1u) == 0u)
-            {
-                row_result = RunMutationWorkers(
-                    row_backend, scenario, schedule, writer_count);
-                fabric_result = RunMutationWorkers(
-                    fabric_backend, scenario, schedule, writer_count);
-            }
-            else
-            {
-                fabric_result = RunMutationWorkers(
-                    fabric_backend, scenario, schedule, writer_count);
-                row_result = RunMutationWorkers(
-                    row_backend, scenario, schedule, writer_count);
-            }
-
-            const bool row_integrity =
-                row_result.Completed() &&
-                VerifyMutationScenario(
-                    row_backend, scenario, schedule, writer_count);
-
-            const bool fabric_invalid = fabric_result.Invalid();
-
-            // A RETRY exhaustion is a progress/contention result, not an
-            // INVALID mutation. The exact final schedule cannot be verified
-            // after an incomplete run, so expected-state verification is only
-            // performed for a fully committed Fabric sample.
-            const bool fabric_integrity =
-                fabric_result.Completed()
-                    ? VerifyMutationScenario(
-                        fabric_backend,
-                        scenario,
-                        schedule,
-                        writer_count)
-                    : !fabric_invalid;
-
-            row_ok = row_ok &&
-                row_integrity &&
-                !fabric_invalid &&
-                fabric_integrity;
-
-            fabric_had_retry_exhaustion =
-                fabric_had_retry_exhaustion ||
-                fabric_result.RetriedOut();
-
-            fabric_invalid_count +=
-                fabric_result.InvalidFailures;
-            fabric_retry_exhaustions +=
-                fabric_result.RetryExhaustions;
-
-            row_ns[run] = row_result.NsPerSuccess;
-            fabric_ns[run] = fabric_result.NsPerSuccess;
-            retry_rate[run] = fabric_result.Success == 0u ? 0.0 :
-                static_cast<double>(fabric_result.Retries) /
-                static_cast<double>(fabric_result.Success);
+            row = Measure<RowLockedVectorDAG<std::mutex, false>>(
+                config, distributed, writers);
+            fabric = Measure<RuntimeAPCFabricBackend>(
+                config, distributed, writers);
+        }
+        else
+        {
+            fabric = Measure<RuntimeAPCFabricBackend>(
+                config, distributed, writers);
+            row = Measure<RowLockedVectorDAG<std::mutex, false>>(
+                config, distributed, writers);
         }
 
-        const double row_median = Median(row_ns);
-        const double fabric_median = Median(fabric_ns);
-        const double retries = Median(retry_rate);
-        const double row_mops = row_median > 0.0
-            ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS / row_median
-            : 0.0;
-        const double fabric_mops = fabric_median > 0.0
-            ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS / fabric_median
+        const double row_mops = row.WritesPerSecond() / 1.0e6;
+        const double fabric_mops = fabric.WritesPerSecond() / 1.0e6;
+        const double retry_per_success = fabric.Writes
+            ? static_cast<double>(fabric.MutationRetries) /
+                static_cast<double>(fabric.Writes)
             : 0.0;
 
-        all_ok = all_ok && row_ok;
+        const bool valid =
+            row.Valid && fabric.Valid &&
+            row.Writes > 0u && fabric.Writes > 0u;
+        all_ok = all_ok && valid;
+
         std::cout
-            << "    threads=" << std::setw(2) << writer_count
-            << "  rowlock=" << std::setw(9) << std::fixed << std::setprecision(2)
-            << row_median << " ns/op (" << std::setw(7) << row_mops << " M/s)"
-            << "  Fabric=" << std::setw(9) << fabric_median
-            << " ns/op (" << std::setw(7) << fabric_mops << " M/s)"
-            << "  Fabric/row=" << std::setw(6)
-            << Ratio(fabric_median, row_median) << "x"
+            << "    writers=" << std::setw(2) << writers
+            << "  row=" << std::setw(8) << std::fixed << std::setprecision(2)
+            << row_mops << " M/s (" << std::setw(7)
+            << NsPerOperation(row.WritesPerSecond()) << " ns)"
+            << "  Fabric=" << std::setw(8) << fabric_mops
+            << " M/s (" << std::setw(7)
+            << NsPerOperation(fabric.WritesPerSecond()) << " ns)"
+            << "  F/row=" << std::setw(6)
+            << Ratio(fabric.WritesPerSecond(), row.WritesPerSecond()) << "x"
             << "  retry/success=" << std::setw(8) << std::setprecision(4)
-            << retries
-            << "  invalid=" << fabric_invalid_count
-            << "  retry-exhaust=" << fabric_retry_exhaustions
-            << "  "
-            << (!row_ok
-                ? "FAIL"
-                : (fabric_had_retry_exhaustion ? "RETRY" : "PASS"))
-            << '\n';
+            << retry_per_success
+            << "  unfinished=" << fabric.Unfinished
+            << "  invalid=" << fabric.InvalidMutations
+            << "  " << (valid ? "PASS" : "FAIL") << '\n';
     }
+
     return all_ok;
 }
 
@@ -4232,27 +4398,27 @@ inline Result Run(
 {
     Banner("TEST 2A - HOTSPOT STRUCTURAL MUTATION");
     std::cout
-        << "Each writer owns one child; all writers contend on the same two H and two V\n"
-        << "parents. The baseline locks only participating rows. Every writer count from\n"
-        << "1 through usable_threads-2 is printed for each of the four (N,K) cases.\n";
+        << "Same duration-based engine as PaperCSV; one 1-second sample per point.\n"
+        << "Each writer owns one child and contends on the same two H/two V parents.\n";
 
     bool hotspot_ok = true;
     for (std::size_t i = 0u; i < cases.size(); ++i)
         hotspot_ok = RunCase(
-            cases[i], MutationLocality::HOTSPOT, max_writers, i + 1u) && hotspot_ok;
-    std::cout << "\nTEST 2A OVERALL: " << (hotspot_ok ? "PASS" : "FAIL") << '\n';
+            cases[i], false, max_writers, i + 1u) && hotspot_ok;
+    std::cout << "\nTEST 2A OVERALL: "
+              << (hotspot_ok ? "PASS" : "FAIL") << '\n';
 
     Banner("TEST 2B - DISTRIBUTED STRUCTURAL MUTATION");
     std::cout
-        << "Each writer owns one child and follows the same deterministic random schedule\n"
-        << "for both backends. The parent pool is min(100, legal predecessor nodes).\n"
-        << "Test 2B now uses the same 1..(usable_threads-2) sweep as Test 2A.\n";
+        << "Same PaperCSV uniform_full_half geometry: N/2 parents and N/2 active\n"
+        << "children, sharded across writers. One 1-second sample per point.\n";
 
     bool distributed_ok = true;
     for (std::size_t i = 0u; i < cases.size(); ++i)
         distributed_ok = RunCase(
-            cases[i], MutationLocality::DISTRIBUTED, max_writers, i + 1u) && distributed_ok;
-    std::cout << "\nTEST 2B OVERALL: " << (distributed_ok ? "PASS" : "FAIL") << '\n';
+            cases[i], true, max_writers, i + 1u) && distributed_ok;
+    std::cout << "\nTEST 2B OVERALL: "
+              << (distributed_ok ? "PASS" : "FAIL") << '\n';
 
     const bool ok = hotspot_ok && distributed_ok;
     std::cout << "\nTEST 2 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n';
@@ -4267,6 +4433,59 @@ inline Result Run(
 namespace Test03_ReaderWriter
 {
 using namespace BenchmarkCore;
+using namespace BenchmarkCore::TimedScale;
+
+constexpr std::chrono::milliseconds INTERNAL_INTERVAL{1000};
+
+struct MixedSample
+{
+    Numbers ReadOnly{};
+    Numbers WriteOnly{};
+    Numbers Mixed{};
+    bool Valid = false;
+};
+
+template<class Backend>
+MixedSample Measure(
+    const BenchmarkCase& config,
+    bool distributed,
+    std::size_t readers)
+{
+    Geometry geometry = MakeGeometry(config, distributed, 2u, false);
+    if (!distributed) geometry.ChildCount = 1u;
+
+    const auto sample = [&](std::size_t writers, std::size_t reader_count)
+    {
+        Backend backend{};
+        if (!Build(backend, geometry, 2u, true))
+            return Numbers{.Valid = false};
+        return Execute(
+            backend,
+            geometry,
+            writers,
+            reader_count,
+            INTERNAL_INTERVAL);
+    };
+
+    MixedSample out{};
+    out.ReadOnly = sample(0u, readers);
+    out.WriteOnly = sample(2u, 0u);
+    out.Mixed = sample(2u, readers);
+    out.Valid =
+        out.ReadOnly.Valid &&
+        out.WriteOnly.Valid &&
+        out.Mixed.Valid &&
+        out.ReadOnly.Reads > 0u &&
+        out.WriteOnly.Writes > 0u &&
+        out.Mixed.Reads > 0u &&
+        out.Mixed.Writes > 0u;
+    return out;
+}
+
+inline double Retention(double mixed, double baseline) noexcept
+{
+    return baseline > 0.0 ? mixed / baseline : 0.0;
+}
 
 inline bool RunCase(
     const BenchmarkCase& config,
@@ -4274,124 +4493,76 @@ inline bool RunCase(
     std::size_t max_readers,
     std::size_t case_index)
 {
-    const auto maybe_scenario = MakeReaderScenario(config, distributed);
-    if (!maybe_scenario.has_value()) return false;
-    const ReaderScenario scenario = maybe_scenario.value();
-    const ParentSchedule schedule = BuildParentSchedule(scenario);
+    Geometry geometry = MakeGeometry(config, distributed, 2u, false);
+    if (!distributed) geometry.ChildCount = 1u;
 
     std::cout
         << "\n  CASE " << case_index << "/4"
         << "  N=" << config.NodeCount
         << "  K=" << static_cast<unsigned>(config.ParentCapacity)
-        << "  parent-pool=" << scenario.ParentCount << '\n';
+        << "  parent-pool=" << geometry.ParentCount
+        << "  active-children=" << geometry.ChildCount << '\n';
 
     bool all_ok = true;
-    for (std::size_t reader_count = 1u; reader_count <= max_readers; ++reader_count)
+    for (std::size_t readers = 1u; readers <= max_readers; ++readers)
     {
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> row_ns{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_ns{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> retry_rate{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> row_starvations{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_starvations{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> row_writer_mops{};
-        std::array<double, ConcurrencyConfig::MEASURED_RUNS> fabric_writer_mops{};
-        bool row_ok = true;
-        bool row_correctness_ok = true;
-        bool fabric_correctness_ok = true;
-        bool row_progress_ok = true;
-        bool fabric_progress_ok = true;
+        MixedSample row{};
+        MixedSample fabric{};
 
-        for (std::size_t run = 0u; run < ConcurrencyConfig::MEASURED_RUNS; ++run)
+        if (((case_index + readers) & 1u) == 0u)
         {
-            RowLockedVectorDAG<std::shared_mutex, true> row_backend{};
-            RuntimeAPCFabricBackend fabric_backend{};
-            if (
-                !BuildReaderBackend(row_backend, scenario) ||
-                !BuildReaderBackend(fabric_backend, scenario)
-            )
-            {
-                return false;
-            }
-
-            ReaderSweepResult row_result{};
-            ReaderSweepResult fabric_result{};
-            if ((run & 1u) == 0u)
-            {
-                row_result = RunReadersWithWriters(
-                    row_backend, scenario, schedule, reader_count);
-                fabric_result = RunReadersWithWriters(
-                    fabric_backend, scenario, schedule, reader_count);
-            }
-            else
-            {
-                fabric_result = RunReadersWithWriters(
-                    fabric_backend, scenario, schedule, reader_count);
-                row_result = RunReadersWithWriters(
-                    row_backend, scenario, schedule, reader_count);
-            }
-
-            row_ok = row_ok && row_result.Ok && fabric_result.Ok;
-            row_correctness_ok =
-                row_correctness_ok && row_result.CorrectnessOk;
-            fabric_correctness_ok =
-                fabric_correctness_ok && fabric_result.CorrectnessOk;
-            row_progress_ok =
-                row_progress_ok && row_result.ProgressOk;
-            fabric_progress_ok =
-                fabric_progress_ok && fabric_result.ProgressOk;
-
-            row_ns[run] = row_result.NsPerStableRead;
-            fabric_ns[run] = fabric_result.NsPerStableRead;
-            retry_rate[run] = fabric_result.StableReads == 0u ? 0.0 :
-                static_cast<double>(fabric_result.ReaderRetries) /
-                static_cast<double>(fabric_result.StableReads);
-            row_starvations[run] =
-                static_cast<double>(row_result.ReaderStarvations);
-            fabric_starvations[run] =
-                static_cast<double>(fabric_result.ReaderStarvations);
-
-            row_writer_mops[run] = row_result.ElapsedNs > 0.0
-                ? static_cast<double>(row_result.WriterSuccess) *
-                    ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
-                    row_result.ElapsedNs
-                : 0.0;
-            fabric_writer_mops[run] = fabric_result.ElapsedNs > 0.0
-                ? static_cast<double>(fabric_result.WriterSuccess) *
-                    ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS /
-                    fabric_result.ElapsedNs
-                : 0.0;
+            row = Measure<RowLockedVectorDAG<std::shared_mutex, true>>(
+                config, distributed, readers);
+            fabric = Measure<RuntimeAPCFabricBackend>(
+                config, distributed, readers);
+        }
+        else
+        {
+            fabric = Measure<RuntimeAPCFabricBackend>(
+                config, distributed, readers);
+            row = Measure<RowLockedVectorDAG<std::shared_mutex, true>>(
+                config, distributed, readers);
         }
 
-        const double row_median = Median(row_ns);
-        const double fabric_median = Median(fabric_ns);
-        const double retries = Median(retry_rate);
-        const double row_read_mops = row_median > 0.0
-            ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS / row_median
-            : 0.0;
-        const double fabric_read_mops = fabric_median > 0.0
-            ? ConcurrencyConfig::MILLION_OPERATIONS_PER_SECOND_FROM_NS / fabric_median
+        const double row_qread = row.ReadOnly.ReadsPerSecond();
+        const double row_wbase = row.WriteOnly.WritesPerSecond();
+        const double row_mread = row.Mixed.ReadsPerSecond();
+        const double row_mwrite = row.Mixed.WritesPerSecond();
+        const double fabric_qread = fabric.ReadOnly.ReadsPerSecond();
+        const double fabric_wbase = fabric.WriteOnly.WritesPerSecond();
+        const double fabric_mread = fabric.Mixed.ReadsPerSecond();
+        const double fabric_mwrite = fabric.Mixed.WritesPerSecond();
+
+        const double fabric_retry_per_read = fabric.Mixed.Reads
+            ? static_cast<double>(fabric.Mixed.ReadRetries) /
+                static_cast<double>(fabric.Mixed.Reads)
             : 0.0;
 
-        all_ok = all_ok && row_ok;
+        const bool valid = row.Valid && fabric.Valid;
+        all_ok = all_ok && valid;
+
         std::cout
-            << "    readers=" << std::setw(2) << reader_count
-            << "  row-rw=" << std::setw(9) << std::fixed << std::setprecision(2)
-            << row_median << " ns (" << std::setw(7) << row_read_mops << " M/s)"
-            << "  Fabric=" << std::setw(9) << fabric_median
-            << " ns (" << std::setw(7) << fabric_read_mops << " M/s)"
-            << "  Fabric/row=" << std::setw(6)
-            << Ratio(fabric_median, row_median) << "x"
-            << "  retry/read=" << std::setw(8) << std::setprecision(4) << retries
-            << "  starve row/Fabric=" << std::setprecision(0)
-            << Median(row_starvations) << "/" << Median(fabric_starvations)
-            << "  writers M/s row/Fabric=" << std::setprecision(2)
-            << Median(row_writer_mops) << "/" << Median(fabric_writer_mops)
-            << "  correctness="
-            << (row_correctness_ok && fabric_correctness_ok ? "PASS" : "FAIL")
-            << "  progress="
-            << (row_progress_ok && fabric_progress_ok ? "PASS" : "FAIL")
-            << "  " << (row_ok ? "PASS" : "FAIL") << '\n';
+            << "    readers=" << std::setw(2) << readers
+            << std::fixed << std::setprecision(2)
+            << "  row R=" << std::setw(7) << row_mread / 1.0e6
+            << " W=" << std::setw(7) << row_mwrite / 1.0e6
+            << " M/s"
+            << "  Fabric R=" << std::setw(7) << fabric_mread / 1.0e6
+            << " W=" << std::setw(7) << fabric_mwrite / 1.0e6
+            << " M/s"
+            << "  retain R row/F=" << std::setprecision(3)
+            << Retention(row_mread, row_qread) << "/"
+            << Retention(fabric_mread, fabric_qread)
+            << " W row/F="
+            << Retention(row_mwrite, row_wbase) << "/"
+            << Retention(fabric_mwrite, fabric_wbase)
+            << "  retry/read=" << std::setprecision(4)
+            << fabric_retry_per_read
+            << "  invalid="
+            << (fabric.Mixed.InvalidReads + fabric.Mixed.InvalidMutations)
+            << "  " << (valid ? "PASS" : "FAIL") << '\n';
     }
+
     return all_ok;
 }
 
@@ -4401,25 +4572,27 @@ inline Result Run(
 {
     Banner("TEST 3A - HOTSPOT STABLE READS WITH TWO ACTIVE WRITERS");
     std::cout
-        << "Exactly two writers remain active: H toggles 0<->1 and V toggles 2<->3\n"
-        << "on the same child. Readers sweep 1..(usable_threads-2). The vector baseline\n"
-        << "uses row-local shared_mutex shared reads and exclusive writer ownership.\n";
+        << "Same PaperCSV three-phase measurement: read-only, write-only, then mixed.\n"
+        << "Exactly two writers share one child (H and V); one 1-second sample/mode.\n";
 
     bool hotspot_ok = true;
     for (std::size_t i = 0u; i < cases.size(); ++i)
-        hotspot_ok = RunCase(cases[i], false, max_readers, i + 1u) && hotspot_ok;
-    std::cout << "\nTEST 3A OVERALL: " << (hotspot_ok ? "PASS" : "FAIL") << '\n';
+        hotspot_ok = RunCase(
+            cases[i], false, max_readers, i + 1u) && hotspot_ok;
+    std::cout << "\nTEST 3A OVERALL: "
+              << (hotspot_ok ? "PASS" : "FAIL") << '\n';
 
     Banner("TEST 3B - DISTRIBUTED STABLE READS WITH TWO ACTIVE WRITERS");
     std::cout
-        << "Two writers own separate child relations and mutate across up to 100 legal\n"
-        << "parents. Readers sweep every count from 1 through usable_threads-2; APC RETRY\n"
-        << "outcomes are retried and never counted as successful stable reads.\n";
+        << "Same PaperCSV uniform_full_half geometry and three-phase measurement;\n"
+        << "two writer shards plus the requested reader sweep, one sample/mode.\n";
 
     bool distributed_ok = true;
     for (std::size_t i = 0u; i < cases.size(); ++i)
-        distributed_ok = RunCase(cases[i], true, max_readers, i + 1u) && distributed_ok;
-    std::cout << "\nTEST 3B OVERALL: " << (distributed_ok ? "PASS" : "FAIL") << '\n';
+        distributed_ok = RunCase(
+            cases[i], true, max_readers, i + 1u) && distributed_ok;
+    std::cout << "\nTEST 3B OVERALL: "
+              << (distributed_ok ? "PASS" : "FAIL") << '\n';
 
     const bool ok = hotspot_ok && distributed_ok;
     std::cout << "\nTEST 3 OVERALL: " << (ok ? "PASS" : "FAIL") << '\n';
@@ -4435,7 +4608,7 @@ inline Result Run(
 namespace Test04_PublicMutationAPI
 {
 inline bool ParentSetEquals(
-    APCFabricBackend<8u, 1u, 2u>& backend,
+    SmallFabricFixture<8u, 2u>& backend,
     std::size_t child,
     Axis axis,
     std::array<std::size_t, 2u> expected,
@@ -4465,7 +4638,7 @@ inline bool ParentSetEquals(
 inline Result Run()
 {
     Banner("TEST 4 - PUBLIC DAG MUTATION API PAIRS AND MULTI-PARENT ISOLATION");
-    APCFabricBackend<8u, 1u, 2u> backend{};
+    SmallFabricFixture<8u, 2u> backend{};
     if (!backend.Initialize()) return Result::FAIL;
 
     bool ok = true;
@@ -4499,15 +4672,16 @@ inline Result Run()
     ok = ParentSetEquals(backend, 5u, Axis::VERTICAL, {1u, 2u}, 2u) && ok;
 
     const bool same_parent_replace_rejected =
-        backend.Node(5u).ReplaceParent(
-            backend.Node(1u),
-            backend.Node(1u),
-            FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V
+        backend.Fabric().ReplaceParentByHandle(
+            backend.Handle(1u), backend.Handle(1u), backend.Handle(5u),
+            FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
+            DEFAULT_MAX_TRIES, AdaptivePackedCellContainer::INTERNAL_RECURSION
         ) == MutationResult::INVALID;
     const bool invalid_table_rejected =
-        backend.Node(5u).AddParent(
-            backend.Node(0u),
-            FabricSegments::SEGMENT_POOL
+        backend.Fabric().AddParenByHandle(
+            backend.Handle(0u), backend.Handle(5u),
+            FabricSegments::SEGMENT_POOL,
+            DEFAULT_MAX_TRIES, AdaptivePackedCellContainer::INTERNAL_RECURSION
         ) == MutationResult::INVALID;
 
     const GraphProof proof = ProveQuiescentCombinedDAG<8u, 2u>(backend);
@@ -4535,7 +4709,7 @@ inline Result Run()
     Banner("TEST 5 - H-UNION-V ACYCLIC DAG, MULTI-PARENT CAPACITY, CYCLE REJECTION");
     constexpr std::size_t N = 7u;
     constexpr std::uint8_t K = 2u;
-    APCFabricBackend<N, 1u, K> backend{};
+    SmallFabricFixture<N, K> backend{};
     if (!backend.Initialize()) return Result::FAIL;
 
     bool valid_diamond =
@@ -5618,7 +5792,7 @@ namespace Test07_ConcurrentDAGAndRetirement
 inline bool FixedOrderRace()
 {
     constexpr std::uint32_t ROUNDS = 10'000u;
-    APCFabricBackend<2u, 1u, 2u> backend{};
+    SmallFabricFixture<2u, 2u> backend{};
     if (!backend.Initialize()) return false;
 
     std::barrier phase(3);
@@ -5679,7 +5853,7 @@ inline bool MixedAxisStress(std::uint64_t& retries_out)
     constexpr std::size_t FIRST_CHILD = 8u;
     constexpr std::uint32_t ROUNDS = 5'000u;
 
-    APCFabricBackend<N, 1u, K> backend{};
+    SmallFabricFixture<N, K> backend{};
     if (!backend.Initialize()) return false;
     for (std::size_t i = 0u; i < WORKERS; ++i)
     {
@@ -6731,11 +6905,13 @@ inline bool ValidateRunArguments(
         return fail("N*K exceeds the uint32 relation-locator domain");
 
     const std::size_t worker_limit = usable_thread_count - 2u;
-    const std::size_t minimum_nodes = std::max(
+    const std::size_t minimum_nodes = std::max({
         higher_parent_capacity + 2u,
-        worker_limit + 4u);
+        worker_limit + 4u,
+        worker_limit * 2u
+    });
     if (lower_node_count < minimum_nodes)
-        return fail("lower node bound is too small for K and the requested thread sweep");
+        return fail("lower node bound is too small for K/full-half geometry and the requested thread sweep");
 
     return true;
 }
@@ -6763,6 +6939,17 @@ inline int Run(
         higher_node_count,
         static_cast<std::uint8_t>(lower_parent_capacity),
         static_cast<std::uint8_t>(higher_parent_capacity));
+
+    // Internal Tests 2-3 deliberately exercise only the four user-supplied
+    // corners, in high-to-low order, with one timed sample per point. Test 1
+    // keeps its existing case order and repeated measurements.
+    const std::array<BenchmarkCase, 4u> internal_scale_cases{{
+        {higher_node_count, static_cast<std::uint8_t>(higher_parent_capacity)},
+        {higher_node_count, static_cast<std::uint8_t>(lower_parent_capacity)},
+        {lower_node_count,  static_cast<std::uint8_t>(higher_parent_capacity)},
+        {lower_node_count,  static_cast<std::uint8_t>(lower_parent_capacity)}
+    }};
+
     const std::size_t concurrent_threads = usable_thread_count - 2u;
 
     std::cout
@@ -6775,13 +6962,14 @@ inline int Run(
         << "  Test 2 writer sweep     : 1.." << concurrent_threads << '\n'
         << "  Test 3 reader sweep     : 1.." << concurrent_threads
         << " + 2 fixed writers\n"
-        << "  measured samples/point  : "
-        << ConcurrencyConfig::MEASURED_RUNS << '\n';
+        << "  Test 1 samples/point    : "
+        << ConcurrencyConfig::MEASURED_RUNS << '\n'
+        << "  Test 2/3 samples/point  : 1 (PaperCSV timed engine)\n";
 
     const std::array<std::pair<const char*, Result>, 8u> results{{
         {"Test 1 - scaled fair bidirectional DAG benchmark", Test01_Baseline::Run(cases)},
-        {"Test 2 - hotspot + distributed mutation", Test02_Contention::Run(cases, concurrent_threads)},
-        {"Test 3 - hotspot + distributed readers", Test03_ReaderWriter::Run(cases, concurrent_threads)},
+        {"Test 2 - hotspot + distributed mutation", Test02_Contention::Run(internal_scale_cases, concurrent_threads)},
+        {"Test 3 - hotspot + distributed readers", Test03_ReaderWriter::Run(internal_scale_cases, concurrent_threads)},
         {"Test 4 - public mutation API", Test04_PublicMutationAPI::Run()},
         {"Test 5 - combined DAG proof", Test05_CombinedAcyclicity::Run()},
         {"Test 6 - region schema and views", Test06_RegionSchemaAndViews::Run()},
@@ -6837,6 +7025,7 @@ inline int RunAll(
 namespace APCDAGTests::PaperCSV
 {
 using namespace BenchmarkCore;
+using namespace BenchmarkCore::TimedScale;
 using namespace std::chrono_literals;
 
 struct Settings
@@ -6871,17 +7060,6 @@ struct Files
         for (const auto& f : Stream) if (!f.good()) return false;
         return true;
     }
-};
-
-struct Numbers
-{
-    double Seconds = 0;
-    std::uint64_t Writes = 0, Reads = 0, MutationRetries = 0, ReadRetries = 0;
-    std::uint64_t Unfinished = 0, InvalidMutations = 0, InvalidReads = 0;
-    std::uint64_t DistinctChildren = 0;
-    bool Valid = true;
-    double WritesPerSecond() const { return Seconds > 0 ? Writes / Seconds : 0; }
-    double ReadsPerSecond() const { return Seconds > 0 ? Reads / Seconds : 0; }
 };
 
 inline void Row(std::ofstream& f, const char* test, const char* backend,
@@ -6994,262 +7172,6 @@ inline bool AppendMedians(const std::string& path, std::size_t expected_runs)
     }
     output.flush();
     return all_valid && output.good();
-}
-
-template<class Backend> struct Registration
-{
-    Backend& Value;
-    std::size_t Id;
-    bool Ok = true;
-    Registration(Backend& backend, std::size_t id) : Value(backend), Id(id)
-    {
-        if constexpr (requires { backend.RegisterThread(id); }) Ok = backend.RegisterThread(id);
-    }
-    ~Registration()
-    {
-        if constexpr (requires { Value.DeregisterThread(Id); })
-            if (Ok) Value.DeregisterThread(Id);
-    }
-};
-
-template<class Backend> bool Healthy(Backend& backend)
-{
-    if constexpr (requires { backend.Healthy(); }) return backend.Healthy();
-    return true;
-}
-
-template<class Backend> bool Prepare(Backend& backend, BenchmarkCase c, std::size_t words,
-                                    bool stable_guard = false)
-{
-    if (!InitializeBackend(backend, c, words, words == TEST1_PAYLOAD_WORDS)) return false;
-    if constexpr (requires { backend.PrimePayloadStorage(); })
-        if (!backend.PrimePayloadStorage()) return false;
-    if (stable_guard)
-    {
-        if constexpr (requires { backend.EnableStableReadGuard(); })
-            if (!backend.EnableStableReadGuard()) return false;
-    }
-    return Healthy(backend);
-}
-
-enum class Attempt { COMMITTED, RETRY, INVALID };
-template<class Backend> Attempt ReplaceOnce(Backend& backend, std::size_t oldp,
-    std::size_t newp, std::size_t child, Axis axis)
-{
-    if constexpr (requires { backend.ReplaceParentResult(oldp, newp, child, axis, 1u); })
-    {
-        const auto r = backend.ReplaceParentResult(oldp, newp, child, axis, 1u);
-        return MutationCommitted(r) ? Attempt::COMMITTED :
-            (MutationInvalid(r) ? Attempt::INVALID : Attempt::RETRY);
-    }
-    else
-    {
-        if (backend.ReplaceParent(oldp, newp, child, axis, 1u)) return Attempt::COMMITTED;
-        return Healthy(backend) ? Attempt::RETRY : Attempt::INVALID;
-    }
-}
-
-inline std::size_t ParentSeed(std::size_t child, std::size_t parents, Axis axis)
-{
-    return (child + (axis == Axis::VERTICAL ? parents / 2u : 0u)) % parents;
-}
-inline std::size_t NextParent(std::uint64_t& state, std::size_t parents,
-                              std::size_t current, bool skew)
-{
-    if (!skew || parents < 100u) return DifferentRandomParent(state, parents, current);
-    // 80% from the first 1% of parents; remainder from the entire population.
-    const bool hot = NextRandom(state) % 10u < 8u;
-    const std::size_t limit = hot ? std::max<std::size_t>(2u, parents / 100u) : parents;
-    std::size_t next = NextRandom(state) % limit;
-    if (next == current) next = (next + 1u) % limit;
-    return next;
-}
-
-struct Geometry
-{
-    BenchmarkCase Case{};
-    bool Distributed = false, Skew = false;
-    std::size_t ParentCount = 0, FirstChild = 0, ChildCount = 0;
-    std::size_t Child(std::size_t writer, std::uint64_t step,
-                      std::size_t writers) const
-    {
-        if (!Distributed) return FirstChild + writer;
-        const std::size_t first = FirstChild + ChildCount * writer / writers;
-        const std::size_t last = FirstChild + ChildCount * (writer + 1u) / writers;
-        return first + step % (last - first);
-    }
-    std::size_t Initial(std::size_t child, Axis axis) const
-    {
-        if (Distributed) return ParentSeed(child, ParentCount, axis);
-        return axis == Axis::HORIZONTAL ? 0u : 2u;
-    }
-    std::size_t Next(std::uint64_t& state, std::size_t current, Axis axis) const
-    {
-        if (Distributed) return NextParent(state, ParentCount, current, Skew);
-        return axis == Axis::HORIZONTAL ? (current == 0u ? 1u : 0u)
-                                        : (current == 2u ? 3u : 2u);
-    }
-};
-inline Geometry MakeGeometry(BenchmarkCase c, bool distributed,
-                             std::size_t worker_count, bool skew)
-{
-    if (distributed)
-    {
-        const std::size_t p = c.NodeCount / 2u;
-        return {c, true, skew, p, p, c.NodeCount - p};
-    }
-    return {c, false, false, 4u, 4u, worker_count};
-}
-
-template<class Backend> bool Build(Backend& backend, const Geometry& g,
-                                   std::size_t workers, bool mixed)
-{
-    if (!Prepare(backend, g.Case, 1u, mixed)) return false;
-    if (!g.Distributed)
-    {
-        for (std::size_t w = 0; w < (mixed ? 1u : workers); ++w)
-        {
-            const std::size_t c = g.FirstChild + w;
-            if (!backend.AddParent(0u, c, Axis::HORIZONTAL) ||
-                !backend.AddParent(2u, c, Axis::VERTICAL)) return false;
-        }
-    }
-    else
-    {
-        for (std::size_t c = g.FirstChild; c < g.FirstChild + g.ChildCount; ++c)
-            for (Axis a : {Axis::HORIZONTAL, Axis::VERTICAL})
-                if (!backend.AddParent(g.Initial(c, a), c, a)) return false;
-    }
-    return Healthy(backend);
-}
-
-// An operation has no retry-count ceiling: it retries until commit, an invalid
-// outcome, or the SAMPLE deadline. A deadline hit is recorded as unfinished.
-// This prevents a permanently stalled operation from hanging the entire suite.
-template<class Backend> Attempt CommitUntilDeadline(Backend& backend, std::size_t oldp,
-    std::size_t newp, std::size_t child, Axis axis, Clock::time_point deadline,
-    std::uint64_t& retries)
-{
-    for (std::uint64_t attempt = 0;; ++attempt)
-    {
-        if (Clock::now() >= deadline) return Attempt::RETRY;
-        const Attempt result = ReplaceOnce(backend, oldp, newp, child, axis);
-        if (result != Attempt::RETRY) return result;
-        ++retries;
-        PerturbSchedule(static_cast<std::uint32_t>(attempt));
-    }
-}
-
-template<class Backend> Numbers Execute(Backend& backend, const Geometry& g,
-    std::size_t writers, std::size_t readers, std::chrono::milliseconds interval)
-{
-    // There is one primary writer per child/axis. In 3A writers use H and V
-    // on the same child; in 3B their child shards are disjoint.
-    const std::size_t participants = writers + readers;
-    std::atomic<std::uint64_t> done_w{0}, done_r{0}, retry_w{0}, retry_r{0};
-    std::atomic<std::uint64_t> unfinished{0}, bad_w{0}, bad_r{0}, distinct{0};
-    std::atomic<bool> ready{true};
-    struct FinalState { std::size_t Child = 0, Parent = 0; Axis Relation = Axis::HORIZONTAL; bool Seen = false; };
-    std::vector<FinalState> final(writers);
-    Clock::time_point start{};
-    std::barrier gate(static_cast<std::ptrdiff_t>(participants + 1u), [&] { start = Clock::now(); });
-    const auto deadline = [&] { return start + interval; };
-    std::vector<std::thread> threads;
-    threads.reserve(participants);
-    for (std::size_t w = 0; w < writers; ++w)
-        threads.emplace_back([&, w]
-        {
-            Registration registration(backend, w + 1u);
-            if (!registration.Ok) ready.store(false);
-            std::uint64_t local_w = 0, local_retry = 0, local_unfinished = 0, local_bad = 0;
-            std::uint64_t step = 0;
-            std::uint64_t state = ConcurrencyConfig::RANDOM_SEED ^
-                (static_cast<std::uint64_t>(w + 1u) * ConcurrencyConfig::RANDOM_STREAM_STEP);
-            const Axis axis = w % 2u ? Axis::VERTICAL : Axis::HORIZONTAL;
-            const std::size_t first = g.Distributed
-                ? g.FirstChild + g.ChildCount * w / writers
-                : g.FirstChild + (g.ChildCount == 1u || readers ? 0u : w);
-            const std::size_t count = g.Distributed
-                ? g.FirstChild + g.ChildCount * (w + 1u) / writers - first : 1u;
-            std::vector<std::size_t> current(count);
-            for (std::size_t i = 0; i < count; ++i)
-                current[i] = g.Initial(first + i, axis);
-            gate.arrive_and_wait();
-            if (registration.Ok)
-                while (Clock::now() < deadline() && !bad_w.load())
-                {
-                    const std::size_t offset = step++ % count;
-                    const std::size_t child = first + offset;
-                    const std::size_t old = current[offset];
-                    const std::size_t next = g.Next(state, old, axis);
-                    const Attempt a = CommitUntilDeadline(
-                        backend, old, next, child, axis, deadline(), local_retry);
-                    if (a == Attempt::COMMITTED)
-                    {
-                        current[offset] = next;
-                        final[w] = {child, next, axis, true};
-                        ++local_w;
-                    }
-                    else if (a == Attempt::INVALID) { ++local_bad; break; }
-                    else { ++local_unfinished; break; }
-                }
-            distinct.fetch_add(g.Distributed ? std::min<std::uint64_t>(local_w, count)
-                : (local_w ? 1u : 0u));
-            done_w.fetch_add(local_w); retry_w.fetch_add(local_retry);
-            unfinished.fetch_add(local_unfinished); bad_w.fetch_add(local_bad);
-        });
-    for (std::size_t r = 0; r < readers; ++r)
-        threads.emplace_back([&, r]
-        {
-            Registration registration(backend, writers + r + 1u);
-            if (!registration.Ok) ready.store(false);
-            std::uint64_t local_reads = 0, local_retry = 0, local_bad = 0;
-            std::uint64_t step = r;
-            gate.arrive_and_wait();
-            if (registration.Ok)
-                while (Clock::now() < deadline() && !bad_r.load())
-                {
-                    const std::size_t child = g.Distributed
-                        ? g.FirstChild + ((++step * 1315423911ull + r) % g.ChildCount)
-                        : g.FirstChild;
-                    const Axis axis = g.Distributed
-                        ? ((child - g.FirstChild) < g.ChildCount / 2u
-                            ? Axis::HORIZONTAL : Axis::VERTICAL)
-                        : ((++step & 1u) ? Axis::HORIZONTAL : Axis::VERTICAL);
-                    const ReadResult read = backend.StableFindParent(child, axis, 0u, 1u);
-                    if (read.IsRetry()) { ++local_retry; continue; }
-                    if (!read.ContractValid() || !read.IsFound() || read.Node >= g.ParentCount ||
-                        (!g.Distributed && (axis == Axis::HORIZONTAL ? read.Node > 1u :
-                            (read.Node != 2u && read.Node != 3u))))
-                    { ++local_bad; break; }
-                    ++local_reads;
-                }
-            done_r.fetch_add(local_reads); retry_r.fetch_add(local_retry);
-            bad_r.fetch_add(local_bad);
-        });
-    gate.arrive_and_wait();
-    for (auto& thread : threads) thread.join();
-    Numbers out;
-    out.Seconds = std::chrono::duration<double>(Clock::now() - start).count();
-    out.Writes = done_w.load(); out.Reads = done_r.load();
-    out.MutationRetries = retry_w.load(); out.ReadRetries = retry_r.load();
-    out.Unfinished = unfinished.load(); out.DistinctChildren = distinct.load();
-    if (!g.Distributed && readers && out.DistinctChildren) out.DistinctChildren = 1u;
-    out.InvalidMutations = bad_w.load();
-    out.InvalidReads = bad_r.load();
-    out.Valid = ready.load() && Healthy(backend) && !out.InvalidMutations && !out.InvalidReads;
-    for (const auto& expected : final)
-    {
-        if (!expected.Seen) continue;
-        const auto observed = backend.StableFindParent(
-            expected.Child, expected.Relation, 0u, DEFAULT_MAX_TRIES);
-        if (!observed.IsFound() || !observed.ContractValid() ||
-            observed.Node != expected.Parent ||
-            !ReverseContains(backend, expected.Parent, expected.Child,
-                expected.Relation, g.Case.NodeCount)) out.Valid = false;
-    }
-    // Sample deadlines are explicitly counted, never mislabelled as corruption.
-    return out;
 }
 
 template<class Backend> bool OneTest1(std::ofstream& file, const char* label,

@@ -5,5 +5,5 @@
 #include "TestFiles/SuperNovaTest2ARepeat.hpp"
 int main()
 {
-    return APCDAGTests::RunAll();
+    return APCDAGTests::RunAll(100, 1000000);
 }

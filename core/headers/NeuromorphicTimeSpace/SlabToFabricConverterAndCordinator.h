@@ -187,6 +187,69 @@ namespace BidirectionalInMemGraph
     public:
         using MutationResult = AdaptivePackedCellContainer::MutationResult;
 
+        MutationResult ReplaceParentByHandle(
+            uint64_t old_parent_handle,
+            uint64_t new_parent_handle,
+            uint64_t child_handle,
+            FabricSegments edge_table,
+            uint32_t max_tries,
+            uint32_t internal_max_tries
+        ) noexcept
+        {
+            return ReplaceParentRelation_(
+                TwinU32ToU64::ExtractLow32Of64(old_parent_handle),
+                TwinU32ToU64::ExtractHigh32Of64(old_parent_handle),
+                TwinU32ToU64::ExtractLow32Of64(new_parent_handle),
+                TwinU32ToU64::ExtractHigh32Of64(new_parent_handle),
+                TwinU32ToU64::ExtractLow32Of64(child_handle),
+                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                edge_table,
+                nullptr,
+                max_tries,
+                internal_max_tries
+            );
+        }
+
+        MutationResult AddParenByHandle(
+            uint64_t parent_handle,
+            uint64_t child_handle,
+            FabricSegments edge_table,
+            uint32_t max_tries,
+            uint32_t internal_max_tries
+        ) noexcept
+        {
+            return AddParentRelation_(
+                TwinU32ToU64::ExtractLow32Of64(parent_handle),
+                TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+                TwinU32ToU64::ExtractLow32Of64(child_handle),
+                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                edge_table,
+                nullptr,
+                max_tries,
+                internal_max_tries
+            );
+        }
+
+        MutationResult RemoveParentByHandle(
+            uint64_t parent_handle,
+            uint64_t child_handle,
+            FabricSegments edge_table,
+            uint32_t max_tries,
+            uint32_t internal_max_tries
+        ) noexcept
+        {
+            return RemoveParentRelation_(
+                TwinU32ToU64::ExtractLow32Of64(parent_handle),
+                TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+                TwinU32ToU64::ExtractLow32Of64(child_handle),
+                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                edge_table,
+                nullptr,
+                max_tries,
+                internal_max_tries
+            );
+        }
+
     protected:
         static constexpr bool SameHeader_(
             const EdgeBuilder::EdgeData& left,
