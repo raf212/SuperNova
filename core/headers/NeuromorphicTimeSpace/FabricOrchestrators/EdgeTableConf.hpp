@@ -63,7 +63,7 @@ namespace BidirectionalInMemGraph
         ) noexcept
         {
             return value > 0u &&
-                value <= ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS;
+                value <= ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS;
         }
 
         static constexpr bool IsValidRelationOrdinal(

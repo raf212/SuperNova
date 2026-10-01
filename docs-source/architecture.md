@@ -319,9 +319,7 @@ Static description of APC-local ABI and helper functions. It does not own storag
 | `CompactRegionIndex(active_mask,column)` | active bit mask + logical column | `optional<uint8_t>` | Returns compact schema-row ordinal by popcounting lower active bits. | Do not treat logical enum ordinal as compact row ordinal when some regions are disabled. |
 | `IsValid32BitAPCUnit(index)` | `uint64_t` | `bool` | Ensures value is below `UINT32_MAX` sentinel. | Not sufficient to prove slot < `CountOfAPC_`. |
 | `IsValidFabricUnit(index)` | `uint64_t` | `bool` | Ensures value is below `UINT64_MAX` Fabric sentinel. | Not a slab bounds check. |
-| `InLimitOfUint8(version)` | `uint32_t` | `bool` | Valid nonzero value below `UINT8_MAX`. | Not used as a general integer validator. |
 | `IsCapacityOfAPCValid(capacity)` | cell count | `bool` | Requires at least `MINIMUM_APC_CELL_COUNT` and 32-bit-valid cell count. | Does not validate a schema fits that capacity. |
-| `IsPowerOfTwoValue(value)` | `uint64_t` | `bool` | Generic power-of-two test. | Zero is false. |
 | `IsValidEven64(value)` | `uint64_t` | `bool` | Parity check used by lifecycle sequence invariant. | Even alone does not mean a lifecycle state is valid. |
 
 ### `APCDataStructure::CacheOfAPC`
@@ -1506,9 +1504,7 @@ This index is intentionally redundant: use it when you know a symbol name but no
 - `APCDataStructure::CompactRegionIndex`
 - `APCDataStructure::IsValid32BitAPCUnit`
 - `APCDataStructure::IsValidFabricUnit`
-- `APCDataStructure::InLimitOfUint8`
 - `APCDataStructure::IsCapacityOfAPCValid`
-- `APCDataStructure::IsPowerOfTwoValue`
 - `APCDataStructure::IsValidEven64`
 - `APCUseScope::Release`
 - `TwinU32ToU64::PackDoubleUnsigned32In64`

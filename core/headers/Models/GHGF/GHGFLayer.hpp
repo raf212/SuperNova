@@ -65,8 +65,8 @@ namespace BidirectionalInMemGraph
         {
             uint64_t ParentMask = UNSIGNED_ZERO;
             uint32_t RowSequence = UINT32_MAX;
-            std::array<uint64_t, ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS> ParentHandles{};
-            std::array<float, ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS> Couplings{};
+            std::array<uint64_t, ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS> ParentHandles{};
+            std::array<float, ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS> Couplings{};
         };
     };
 
@@ -201,7 +201,7 @@ namespace BidirectionalInMemGraph
             if (
                 batch_capacity == UNSIGNED_ZERO ||
                 max_direct_parent_per_axis == UNSIGNED_ZERO ||
-                max_direct_parent_per_axis > ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS
+                max_direct_parent_per_axis > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS
             )
             {
                 return false;
@@ -310,7 +310,7 @@ namespace BidirectionalInMemGraph
                 profile.IsValid &&
                 profile.BatchCapacity != UNSIGNED_ZERO &&
                 profile.MaxDirectParentPerAxis != UNSIGNED_ZERO &&
-                profile.MaxDirectParentPerAxis <= ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS &&
+                profile.MaxDirectParentPerAxis <= ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS &&
                 profile.ParameterCount == expected_paremeter_count &&
                 profile.ActiveRegionMask == expected_mask &&
                 profile.FabricConfig.ActiveRegionMask == expected_mask &&
