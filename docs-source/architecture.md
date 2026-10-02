@@ -298,7 +298,6 @@ The Fabric owns storage and graph authority. An APC facade is a **runtime view/b
 
 | Function | Arguments | Returns | What it does / who uses it | Do not use it for |
 | --- | --- | --- | --- | --- |
-| `IsLiveSateOfAPC(state)` | `optional<StateOfAPC>` | `bool` | Simple LIVE-state check used by lifecycle/resolver code. | Do not confuse header lifecycle LIVE with handle-table generation being open; both checks matter. |
 | `MaskLowBitsForU64(n)` | bit count | `uint64_t` mask | Builds low-N-bit mask without undefined full-width shift. | Not a range check. |
 | `MaskLowBitsForU32(n)` | bit count | `uint32_t` mask | 32-bit equivalent. | Not a relation locator validator. |
 

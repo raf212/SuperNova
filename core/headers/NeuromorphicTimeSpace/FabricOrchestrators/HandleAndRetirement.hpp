@@ -7,36 +7,43 @@ namespace BidirectionalInMemGraph
 
     struct HandleOfAPCStatic
     {
-        struct alignas(uint64_t) StructuralHotRow final
+        struct LifeCycleControl 
         {
-            uint64_t GenerationAndLifeCycle = FABRIC_CELL_SENTINAL;
-            uint64_t ValueParentControl = FABRIC_CELL_SENTINAL;
-            uint64_t ValueChildControl = FABRIC_CELL_SENTINAL;
-            uint64_t VolatileParentControl = FABRIC_CELL_SENTINAL;
-            uint64_t VolatileChildControl = FABRIC_CELL_SENTINAL;
+            uint32_t SeqLock = 2u;
+            StateOfAPC State = StateOfAPC::FREE;
         };
+        static_assert(std::atomic<LifeCycleControl>::is_always_lock_free == true);
+
+        struct ParentRowControl 
+        {
+            uint32_t SeqLock = 0u;
+            EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::LIVE;
+        };
+        static_assert(std::atomic<ParentRowControl>::is_always_lock_free == true);
+
+
+        struct ChildListControl
+        {
+            uint32_t SeqLockChild = 0u;
+            EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::LIVE;
+        };
+        static_assert(std::atomic<ChildListControl>::is_always_lock_free == true);
+
+
+        struct alignas(64) StructuralHotRow final
+        {
+            uint64_t GenerationContron = FABRIC_CELL_SENTINAL;
+            LifeCycleControl LifeCycle{};
+            ParentRowControl ValueParentControl{};
+            ChildListControl ValueChildControl{};
+            ParentRowControl VolatileParentControl{};
+            ChildListControl VolatileChildControl{};
+            uint32_t ValueChildTail = EdgeBuilder::RELATION_NULL;
+            uint32_t VolatileChildTail = EdgeBuilder::RELATION_NULL;
+        };
+        static_assert(sizeof(StructuralHotRow) ==  8 * sizeof(uint64_t));
 
         static constexpr uint32_t STRUCTURAL_HOT_FIXED_CELLS = sizeof(StructuralHotRow) / sizeof(uint64_t);
-        static constexpr uint8_t CACHE_LINE_CELLS = ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
-        static constexpr uint32_t ParentMaskWordCount(uint32_t k) noexcept
-        {
-            return (k + ADS::APC_CACHELINE_SIZE - 1u) / ADS::APC_CACHELINE_SIZE;
-        }
-        static constexpr uint32_t ValueParentMaskOffset() noexcept
-        {
-            return STRUCTURAL_HOT_FIXED_CELLS;
-        }
-
-        static constexpr uint32_t VolatileParentMaskOffset(uint32_t k) noexcept
-        {
-            return STRUCTURAL_HOT_FIXED_CELLS + ParentMaskWordCount(k);
-        }
-
-        static constexpr uint32_t StructralHotRowCellCount(uint32_t k) noexcept
-        {
-            const uint32_t raw = STRUCTURAL_HOT_FIXED_CELLS + EDGE_COUNT * ParentMaskWordCount(k);
-            return (raw + CACHE_LINE_CELLS - 1u) & ~(CACHE_LINE_CELLS - 1u); 
-        }
 
         static constexpr uint8_t HANDLE_TABLE_WIDTH = sizeof(StructuralHotRow) / sizeof(uint64_t);
 

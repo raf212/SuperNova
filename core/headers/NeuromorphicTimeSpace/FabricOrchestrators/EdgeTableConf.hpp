@@ -35,13 +35,35 @@ namespace BidirectionalInMemGraph
         static constexpr uint32_t EDGE_SEQUENCE_MASK = MaskLowBitsForU32(EDGE_SEQUENCE_BITS);
         static constexpr uint64_t EDGE_STATUS_MASK = MaskLowBitsForU64(EDGE_STATUS_BITS);
 
+        struct ParentIDGeneration
+        {
+            uint32_t Generation = RELATION_NULL;
+            uint32_t Slot = RELATION_NULL;
+        };
+        static_assert(std::atomic<ParentIDGeneration>::is_always_lock_free == true);
+
+        struct SiblingLinks
+        {
+            uint32_t Previous = RELATION_NULL;
+            uint32_t Next = RELATION_NULL;
+        };
+        static_assert(std::atomic<SiblingLinks>::is_always_lock_free == true);
+
         struct alignas(uint64_t) ParentRelation final
         {
-            uint32_t ParentGeneration = RELATION_NULL;
-            uint32_t ParentSlot = RELATION_NULL;
-            uint32_t PreviousSibbling = RELATION_NULL;
-            uint32_t NextSibbling = RELATION_NULL;
+            ParentIDGeneration Parent{};
+            SiblingLinks Siblings{};
         };
+
+        static constexpr uint32_t ParentMaskWordCount(uint32_t k) noexcept
+        {
+            return (k + ADS::APC_CACHELINE_SIZE - 1u) / ADS::APC_CACHELINE_SIZE;
+        }
+        
+        static constexpr uint64_t ParentRelationOffset(uint32_t k) noexcept
+        {
+            return (k + (LEN_OF_BYTE_IN_BITS * sizeof(uint64_t)) - 1) / (LEN_OF_BYTE_IN_BITS * sizeof(uint64_t));
+        }
 
         struct EdgeData final
         {
@@ -111,21 +133,21 @@ namespace BidirectionalInMemGraph
         static constexpr bool IsEmpty(const ParentRelation& relation) noexcept
         {
             return
-                relation.ParentGeneration == RELATION_NULL &&
-                relation.ParentSlot == RELATION_NULL &&
-                relation.PreviousSibbling == RELATION_NULL &&
-                relation.NextSibbling == RELATION_NULL;
+                relation.Parent.Generation == RELATION_NULL &&
+                relation.Parent.Slot == RELATION_NULL &&
+                relation.Siblings.Previous == RELATION_NULL &&
+                relation.Siblings.Next == RELATION_NULL;
         }
 
         static constexpr bool IsPartiallyEmpty(const ParentRelation& relation) noexcept
         {
             const bool parent_empty =
-                relation.ParentGeneration == RELATION_NULL &&
-                relation.ParentSlot == RELATION_NULL;
+                relation.Parent.Generation == RELATION_NULL &&
+                relation.Parent.Slot == RELATION_NULL;
 
             const bool sibling_empty =
-                relation.PreviousSibbling == RELATION_NULL &&
-                relation.NextSibbling == RELATION_NULL;
+                relation.Siblings.Previous == RELATION_NULL &&
+                relation.Siblings.Next == RELATION_NULL;
 
             return parent_empty != sibling_empty;
         }
@@ -133,8 +155,8 @@ namespace BidirectionalInMemGraph
         static constexpr bool IsParentEmpty(const ParentRelation& relation) noexcept
         {
             return
-                relation.ParentGeneration == RELATION_NULL &&
-                relation.ParentSlot == RELATION_NULL;
+                relation.Parent.Generation == RELATION_NULL &&
+                relation.Parent.Slot == RELATION_NULL;
         }
 
         static constexpr bool IsSiblingEmpty(
@@ -142,8 +164,8 @@ namespace BidirectionalInMemGraph
         ) noexcept
         {
             return
-                relation.PreviousSibbling == RELATION_NULL &&
-                relation.NextSibbling == RELATION_NULL;
+                relation.Siblings.Previous == RELATION_NULL &&
+                relation.Siblings.Next == RELATION_NULL;
         }
 
         static constexpr void Clear(ParentRelation& relation) noexcept

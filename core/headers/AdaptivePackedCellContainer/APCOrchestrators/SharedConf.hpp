@@ -70,11 +70,6 @@ namespace BidirectionalInMemGraph
         RETIRED = 3,
         HAULTED = 4
     };
-
-    static constexpr bool IsLiveSateOfAPC(std::optional<StateOfAPC> state) noexcept
-    {
-        return state.has_value() && state.value() == StateOfAPC::LIVE;
-    }
     
     static  constexpr uint64_t MaskLowBitsForU64(unsigned n) noexcept
     {
