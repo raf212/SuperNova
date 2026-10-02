@@ -129,6 +129,11 @@ namespace BidirectionalInMemGraph
     class APCHandleAndRetirement : public MatrixViewConstructor
     {
     protected:
+
+        using HAS = HandleOfAPCStatic;
+
+        HAS::StructuralHotRow* GetStructuralHotRow_(uint32_t slot) noexcept;
+
         uint64_t* GetAPCGenerationPtr_(uint32_t slot) noexcept;
 
         bool InitializeAPCGenerationTable_() noexcept;

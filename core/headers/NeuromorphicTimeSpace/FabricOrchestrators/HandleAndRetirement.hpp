@@ -1,13 +1,44 @@
 #pragma once 
 #include "EdgeTableConf.hpp"
+#include <bitset>
 
 namespace BidirectionalInMemGraph
 {
 
     struct HandleOfAPCStatic
     {
+        struct alignas(uint64_t) StructuralHotRow final
+        {
+            uint64_t GenerationAndLifeCycle = FABRIC_CELL_SENTINAL;
+            uint64_t ValueParentControl = FABRIC_CELL_SENTINAL;
+            uint64_t ValueChildControl = FABRIC_CELL_SENTINAL;
+            uint64_t VolatileParentControl = FABRIC_CELL_SENTINAL;
+            uint64_t VolatileChildControl = FABRIC_CELL_SENTINAL;
+        };
 
-        static constexpr uint8_t HANDLE_TABLE_WIDTH = 1u;
+        static constexpr uint32_t STRUCTURAL_HOT_FIXED_CELLS = sizeof(StructuralHotRow) / sizeof(uint64_t);
+        static constexpr uint8_t CACHE_LINE_CELLS = ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
+        static constexpr uint32_t ParentMaskWordCount(uint32_t k) noexcept
+        {
+            return (k + ADS::APC_CACHELINE_SIZE - 1u) / ADS::APC_CACHELINE_SIZE;
+        }
+        static constexpr uint32_t ValueParentMaskOffset() noexcept
+        {
+            return STRUCTURAL_HOT_FIXED_CELLS;
+        }
+
+        static constexpr uint32_t VolatileParentMaskOffset(uint32_t k) noexcept
+        {
+            return STRUCTURAL_HOT_FIXED_CELLS + ParentMaskWordCount(k);
+        }
+
+        static constexpr uint32_t StructralHotRowCellCount(uint32_t k) noexcept
+        {
+            const uint32_t raw = STRUCTURAL_HOT_FIXED_CELLS + EDGE_COUNT * ParentMaskWordCount(k);
+            return (raw + CACHE_LINE_CELLS - 1u) & ~(CACHE_LINE_CELLS - 1u); 
+        }
+
+        static constexpr uint8_t HANDLE_TABLE_WIDTH = sizeof(StructuralHotRow) / sizeof(uint64_t);
 
         static constexpr uint8_t ACTIVE_OPERATION_LEN = 32u;
         static constexpr uint8_t GENERATION_LEN = 31u;
@@ -70,7 +101,7 @@ namespace BidirectionalInMemGraph
 
         static constexpr size_t CellOffset(uint32_t slot) noexcept
         {
-            return static_cast<size_t>(slot);
+            return static_cast<size_t>(slot) * HANDLE_TABLE_WIDTH;
         }
     };
     static_assert(

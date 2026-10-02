@@ -2,6 +2,7 @@
 
 namespace BidirectionalInMemGraph
 {
+    using HAS = HandleOfAPCStatic;
 
     bool FabricConstructor::ReadAFabricU64Directly(
         size_t slab_index,
@@ -125,37 +126,28 @@ namespace BidirectionalInMemGraph
 
     uint64_t* APCHandleAndRetirement::GetAPCGenerationPtr_(uint32_t slot) noexcept
     {
-        if (
-            !SlabBasePtr_ ||
-            slot >= FabCache_->CountOfAPC_ ||
-            FabCache_->HandleTableBeginIndex_ >= FabCache_->SlabCellCount_
-        )
-        {
-            return nullptr;
-        }
-        
-        const size_t idx = FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
-
-        return idx < FabCache_->SlabCellCount_ ? &SlabBasePtr_[idx] : nullptr;
+        HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
+        return row ? &row->GenerationAndLifeCycle : nullptr;
     }
 
     bool APCHandleAndRetirement::InitializeAPCGenerationTable_() noexcept
     {
         for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; slot++)
         {
-            uint64_t* cell = GetAPCGenerationPtr_(slot);
-            if (!cell)
+            HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
+            if (!row)
             {
                 return false;
             }
+
+            std::construct_at(row, HAS::StructuralHotRow{});
 
             HandleOfAPCStatic::ControlValues values{};
             values.Generation = HandleOfAPCStatic::FIRST_GENERATION;
             values.ActiveAccess = UNSIGNED_ZERO;
             values.Closed = true;
 
-
-            std::atomic_ref<uint64_t>(*cell).store(
+            std::atomic_ref<uint64_t>(row->GenerationAndLifeCycle).store(
                 HandleOfAPCStatic::MakeControlCell(values),
                 std::memory_order_relaxed
             );
@@ -296,6 +288,25 @@ namespace BidirectionalInMemGraph
             std::memory_order_acq_rel,
             std::memory_order_acquire
         );
+    }
+
+    HAS::StructuralHotRow* APCHandleAndRetirement::GetStructuralHotRow_(uint32_t slot) noexcept
+    {
+        if (!SlabBasePtr_ || !FabCache_ || slot >= FabCache_->CountOfAPC_)
+        {
+            return nullptr;
+        }
+
+        const uint64_t begin = static_cast<uint64_t>(FabCache_->HandleTableBeginIndex_) + HAS::CellOffset(slot);
+        if (
+            begin >= FabCache_->SlabCellCount_ ||
+            HAS::HANDLE_TABLE_WIDTH > FabCache_->SlabCellCount_ - begin
+        )
+        {
+            return nullptr;
+        }
+
+        return std::launder(reinterpret_cast<HAS::StructuralHotRow*>(SlabBasePtr_ + begin));
     }
 
 

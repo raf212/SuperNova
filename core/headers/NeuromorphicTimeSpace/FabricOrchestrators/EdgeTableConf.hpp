@@ -37,8 +37,10 @@ namespace BidirectionalInMemGraph
 
         struct alignas(uint64_t) ParentRelation final
         {
-            uint64_t ParentHandle = FABRIC_CELL_SENTINAL;
-            uint64_t SiblingLocators = FABRIC_CELL_SENTINAL;
+            uint32_t ParentGeneration = RELATION_NULL;
+            uint32_t ParentSlot = RELATION_NULL;
+            uint32_t PreviousSibbling = RELATION_NULL;
+            uint32_t NextSibbling = RELATION_NULL;
         };
 
         struct EdgeData final
@@ -63,7 +65,7 @@ namespace BidirectionalInMemGraph
         ) noexcept
         {
             return value > 0u &&
-                value <= ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS;
+                value <= ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS ;
         }
 
         static constexpr bool IsValidRelationOrdinal(
@@ -106,94 +108,42 @@ namespace BidirectionalInMemGraph
             return static_cast<uint8_t>(locator >> RELATION_SLOT_BITS);
         }
 
-        static constexpr uint64_t MakeParentHandle(
-            uint32_t parent_slot,
-            uint32_t parent_generation
-        ) noexcept
+        static constexpr bool IsEmpty(const ParentRelation& relation) noexcept
         {
-            return TwinU32ToU64::PackDoubleUnsigned32In64(
-                parent_slot,
-                parent_generation
-            );
+            return
+                relation.ParentGeneration == RELATION_NULL &&
+                relation.ParentSlot == RELATION_NULL &&
+                relation.PreviousSibbling == RELATION_NULL &&
+                relation.NextSibbling == RELATION_NULL;
         }
 
-        static constexpr uint32_t ParentSlot(
-            const ParentRelation& relation
-        ) noexcept
+        static constexpr bool IsPartiallyEmpty(const ParentRelation& relation) noexcept
         {
-            return TwinU32ToU64::ExtractLow32Of64(
-                relation.ParentHandle
-            );
+            const bool parent_empty =
+                relation.ParentGeneration == RELATION_NULL &&
+                relation.ParentSlot == RELATION_NULL;
+
+            const bool sibling_empty =
+                relation.PreviousSibbling == RELATION_NULL &&
+                relation.NextSibbling == RELATION_NULL;
+
+            return parent_empty != sibling_empty;
         }
 
-        static constexpr uint32_t ParentGeneration(
-            const ParentRelation& relation
-        ) noexcept
+        static constexpr bool IsParentEmpty(const ParentRelation& relation) noexcept
         {
-            return TwinU32ToU64::ExtractHigh32Of64(
-                relation.ParentHandle
-            );
+            return
+                relation.ParentGeneration == RELATION_NULL &&
+                relation.ParentSlot == RELATION_NULL;
         }
 
-        static constexpr uint32_t PreviousLocator(
-            const ParentRelation& relation
-        ) noexcept
-        {
-            return TwinU32ToU64::ExtractLow32Of64(
-                relation.SiblingLocators
-            );
-        }
-
-        static constexpr uint32_t NextLocator(
-            const ParentRelation& relation
-        ) noexcept
-        {
-            return TwinU32ToU64::ExtractHigh32Of64(
-                relation.SiblingLocators
-            );
-        }
-
-        static constexpr void SetSiblingLocators(
-            ParentRelation& relation,
-            uint32_t previous,
-            uint32_t next
-        ) noexcept
-        {
-            relation.SiblingLocators =
-                TwinU32ToU64::PackDoubleUnsigned32In64(
-                    previous,
-                    next
-                );
-        }
-
-        static constexpr ParentRelation MakeParentRelation(
-            uint32_t parent_slot,
-            uint32_t parent_generation,
-            uint32_t previous,
-            uint32_t next
-        ) noexcept
-        {
-            return ParentRelation{
-                MakeParentHandle(parent_slot, parent_generation),
-                TwinU32ToU64::PackDoubleUnsigned32In64(previous, next)
-            };
-        }
-
-        static constexpr bool IsEmpty(
-            const ParentRelation& relation
-        ) noexcept
-        {
-            return relation.ParentHandle == FABRIC_CELL_SENTINAL &&
-                relation.SiblingLocators == FABRIC_CELL_SENTINAL;
-        }
-
-        static constexpr bool IsPartiallyEmpty(
+        static constexpr bool IsSiblingEmpty(
             const ParentRelation& relation
         ) noexcept
         {
             return
-                (relation.ParentHandle == FABRIC_CELL_SENTINAL) !=
-                (relation.SiblingLocators == FABRIC_CELL_SENTINAL);
+                relation.PreviousSibbling == RELATION_NULL &&
+                relation.NextSibbling == RELATION_NULL;
         }
 
         static constexpr void Clear(ParentRelation& relation) noexcept
@@ -289,15 +239,6 @@ namespace BidirectionalInMemGraph
                 static_cast<uint16_t>(sizeof(ParentRelation) / sizeof(uint64_t));
         }
 
-        static constexpr bool IsParentEmpty(const ParentRelation& relation) noexcept
-        {
-            return relation.ParentHandle == FABRIC_CELL_SENTINAL;
-        }
-
-        static constexpr bool AreSiblingsEmpty(const ParentRelation& relation) noexcept
-        {
-            return relation.SiblingLocators == FABRIC_CELL_SENTINAL;
-        }
     };
 
 

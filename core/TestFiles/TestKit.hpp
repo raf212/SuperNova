@@ -393,7 +393,7 @@ public:
             node_count == 0u ||
             node_count > UINT32_MAX ||
             parent_capacity == 0u ||
-            parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS ||
+            parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS  ||
             payload_words > UINT32_MAX ||
             node_count > UINT32_MAX / static_cast<std::size_t>(parent_capacity)
         )
@@ -1362,7 +1362,7 @@ public:
             node_count == 0u || node_count > UINT32_MAX ||
             payload_words == 0u || payload_words > UINT32_MAX ||
             parent_capacity == 0u ||
-            parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS)
+            parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS )
         {
             return false;
         }
@@ -5057,7 +5057,7 @@ inline bool FabricConfigurationValidation() noexcept
             MINIMUM_APC_CELL_COUNT,
             valid,
             static_cast<std::uint8_t>(
-                ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS + 1u
+                ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS  + 1u
             )
         );
 }
@@ -6893,7 +6893,7 @@ inline bool ValidateRunArguments(
     if (
         lower_parent_capacity == 0u ||
         higher_parent_capacity < lower_parent_capacity ||
-        higher_parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS
+        higher_parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS 
     )
         return fail("parent bounds must satisfy 0 < lower <= higher <= 64");
     if (higher_node_count > UINT32_MAX)

@@ -30,7 +30,8 @@ namespace BidirectionalInMemGraph
         static constexpr size_t APC_CACHELINE_SIZE = 64u;
         static constexpr uint8_t DEFAULT_DIRECTED_PARENT_PER_AXIS = 8u;
         //Later transfer it to GHGF side.
-        static constexpr uint8_t GHGF_MAX_DIRECTED_PARENT_PER_AXIS = 64u;
+        static constexpr uint32_t MAX_DIRECTED_PARENT_PER_AXIS  = 1024u;        
+        static constexpr uint8_t GHGF_MAX_DIRECTED_PARENT_PER_AXIS  = 64u;        
 
         struct RangeOfAPC
         {
