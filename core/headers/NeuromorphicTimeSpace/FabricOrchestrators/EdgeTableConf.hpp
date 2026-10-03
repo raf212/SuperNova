@@ -18,52 +18,49 @@ namespace BidirectionalInMemGraph
             REMOVE_PARENT = 1,
             REPLACE_PARENT = 2
         };
+
+        enum class EdgeDomain : uint8_t
+        {
+            PARENT_RELATIONS = 0u,
+            CHILD_LIST = 1u
+        };
         
         using DirtyRelationMask = uint64_t;
 
-        static constexpr uint8_t RELATION_SLOT_BITS = 24u;
-        static constexpr uint8_t RELATION_ORDINAL_BITS = 8u;
-
-        static constexpr uint8_t EDGE_TAIL_BITS = 32u;
-        static constexpr uint8_t EDGE_SEQUENCE_BITS = 30u;
-        static constexpr uint8_t EDGE_STATUS_BITS = 2u;
-
-        static_assert(EDGE_TAIL_BITS + EDGE_SEQUENCE_BITS + EDGE_STATUS_BITS == 64u);
-
-        static constexpr uint32_t RELATION_NULL = UINT32_MAX;
-        static constexpr uint32_t RELATION_SLOT_MASK = MaskLowBitsForU32(RELATION_SLOT_BITS);
-        static constexpr uint32_t EDGE_SEQUENCE_MASK = MaskLowBitsForU32(EDGE_SEQUENCE_BITS);
-        static constexpr uint64_t EDGE_STATUS_MASK = MaskLowBitsForU64(EDGE_STATUS_BITS);
+        struct alignas(uint64_t) ParentMaskBlock
+        {
+            uint64_t Block = UNSIGNED_ZERO;
+        };
 
         struct ParentIDGeneration
         {
             uint32_t Generation = RELATION_NULL;
             uint32_t Slot = RELATION_NULL;
+            friend constexpr bool operator==(
+                const ParentIDGeneration&,
+                const ParentIDGeneration&
+            ) noexcept = default;
         };
-        static_assert(std::atomic<ParentIDGeneration>::is_always_lock_free == true);
 
         struct SiblingLinks
         {
             uint32_t Previous = RELATION_NULL;
             uint32_t Next = RELATION_NULL;
+            friend constexpr bool operator==(
+                const SiblingLinks&,
+                const SiblingLinks&
+            ) noexcept = default;
         };
-        static_assert(std::atomic<SiblingLinks>::is_always_lock_free == true);
 
         struct alignas(uint64_t) ParentRelation final
         {
             ParentIDGeneration Parent{};
             SiblingLinks Siblings{};
+            friend constexpr bool operator==(
+                const ParentRelation&,
+                const ParentRelation&
+            ) noexcept = default;
         };
-
-        static constexpr uint32_t ParentMaskWordCount(uint32_t k) noexcept
-        {
-            return (k + ADS::APC_CACHELINE_SIZE - 1u) / ADS::APC_CACHELINE_SIZE;
-        }
-        
-        static constexpr uint64_t ParentRelationOffset(uint32_t k) noexcept
-        {
-            return (k + (LEN_OF_BYTE_IN_BITS * sizeof(uint64_t)) - 1) / (LEN_OF_BYTE_IN_BITS * sizeof(uint64_t));
-        }
 
         struct EdgeData final
         {
@@ -73,61 +70,43 @@ namespace BidirectionalInMemGraph
             bool IsValid = false;
         };
 
-        static constexpr uint16_t EdgeTableRecordWidth(
-            uint8_t max_direct_parents
-        ) noexcept
+        static constexpr uint8_t EDGE_TAIL_BITS = 32u;
+        static constexpr uint8_t EDGE_SEQUENCE_BITS = 30u;
+        static constexpr uint8_t EDGE_STATUS_BITS = 2u;
+
+
+        static constexpr uint32_t RELATION_NULL = UINT32_MAX;
+        static constexpr uint32_t EDGE_SEQUENCE_MASK = MaskLowBitsForU32(EDGE_SEQUENCE_BITS);
+        static constexpr uint64_t EDGE_STATUS_MASK = MaskLowBitsForU64(EDGE_STATUS_BITS);
+
+        static constexpr uint8_t PARENT_MASK_BITS_PER_BLOCK = sizeof(uint64_t) * LEN_OF_BYTE_IN_BITS;
+
+        static constexpr uint32_t ParentMaskWordCount(uint32_t k) noexcept
         {
-            constexpr uint16_t cells_per_cacheline = ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
-            const uint16_t raw = RawEdgeTableRecordWidth(max_direct_parents);
+            return (k + PARENT_MASK_BITS_PER_BLOCK - 1u) / PARENT_MASK_BITS_PER_BLOCK;
+        }
+        
+        static constexpr uint32_t RawEdgeTableRecordWidth(uint32_t max_direct_parents) noexcept
+        {
+            return ParentMaskWordCount(max_direct_parents) + 
+                max_direct_parents * (sizeof(ParentRelation) / sizeof(uint64_t));
+        }
+
+        static constexpr uint32_t EdgeTableRecordWidth(uint32_t max_direct_parents) noexcept
+        {
+            constexpr uint32_t cells_per_cacheline = ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
+            const uint32_t raw = RawEdgeTableRecordWidth(max_direct_parents);
             return (raw + cells_per_cacheline - 1u) & ~(cells_per_cacheline - 1u);
         }
 
-        static constexpr bool IsValidConfigurableParentCapacity(
-            uint8_t value
-        ) noexcept
+        static constexpr bool IsValidConfigurableParentCapacity(uint32_t max_direct_parents, uint32_t count_of_apc) noexcept
         {
-            return value > 0u &&
-                value <= ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS ;
+            return max_direct_parents > UNSIGNED_ZERO && max_direct_parents <= count_of_apc;
         }
 
-        static constexpr bool IsValidRelationOrdinal(
-            uint8_t ordinal,
-            uint8_t configured_capacity
-        ) noexcept
+        static constexpr bool IsValidRelationOrdinal(uint32_t ordinal, uint32_t configured_capacity) noexcept
         {
             return ordinal < configured_capacity;
-        }
-
-        static constexpr bool IsValidRelationLocator(
-            uint32_t locator,
-            uint32_t slot_count,
-            uint8_t configured_capacity
-        ) noexcept
-        {
-            return locator != RELATION_NULL &&
-                RelationSlot(locator) < slot_count &&
-                RelationOrdinal(locator) < configured_capacity;
-        }
-
-        static constexpr uint32_t PackRelationLocator(
-            uint32_t apc_slot,
-            uint8_t relation_ordinal
-        ) noexcept
-        {
-            return
-                (static_cast<uint32_t>(relation_ordinal)
-                    << RELATION_SLOT_BITS) |
-                apc_slot;
-        }
-
-        static constexpr uint32_t RelationSlot(uint32_t locator) noexcept
-        {
-            return locator & RELATION_SLOT_MASK;
-        }
-
-        static constexpr uint8_t RelationOrdinal(uint32_t locator) noexcept
-        {
-            return static_cast<uint8_t>(locator >> RELATION_SLOT_BITS);
         }
 
         static constexpr bool IsEmpty(const ParentRelation& relation) noexcept
@@ -235,12 +214,6 @@ namespace BidirectionalInMemGraph
             return uint64_t{1u} << ordinal;
         }
 
-        enum class EdgeDomain : uint8_t
-        {
-            PARENT_RELATIONS = 0u,
-            CHILD_LIST = 1u
-        };
-
         static constexpr uint16_t CHILD_LIST_CONTROL_OFFSET = 0u;
         static constexpr uint16_t PARENT_RELATION_CONTROL_OFFSET = 1u;
         static constexpr uint16_t PARENT_RELATION_ARRAY_OFFSET = 2u;
@@ -250,15 +223,6 @@ namespace BidirectionalInMemGraph
             return domain == EdgeDomain::PARENT_RELATIONS
                 ? PARENT_RELATION_CONTROL_OFFSET
                 : CHILD_LIST_CONTROL_OFFSET;
-        }
-
-        static constexpr uint16_t RawEdgeTableRecordWidth(
-            uint8_t max_direct_parents
-        ) noexcept
-        {
-            return PARENT_RELATION_ARRAY_OFFSET +
-                static_cast<uint16_t>(max_direct_parents) *
-                static_cast<uint16_t>(sizeof(ParentRelation) / sizeof(uint64_t));
         }
 
     };
