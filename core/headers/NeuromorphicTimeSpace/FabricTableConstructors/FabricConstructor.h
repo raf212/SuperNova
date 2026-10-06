@@ -134,9 +134,13 @@ namespace BidirectionalInMemGraph
 
         HAS::StructuralHotRow* GetStructuralHotRow_(uint32_t slot) noexcept;
 
+        HAS::ParentRowControl* ParentRowControl_(FabricSegments edge_table, uint32_t slot) noexcept;
+
+        HAS::ChildListControl* ChildRowControl_(FabricSegments edge_table, uint32_t slot) noexcept;
+
         uint64_t* GetAPCGenerationPtr_(uint32_t slot) noexcept;
 
-        bool InitializeAPCGenerationTable_() noexcept;
+        bool InitializeStructHotRowApcHandleTable_() noexcept;
 
         bool OpenAPCGeneration_(uint32_t slot, uint32_t generation) noexcept;
 

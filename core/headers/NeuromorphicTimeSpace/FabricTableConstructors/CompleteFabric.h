@@ -49,8 +49,6 @@ namespace BidirectionalInMemGraph
 
         DescriptionOfAPC::SeqLockAndStateStruct ReadAPCStateAtomically_(uint64_t apc_description_index) noexcept;
 
-        void InitAllAPCLifeCycleState() noexcept;
-
     };
 
     class EdgeTableConstructor : public APCLifeCycle
@@ -150,6 +148,8 @@ namespace BidirectionalInMemGraph
             EdgeBuilder::EdgeStatus desired_status
         ) noexcept;
     };
+
+    
     class CompiledDAGTableConstructor : public EdgeTableConstructor
     {
     protected:

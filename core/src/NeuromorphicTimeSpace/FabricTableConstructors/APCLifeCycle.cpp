@@ -109,31 +109,5 @@ namespace BidirectionalInMemGraph
         return state_cell_idx;
     }
 
-    void APCLifeCycle::InitAllAPCLifeCycleState() noexcept
-    {
-        for (size_t i = 0; i < FabCache_->CountOfAPC_; i++)
-        {
-            std::optional<uint64_t> maybe_id_state_idx = GetDescriptionLockIdxInFabric_(i);
-            if (!maybe_id_state_idx.has_value())
-            {
-                return;
-            }
-
-            DescriptionOfAPC::SeqLockAndStateStruct values{};
-            values.StateOfTheAPC = StateOfAPC::FREE;
-            values.SeqLock = 2u;
-
-            const uint64_t raw_lifecycle = DSA::ComposeSeqLockAndState(values);
-            
-            if (!ADS::IsValidFabricUnit(raw_lifecycle))
-            {
-                return;
-            }
-            
-            DirectlyStoreFabricUnit64(maybe_id_state_idx.value(), raw_lifecycle);
-        }
-        
-    }
-
 
 }

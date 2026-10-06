@@ -109,19 +109,19 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    // bool EdgeTableConstructor::ReadEdgeControl_(
-    //     FabricSegments edge_table,
-    //     uint32_t row_slot,
-    //     EdgeBuilder::EdgeDomain domain,
-    //     EdgeBuilder::EdgeData &edge) noexcept
-    // {
-    //     edge = {};
-    //     if (domain == EB::EdgeDomain::PARENT_RELATIONS)
-    //     {
-
-    //     }
+    bool EdgeTableConstructor::ReadEdgeControl_(
+        FabricSegments edge_table,
+        uint32_t slot,
+        EdgeBuilder::EdgeDomain domain,
+        EdgeBuilder::EdgeData &edge) noexcept
+    {
+        edge = {};
+        if (domain == EB::EdgeDomain::PARENT_RELATIONS)
+        {
+            HAS::ParentRowControl* const p_row_ptr = ParentRowControl_(edge_table, slot);
+        }
         
-    // }
+    }
 
     bool EdgeTableConstructor::ReadChildDomainControl_(
         FabricSegments edge_table,

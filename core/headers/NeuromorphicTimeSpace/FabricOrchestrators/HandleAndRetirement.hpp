@@ -33,7 +33,7 @@ namespace BidirectionalInMemGraph
         struct ChildListControl
         {
             uint32_t SeqLockChild = 0u;
-            EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::LIVE;
+            EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::FREE;
             uint8_t Reserved[3]{};
 
             friend constexpr bool operator==(
@@ -45,7 +45,7 @@ namespace BidirectionalInMemGraph
 
         struct alignas(64) StructuralHotRow final
         {
-            uint64_t GenerationContron = FABRIC_CELL_SENTINAL;
+            uint64_t GenerationControl = FABRIC_CELL_SENTINAL;
             LifeCycleControl LifeCycle{};
             ParentRowControl ValueParentControl{};
             ChildListControl ValueChildControl{};

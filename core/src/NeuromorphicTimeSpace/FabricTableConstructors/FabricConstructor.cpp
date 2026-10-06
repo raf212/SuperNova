@@ -32,10 +32,6 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-
-
-
-
     void FabricConstructor::DirectlyStoreFabricUnit64(size_t slab_index, uint64_t fabric_unit) noexcept
     {
         if (!IsDesiredIndexValidInSLab(slab_index))
@@ -124,36 +120,71 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
+    HAS::ParentRowControl* APCHandleAndRetirement::ParentRowControl_(FabricSegments edge_table, uint32_t slot) noexcept
+    {
+        HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
+        if (
+            !row ||
+            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
+        )
+        {
+            return nullptr;
+        }
+        
+        return edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H ?
+            &row->ValueParentControl : &row->VolatileParentControl;
+    }
+
     uint64_t* APCHandleAndRetirement::GetAPCGenerationPtr_(uint32_t slot) noexcept
     {
         HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
-        return row ? &row->GenerationAndLifeCycle : nullptr;
+        return row ? &row->GenerationControl : nullptr;
     }
 
-    bool APCHandleAndRetirement::InitializeAPCGenerationTable_() noexcept
+    bool APCHandleAndRetirement::InitializeStructHotRowApcHandleTable_() noexcept
     {
-        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; slot++)
+        if (
+            !SlabBasePtr_ ||
+            !FabCache_
+        )
         {
-            HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
-            if (!row)
+            return false;
+        }
+
+        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
+        {
+            const uint64_t begin = FabCache_->HandleTableBeginIndex_ + HAS::CellOffset(i);
+            if (
+                begin >= FabCache_->SlabCellCount_ ||
+                HAS::HANDLE_TABLE_WIDTH > FabCache_->SlabCellCount_ - begin
+            )
             {
                 return false;
             }
 
-            std::construct_at(row, HAS::StructuralHotRow{});
+            HAS::StructuralHotRow initial{};
+            HAS::ControlValues generation{};
+            generation.Generation = HAS::FIRST_GENERATION;
+            generation.ActiveAccess = UNSIGNED_ZERO;
+            generation.Closed = true;
 
-            HandleOfAPCStatic::ControlValues values{};
-            values.Generation = HandleOfAPCStatic::FIRST_GENERATION;
-            values.ActiveAccess = UNSIGNED_ZERO;
-            values.Closed = true;
+            initial.GenerationControl = HAS::MakeControlCell(generation);
+            initial.LifeCycle = HAS::LifeCycleControl{};
+            initial.ValueParentControl = HAS::ParentRowControl{};
+            initial.ValueChildControl = HAS::ChildListControl{};
+            initial.VolatileParentControl = HAS::ParentRowControl{};
+            initial.VolatileChildControl = HAS::ChildListControl{};
+            initial.ValueChildTail = EdgeBuilder::RELATION_NULL;
+            initial.VolatileChildTail = EdgeBuilder::RELATION_NULL;
 
-            std::atomic_ref<uint64_t>(row->GenerationAndLifeCycle).store(
-                HandleOfAPCStatic::MakeControlCell(values),
-                std::memory_order_relaxed
+            std::construct_at(
+                reinterpret_cast<HAS::StructuralHotRow*>(SlabBasePtr_ + begin),
+                initial
             );
         }
         return true;
     }
+
 
     bool APCHandleAndRetirement::OpenAPCGeneration_(uint32_t slot, uint32_t generation) noexcept
     {
