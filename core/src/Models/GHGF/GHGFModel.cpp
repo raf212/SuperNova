@@ -106,7 +106,7 @@ namespace BidirectionalInMemGraph
         
         InvalidateGHGFModel_();
 
-        const std::span<EdgeBuilder::ParentRelation> retations = ParentRelations_(connection.Edge, connection.Child);
+        const std::span<EdgeBuilder::ParentRelation> retations = EdgeRelationsPerSlot_(connection.Edge, connection.Child);
         for (uint8_t i = 0; i < FabCache_->MaxDirectParentsPerAxis_; i++)
         {
             if (
@@ -347,7 +347,7 @@ namespace BidirectionalInMemGraph
             return Operation::NONE;
         }
 
-        const std::span<EdgeBuilder::ParentRelation> relations = ParentRelations_(edge, child);
+        const std::span<EdgeBuilder::ParentRelation> relations = EdgeRelationsPerSlot_(edge, child);
         CompiledDAGRecord* const compiled = CompiledDAGRow_(child);
         float* const weights = GHGFWeight_(child);
 

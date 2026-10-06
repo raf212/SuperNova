@@ -103,8 +103,8 @@ namespace BidirectionalInMemGraph
 
         struct DAGRelationDelta
         {
-            uint32_t ChildSlot = ADS::APC_INDEX_BOUND_SENTINAL;
-            uint8_t Ordinal = INVALID_RELATION_ORDINAL;
+            uint32_t ChildSlot = EB::RELATION_NULL;
+            uint32_t Ordinal = EB::RELATION_NULL;
             EdgeBuilder::ParentRelation Before{};
             EdgeBuilder::ParentRelation Work{};
             bool ParentHandleDirty = false;

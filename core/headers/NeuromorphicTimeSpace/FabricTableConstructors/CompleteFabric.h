@@ -65,7 +65,7 @@ namespace BidirectionalInMemGraph
         {
             return EdgeTableRow_(edge_table, row_slot).Masks;
         }
-        std::span<EB::ParentRelation> ParentRelations_(FabricSegments edge_table, uint32_t row_slot) noexcept
+        std::span<EB::ParentRelation> EdgeRelationsPerSlot_(FabricSegments edge_table, uint32_t row_slot) noexcept
         {
             return EdgeTableRow_(edge_table, row_slot).Relations;
         }
@@ -95,7 +95,7 @@ namespace BidirectionalInMemGraph
         SeqLockedOperation ReadParentHandle_(
             FabricSegments edge_table,
             uint32_t slot,
-            uint8_t relation_ordinal,
+            uint32_t relation_ordinal,
             EB::ParentIDGeneration& parent_handle,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
@@ -119,16 +119,16 @@ namespace BidirectionalInMemGraph
 
         void StoreReservedParentHandle_(
             FabricSegments edge_table,
-            uint32_t child_slot,
+            uint32_t slot,
             uint8_t relation_ordinal,
-            uint64_t parent_handle
+            const EB::ParentIDGeneration& parent
         ) noexcept;
 
         void StoreReservedSiblingLocators_(
             FabricSegments edge_table,
-            uint32_t child_slot,
+            uint32_t slot,
             uint8_t relation_ordinal,
-            uint64_t sibling_locators
+            const EB::SiblingLinks& sibblings
         ) noexcept;
 
         void PublishReservedEdgeDomain_(

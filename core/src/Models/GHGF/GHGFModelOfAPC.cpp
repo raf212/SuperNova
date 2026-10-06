@@ -133,7 +133,7 @@ namespace BidirectionalInMemGraph
 
                 has_child = has_child || header.TailLocator != EdgeBuilder::RELATION_NULL;
                 const uint64_t mask = GHGFParentMask_(i, edge_table);
-                const std::span<EdgeBuilder::ParentRelation> relations = ParentRelations_(edge_table, i);
+                const std::span<EdgeBuilder::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, i);
                 auto ValidMask___ = [&]() noexcept -> bool {return (mask & ~allowed_mask) == UNSIGNED_ZERO;};
                 if (
                     !ValidMask___() ||
@@ -742,7 +742,7 @@ namespace BidirectionalInMemGraph
                     FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
 
                 const auto h_relations =
-                    ParentRelations_(h_axis, child);
+                    EdgeRelationsPerSlot_(h_axis, child);
 
                 for (
                     uint64_t mask = GHGFParentMask_(child, h_axis);
@@ -812,7 +812,7 @@ namespace BidirectionalInMemGraph
                     FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
 
                 const auto v_relations =
-                    ParentRelations_(v_axis, child);
+                    EdgeRelationsPerSlot_(v_axis, child);
 
                 for (
                     uint64_t mask = GHGFParentMask_(child, v_axis);

@@ -255,7 +255,7 @@ namespace BidirectionalInMemGraph
             }
 
             const std::span<EdgeBuilder::ParentRelation> tail_row =
-                ParentRelations_(edge_table, EdgeBuilder::RelationSlot(tail));
+                EdgeRelationsPerSlot_(edge_table, EdgeBuilder::RelationSlot(tail));
             const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
                 tail_row[EdgeBuilder::RelationOrdinal(tail)].SiblingLocators
             ).load(std::memory_order_relaxed);
@@ -478,7 +478,7 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            const std::span<EdgeBuilder::ParentRelation> row = ParentRelations_(
+            const std::span<EdgeBuilder::ParentRelation> row = EdgeRelationsPerSlot_(
                 edge_table,
                 EdgeBuilder::RelationSlot(current_relation_locator)
             );
@@ -597,7 +597,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            const std::span<EdgeBuilder::ParentRelation> row = ParentRelations_(
+            const std::span<EdgeBuilder::ParentRelation> row = EdgeRelationsPerSlot_(
                 edge_table,
                 EdgeBuilder::RelationSlot(current_relation_locator)
             );
@@ -870,7 +870,7 @@ namespace BidirectionalInMemGraph
         const auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept
         {
             const std::span<EdgeBuilder::ParentRelation> relations =
-                ParentRelations_(table, slot);
+                EdgeRelationsPerSlot_(table, slot);
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {
                 return false;
@@ -1122,7 +1122,7 @@ namespace BidirectionalInMemGraph
         const auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept
         {
             const std::span<EdgeBuilder::ParentRelation> relations =
-                ParentRelations_(table, slot);
+                EdgeRelationsPerSlot_(table, slot);
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {
                 return false;
@@ -1287,7 +1287,7 @@ namespace BidirectionalInMemGraph
         auto FreeRowIsEmpty___ = [&](FabricSegments table) noexcept
         {
             std::span<EdgeBuilder::ParentRelation> relations =
-                ParentRelations_(table, slot);
+                EdgeRelationsPerSlot_(table, slot);
 
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {

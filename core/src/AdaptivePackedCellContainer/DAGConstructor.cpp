@@ -352,7 +352,7 @@ namespace BidirectionalInMemGraph
         }
 
         const std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(transaction.EdgeTable, child_slot);
+            EdgeRelationsPerSlot_(transaction.EdgeTable, child_slot);
         if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
         {
             return nullptr;
@@ -552,7 +552,7 @@ namespace BidirectionalInMemGraph
             EdgeBuilder::EdgeDomain::PARENT_RELATIONS
         );
         const std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(transaction.EdgeTable, child_slot);
+            EdgeRelationsPerSlot_(transaction.EdgeTable, child_slot);
         if (
             !owner ||
             !owner->Reserved ||

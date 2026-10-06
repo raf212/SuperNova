@@ -203,7 +203,7 @@ namespace BidirectionalInMemGraph
     {
         parent_handle = {};
         HAS::ParentRowControl* const control = ParentRowControl_(edge_table, slot);
-        std::span<EB::ParentRelation> relations = ParentRelations_(edge_table, slot);
+        std::span<EB::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, slot);
 
         if (
             !control ||
@@ -304,8 +304,7 @@ namespace BidirectionalInMemGraph
         return SeqLockedOperation::RETRY;
     }
 
-    EdgeTableConstructor::SeqLockedOperation
-    EdgeTableConstructor::ReserveEdgeRow_(
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveEdgeRow_(
         FabricSegments edge_table,
         uint32_t row_slot,
         EdgeBuilder::EdgeStatus required_status,
@@ -323,13 +322,24 @@ namespace BidirectionalInMemGraph
 
     void EdgeTableConstructor::StoreReservedParentHandle_(
         FabricSegments edge_table,
-        uint32_t child_slot,
+        uint32_t slot,
         uint8_t relation_ordinal,
-        uint64_t parent_handle) noexcept
+        const EB::ParentIDGeneration& parent
+    ) noexcept
     {
-        std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(edge_table, child_slot);
-        std::atomic_ref<uint64_t>(relations[relation_ordinal].ParentHandle).store(parent_handle, std::memory_order_relaxed);
+        std::span<EB::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, slot);
+        std::atomic_ref<EB::ParentIDGeneration>(relations[relation_ordinal].Parent).store(parent, std::memory_order_relaxed);
+    }
+
+    void EdgeTableConstructor::StoreReservedSiblingLocators_(
+        FabricSegments edge_table,
+        uint32_t slot,
+        uint8_t relation_ordinal,
+        const EB::SiblingLinks& sibbling
+    ) noexcept
+    {
+        std::span<EB::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, slot);
+        std::atomic_ref<EB::SiblingLinks>(relations[relation_ordinal].Siblings).store(sibbling, std::memory_order_relaxed);
     }
 
     void EdgeTableConstructor::PublishReservedEdgeDomain_(
@@ -366,14 +376,5 @@ namespace BidirectionalInMemGraph
             desired_status);
     }
 
-    void EdgeTableConstructor::StoreReservedSiblingLocators_(
-        FabricSegments edge_table,
-        uint32_t child_slot,
-        uint8_t relation_ordinal,
-        uint64_t sibling_locators) noexcept
-    {
-        std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(edge_table, child_slot);
-        std::atomic_ref<uint64_t>(relations[relation_ordinal].SiblingLocators).store(sibling_locators, std::memory_order_relaxed);
-    }
+
 }
