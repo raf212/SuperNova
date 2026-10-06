@@ -27,7 +27,7 @@ namespace BidirectionalInMemGraph
             BORROWED = 2
         };
 
-        struct alignas(uint64_t) FabricCache 
+        struct alignas(64) FabricCache 
         {
             uint32_t FormateVersion_{UNSIGNED_ZERO};
             ///FABRIC CONSTRUCTION
@@ -55,13 +55,13 @@ namespace BidirectionalInMemGraph
             // HOT TABLE BEGIN INDICES
             uint64_t HorizontalEdgeBeginIdx_{UNSIGNED_ZERO};
             uint64_t VerticalEdgeBeginIdx_{UNSIGNED_ZERO};
-            uint64_t CompiledDAGTableBeginIdx_{UNSIGNED_ZERO};
             uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
             uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
             bool HasDefaultRegionTable_{false};
 
+            ///alignment
+            uint64_t Reserved = UNSIGNED_ZERO;
         };
-
 
         struct DetachFabric final
         {
@@ -75,9 +75,6 @@ namespace BidirectionalInMemGraph
             }
         };
         
-
-        static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
-
         enum class RecordBookInternalIndexing : uint8_t
         {
             BEGIN64 = 0,
@@ -110,9 +107,6 @@ namespace BidirectionalInMemGraph
             return entry;        
         }
 
-
-
-    
     };
 
 

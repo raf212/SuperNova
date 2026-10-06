@@ -1,5 +1,6 @@
 #pragma once 
 #include "CoreOfFabricCoordinator.hpp"
+#include <span>
 
 namespace BidirectionalInMemGraph
 {
@@ -25,8 +26,6 @@ namespace BidirectionalInMemGraph
             CHILD_LIST = 1u
         };
         
-        using DirtyRelationMask = uint64_t;
-
         struct alignas(uint64_t) ParentMaskBlock
         {
             uint64_t Block = UNSIGNED_ZERO;
@@ -69,15 +68,7 @@ namespace BidirectionalInMemGraph
             EdgeStatus Status = EdgeStatus::FREE;
             bool IsValid = false;
         };
-
-        static constexpr uint8_t EDGE_TAIL_BITS = 32u;
-        static constexpr uint8_t EDGE_SEQUENCE_BITS = 30u;
-        static constexpr uint8_t EDGE_STATUS_BITS = 2u;
-
-
         static constexpr uint32_t RELATION_NULL = UINT32_MAX;
-        static constexpr uint32_t EDGE_SEQUENCE_MASK = MaskLowBitsForU32(EDGE_SEQUENCE_BITS);
-        static constexpr uint64_t EDGE_STATUS_MASK = MaskLowBitsForU64(EDGE_STATUS_BITS);
 
         static constexpr uint8_t PARENT_MASK_BITS_PER_BLOCK = sizeof(uint64_t) * LEN_OF_BYTE_IN_BITS;
 
@@ -109,42 +100,72 @@ namespace BidirectionalInMemGraph
             return ordinal < configured_capacity;
         }
 
-        static constexpr bool IsEmpty(const ParentRelation& relation) noexcept
+        static constexpr bool IsBoundedRelationLoatorSize(uint32_t slot_count, uint32_t max_parent) noexcept
         {
-            return
-                relation.Parent.Generation == RELATION_NULL &&
-                relation.Parent.Slot == RELATION_NULL &&
-                relation.Siblings.Previous == RELATION_NULL &&
-                relation.Siblings.Next == RELATION_NULL;
+            if (slot_count == UNSIGNED_ZERO)
+            {
+                return false;
+            }
+
+            const uint64_t highest_locator = static_cast<uint64_t>(slot_count - 1u) * max_parent + (max_parent - 1u);
+            
+            return highest_locator < ADS::APC_INDEX_BOUND_SENTINAL;
         }
 
-        static constexpr bool IsPartiallyEmpty(const ParentRelation& relation) noexcept
+        static constexpr uint32_t RelationSlotandOrdinal(uint32_t locator, uint32_t max_parent) noexcept
         {
-            const bool parent_empty =
-                relation.Parent.Generation == RELATION_NULL &&
-                relation.Parent.Slot == RELATION_NULL;
+            return locator % max_parent;
+        }
 
-            const bool sibling_empty =
-                relation.Siblings.Previous == RELATION_NULL &&
-                relation.Siblings.Next == RELATION_NULL;
+        static constexpr bool IsValidRelationLocator(
+            uint32_t locator, uint32_t slot_count, 
+            uint32_t capacity, uint32_t max_parent
+        ) noexcept
+        {
+            return locator != RELATION_NULL &&
+                RelationSlotandOrdinal(locator, max_parent) < slot_count &&
+                RelationSlotandOrdinal(locator, max_parent) < capacity;
 
-            return parent_empty != sibling_empty;
+        }
+
+        static constexpr uint32_t NextSequence(uint32_t current) noexcept
+        {
+            // Unsigned overflow is the sequence wrap.
+            return current + 1u;
+        }
+
+        static constexpr bool IsParentEmpty(const ParentIDGeneration& parent) noexcept
+        {
+            return
+                parent.Generation == RELATION_NULL &&
+                parent.Slot == RELATION_NULL;
         }
 
         static constexpr bool IsParentEmpty(const ParentRelation& relation) noexcept
         {
-            return
-                relation.Parent.Generation == RELATION_NULL &&
-                relation.Parent.Slot == RELATION_NULL;
+            return IsParentEmpty(relation.Parent);
         }
 
-        static constexpr bool IsSiblingEmpty(
-            const ParentRelation& relation
-        ) noexcept
+        static constexpr bool IsSiblingEmpty(const SiblingLinks& sibling) noexcept
         {
             return
-                relation.Siblings.Previous == RELATION_NULL &&
-                relation.Siblings.Next == RELATION_NULL;
+                sibling.Previous == RELATION_NULL &&
+                sibling.Next == RELATION_NULL;
+        }
+
+        static constexpr bool IsSiblingEmpty(const ParentRelation& relation) noexcept
+        {
+            return IsSiblingEmpty(relation.Siblings);
+        }
+
+        static constexpr bool IsEmpty(const ParentRelation& relation) noexcept
+        {
+            return IsSiblingEmpty(relation) && IsParentEmpty(relation);
+        }
+
+        static constexpr bool IsPartiallyEmpty(const ParentRelation& relation) noexcept
+        {
+            return IsParentEmpty(relation) != IsSiblingEmpty(relation);
         }
 
         static constexpr void Clear(ParentRelation& relation) noexcept
@@ -160,70 +181,17 @@ namespace BidirectionalInMemGraph
             return parent_slot < child_slot;
         }
 
-        static constexpr uint32_t NextSequence(uint32_t current) noexcept
+        struct EdgeTableRowView 
         {
-            return (current + 1u) & EDGE_SEQUENCE_MASK;
-        }
-
-        static constexpr uint64_t PackEdgeHeader(
-            const EdgeData& edge
-        ) noexcept
-        {
-            return
-                static_cast<uint64_t>(edge.TailLocator) |
-                (static_cast<uint64_t>(edge.SeqLock & EDGE_SEQUENCE_MASK)
-                    << EDGE_TAIL_BITS) |
-                (static_cast<uint64_t>(edge.Status)
-                    << (EDGE_TAIL_BITS + EDGE_SEQUENCE_BITS));
-        }
-
-        static constexpr EdgeData UnpackEdgeHeader(uint64_t raw) noexcept
-        {
-            EdgeData edge{};
-            edge.TailLocator = static_cast<uint32_t>(raw);
-            edge.SeqLock = static_cast<uint32_t>(
-                (raw >> EDGE_TAIL_BITS) & EDGE_SEQUENCE_MASK
-            );
-            edge.Status = static_cast<EdgeStatus>(
-                (raw >> (EDGE_TAIL_BITS + EDGE_SEQUENCE_BITS)) &
-                EDGE_STATUS_MASK
-            );
-
-            const bool known_status =
-                edge.Status == EdgeStatus::FREE ||
-                edge.Status == EdgeStatus::RESERVED ||
-                edge.Status == EdgeStatus::LIVE;
-
-            const bool parity_ok =
-                edge.Status == EdgeStatus::RESERVED
-                    ? (edge.SeqLock & 1u) != 0u
-                    : (edge.SeqLock & 1u) == 0u;
-
-            const bool tail_state_ok =
-                edge.Status != EdgeStatus::FREE ||
-                edge.TailLocator == RELATION_NULL;
-
-            edge.IsValid = known_status && parity_ok && tail_state_ok;
-            return edge;
-        }
-
-        static constexpr DirtyRelationMask DirtyBit(
-            uint8_t ordinal
-        ) noexcept
-        {
-            return uint64_t{1u} << ordinal;
-        }
-
-        static constexpr uint16_t CHILD_LIST_CONTROL_OFFSET = 0u;
-        static constexpr uint16_t PARENT_RELATION_CONTROL_OFFSET = 1u;
-        static constexpr uint16_t PARENT_RELATION_ARRAY_OFFSET = 2u;
-
-        static constexpr uint16_t ControlOffset(EdgeDomain domain) noexcept
-        {
-            return domain == EdgeDomain::PARENT_RELATIONS
-                ? PARENT_RELATION_CONTROL_OFFSET
-                : CHILD_LIST_CONTROL_OFFSET;
-        }
+            std::span<ParentMaskBlock> Masks{};
+            std::span<ParentRelation> Relations{};
+            explicit constexpr operator bool() const noexcept
+            {
+                return
+                    !Masks.empty() &&
+                    !Relations.empty();
+            }
+        };
 
     };
 

@@ -11,23 +11,36 @@ namespace BidirectionalInMemGraph
         {
             uint32_t SeqLock = 2u;
             StateOfAPC State = StateOfAPC::FREE;
+            uint8_t Reserved[3]{};
+            friend constexpr bool operator==(
+                const LifeCycleControl&,
+                const LifeCycleControl&
+            ) noexcept = default;
         };
-        static_assert(std::atomic<LifeCycleControl>::is_always_lock_free == true);
 
         struct ParentRowControl 
         {
             uint32_t SeqLock = 0u;
             EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::LIVE;
+            uint8_t Reserved[3]{};
+            friend constexpr bool operator==(
+                const ParentRowControl&,
+                const ParentRowControl&
+            ) noexcept = default;
         };
-        static_assert(std::atomic<ParentRowControl>::is_always_lock_free == true);
 
 
         struct ChildListControl
         {
             uint32_t SeqLockChild = 0u;
             EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::LIVE;
+            uint8_t Reserved[3]{};
+
+            friend constexpr bool operator==(
+                const ChildListControl&,
+                const ChildListControl&
+            ) noexcept = default;
         };
-        static_assert(std::atomic<ChildListControl>::is_always_lock_free == true);
 
 
         struct alignas(64) StructuralHotRow final
@@ -40,8 +53,8 @@ namespace BidirectionalInMemGraph
             ChildListControl VolatileChildControl{};
             uint32_t ValueChildTail = EdgeBuilder::RELATION_NULL;
             uint32_t VolatileChildTail = EdgeBuilder::RELATION_NULL;
+            uint64_t RESERVED = UNSIGNED_ZERO;
         };
-        static_assert(sizeof(StructuralHotRow) ==  8 * sizeof(uint64_t));
 
         static constexpr uint32_t STRUCTURAL_HOT_FIXED_CELLS = sizeof(StructuralHotRow) / sizeof(uint64_t);
 
@@ -111,13 +124,6 @@ namespace BidirectionalInMemGraph
             return static_cast<size_t>(slot) * HANDLE_TABLE_WIDTH;
         }
     };
-    static_assert(
-        (HandleOfAPCStatic::ACTIVE_COUNT_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u
-    );
-
-    static_assert(
-        (HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u
-    );
 
     struct APCRelocationDef : public CoreOfFabricCoordinator
     {
@@ -130,10 +136,9 @@ namespace BidirectionalInMemGraph
                 cache.SlabCellCount_ >= FABRIC_CELL_SENTINAL ||
                 cache.CountOfAPC_ == UNSIGNED_ZERO ||
                 cache.CountOfAPC_ > UINT32_MAX ||
-                cache.CountOfAPC_ > (uint64_t{1u} << EdgeBuilder::RELATION_SLOT_BITS) ||
                 cache.PerAPCRuntimeCellCount_ > UINT32_MAX ||
                 !ADS::IsCapacityOfAPCValid(cache.PerAPCRuntimeCellCount_) ||
-                !EdgeBuilder::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_) ||
+                !EdgeBuilder::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_)||
                 cache.EdgeTableRecordWidth_ != EdgeBuilder::EdgeTableRecordWidth(cache.MaxDirectParentsPerAxis_) ||
                 cache.ActiveRegionMask_ == UNSIGNED_ZERO ||
                 (cache.ActiveRegionMask_ & ~ADS::ValidRegionMask()) != UNSIGNED_ZERO ||

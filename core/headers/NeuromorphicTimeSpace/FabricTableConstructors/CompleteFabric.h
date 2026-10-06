@@ -57,8 +57,13 @@ namespace BidirectionalInMemGraph
     {
     public:
         using EdgeTableRange = ADS::RangeOfAPC;
+        using EB = EdgeBuilder;
+        using EdgeTableRowView = EB::EdgeTableRowView;
 
     protected:
+
+        EdgeTableRowView EdgeTableRow_(FabricSegments edge_table, uint32_t row_slot) noexcept;
+        
         EdgeTableRange ReadAnEdgeTableRange_(
             FabricSegments edge_table,
             uint32_t row_slot
