@@ -94,9 +94,9 @@ namespace BidirectionalInMemGraph
 
         SeqLockedOperation ReadParentHandle_(
             FabricSegments edge_table,
-            uint32_t child_slot,
+            uint32_t slot,
             uint8_t relation_ordinal,
-            uint64_t& parent_handle,
+            EB::ParentIDGeneration& parent_handle,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 

@@ -19,6 +19,37 @@ namespace BidirectionalInMemGraph
             &row->ValueParentControl : &row->VolatileParentControl;
     }
 
+    HAS::ChildListControl* APCHandleAndRetirement::ChildListControl_(FabricSegments edge_table, uint32_t slot) noexcept
+    {
+        HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
+        if (
+            !row ||
+            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
+        )
+        {
+            return nullptr;
+        }
+        
+        return edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H ?
+            &row->ValueChildControl : &row->VolatileChildControl;
+    }
+
+    uint32_t* APCHandleAndRetirement::ChildTailPtr_(FabricSegments edge_table, uint32_t slot) noexcept
+    {
+        HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
+        if (
+            !row ||
+            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table)
+        )
+        {
+            return nullptr;
+        }
+        return edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H ? 
+            &row->ValueChildTail : &row->VolatileChildTail;
+    }
+
+
+
     uint64_t* APCHandleAndRetirement::GetAPCGenerationPtr_(uint32_t slot) noexcept
     {
         HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);

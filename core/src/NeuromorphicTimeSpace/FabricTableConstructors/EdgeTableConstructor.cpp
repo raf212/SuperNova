@@ -119,8 +119,66 @@ namespace BidirectionalInMemGraph
         if (domain == EB::EdgeDomain::PARENT_RELATIONS)
         {
             HAS::ParentRowControl* const p_row_ptr = ParentRowControl_(edge_table, slot);
+            if (!p_row_ptr)
+            {
+                return false;
+            }
+            
+            const HAS::ParentRowControl value = std::atomic_ref<const HAS::ParentRowControl>(*p_row_ptr).load(std::memory_order_acquire);
+            if (!HAS::ValidParentControl(value))
+            {
+                return false;
+            }
+
+            edge.TailLocator = EdgeBuilder::RELATION_NULL;
+            edge.SeqLock = value.SeqLock;
+            edge.Status = value.Status;
+            edge.IsValid = true;
+            return true;
+        }
+
+
+        HAS::ChildListControl* child_list_ptr = ChildListControl_(edge_table, slot);
+        uint32_t* const tail_ptr = ChildTailPtr_(edge_table, slot);
+
+        if (!child_list_ptr || !tail_ptr)
+        {
+            return false;
+        }
+
+        HAS::ChildListControl before = std::atomic_ref<const HAS::ChildListControl>(*child_list_ptr).load(std::memory_order_acquire);
+
+        if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
+        {
+            edge.TailLocator = EdgeBuilder::RELATION_NULL;
+            edge.SeqLock = before.SeqLockChild;
+            edge.Status = before.Status;
+            edge.IsValid = true;
+            return true;
+        }
+
+        const uint32_t tail = std::atomic_ref<const uint32_t>(*tail_ptr).load(std::memory_order_relaxed);
+        HAS::ChildListControl after = std::atomic_ref<const HAS::ChildListControl>(*child_list_ptr).load(std::memory_order_acquire);
+
+        if (before != after)
+        {
+            edge.TailLocator = EdgeBuilder::RELATION_NULL;
+            edge.SeqLock = after.SeqLockChild;
+            edge.Status = after.Status;
+            edge.IsValid = true;
+            return true;
         }
         
+        if (!HAS::ValidChildControl(before, tail))
+        {
+            return false;
+        }
+        
+        edge.TailLocator = tail;
+        edge.SeqLock = before.SeqLockChild;
+        edge.Status = before.Status;
+        edge.IsValid = true;
+        return true;
     }
 
     bool EdgeTableConstructor::ReadChildDomainControl_(
@@ -135,67 +193,64 @@ namespace BidirectionalInMemGraph
             edge);
     }
 
-    EdgeTableConstructor::SeqLockedOperation
-    EdgeTableConstructor::ReadParentHandle_(
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReadParentHandle_(
         FabricSegments edge_table,
-        uint32_t child_slot,
-        uint8_t relation_ordinal,
-        uint64_t &parent_handle,
-        uint32_t max_tries) noexcept
+        uint32_t slot,
+        uint32_t relation_ordinal,
+        EB::ParentIDGeneration& parent_handle,
+        uint32_t max_tries
+    ) noexcept
     {
-        parent_handle = FABRIC_CELL_SENTINAL;
-        const size_t control_index = EdgeControlCellIndex_(
-            edge_table,
-            child_slot,
-            EdgeBuilder::EdgeDomain::PARENT_RELATIONS);
-        const std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(edge_table, child_slot);
+        parent_handle = {};
+        HAS::ParentRowControl* const control = ParentRowControl_(edge_table, slot);
+        std::span<EB::ParentRelation> relations = ParentRelations_(edge_table, slot);
+
         if (
-            control_index == SIZE_MAX ||
+            !control ||
             relations.size() != FabCache_->MaxDirectParentsPerAxis_ ||
-            !EdgeBuilder::IsValidRelationOrdinal(
-                relation_ordinal,
-                FabCache_->MaxDirectParentsPerAxis_))
+            !EB::IsValidRelationOrdinal(relation_ordinal, FabCache_->MaxDirectParentsPerAxis_)
+        )
         {
             return SeqLockedOperation::NONE;
         }
 
-        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
+        for (uint32_t i = 0; i < max_tries; i++)
         {
-            const uint64_t before_raw = std::atomic_ref<const uint64_t>(
-                                            SlabBasePtr_[control_index])
-                                            .load(std::memory_order_acquire);
-            const EdgeBuilder::EdgeData before =
-                EdgeBuilder::UnpackEdgeHeader(before_raw);
-            if (!before.IsValid)
+            const HAS::ParentRowControl before = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (!HAS::ValidParentControl(before))
             {
                 return SeqLockedOperation::NONE;
             }
+
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
                 continue;
             }
+            
             if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
             {
                 return SeqLockedOperation::NONE;
             }
 
-            const uint64_t observed = std::atomic_ref<const uint64_t>(
-                                          relations[relation_ordinal].ParentHandle)
-                                          .load(std::memory_order_relaxed);
-            const uint64_t after_raw = std::atomic_ref<const uint64_t>(
-                                           SlabBasePtr_[control_index])
-                                           .load(std::memory_order_acquire);
-            if (before_raw != after_raw)
+            const EB::ParentIDGeneration observed = std::atomic_ref<const EB::ParentIDGeneration>(relations[relation_ordinal].Parent).load(std::memory_order_relaxed);
+            
+            const HAS::ParentRowControl after = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (before != after)
             {
                 continue;
             }
 
+            if (EB::IsParentEmpty(observed))
+            {
+                return SeqLockedOperation::NONE;
+            }
+            
             parent_handle = observed;
-            return observed == FABRIC_CELL_SENTINAL
-                       ? SeqLockedOperation::NONE
-                       : SeqLockedOperation::FOUND;
+            return SeqLockedOperation::FOUND;
         }
+        
         return SeqLockedOperation::RETRY;
     }
 

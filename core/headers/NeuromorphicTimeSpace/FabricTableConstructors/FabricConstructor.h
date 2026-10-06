@@ -136,7 +136,9 @@ namespace BidirectionalInMemGraph
 
         HAS::ParentRowControl* ParentRowControl_(FabricSegments edge_table, uint32_t slot) noexcept;
 
-        HAS::ChildListControl* ChildRowControl_(FabricSegments edge_table, uint32_t slot) noexcept;
+        HAS::ChildListControl* ChildListControl_(FabricSegments edge_table, uint32_t slot) noexcept;
+
+        uint32_t* ChildTailPtr_(FabricSegments edge_table, uint32_t slot) noexcept;
 
         uint64_t* GetAPCGenerationPtr_(uint32_t slot) noexcept;
 
