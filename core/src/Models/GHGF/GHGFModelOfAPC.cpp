@@ -124,7 +124,7 @@ namespace BidirectionalInMemGraph
                 EdgeBuilder::EdgeData header{};
 
                 if (
-                    !ReadEdgeHeader_(edge_table, i, header) ||
+                    !ReadChildDomainControl_(edge_table, i, header) ||
                     header.Status != EdgeBuilder::EdgeStatus::LIVE
                 )
                 {

@@ -762,7 +762,7 @@ Validates a copied/borrowed image before attachment: format version, supplied sl
 | `ConstructEdgeTableBySlot_` | H/V,row | bool | Placement-constructs K empty relation records. |
 | `InitializeEdgeTable_` | H/V | bool | Initializes controls/relations for all rows. Child-list starts FREE/null; parent-relations starts LIVE/empty. |
 | `ReadEdgeControl_` | H/V,row,domain,out EdgeData | bool | Acquire-load + unpack/validate chosen domain. |
-| `ReadEdgeHeader_` | H/V,row,out | bool | Convenience child-list-domain read. |
+| `ReadChildDomainControl_` | H/V,row,out | bool | Convenience child-list-domain read. |
 | `ReadParentHandle_` | H/V, child, ordinal, out handle, tries | FOUND/NONE/RETRY | Sequence-validates parent-relations control before/after relation read. |
 | `ReserveEdgeDomain_` | H/V,row,domain,required status,out before,tries | FOUND/NONE/RETRY | CASes stable control to RESERVED with next odd sequence. |
 | `ReserveEdgeRow_` | H/V,row,required status,out before,tries | operation | Child-list-domain wrapper. |
@@ -1647,7 +1647,7 @@ This index is intentionally redundant: use it when you know a symbol name but no
 - `EdgeTableConstructor::ConstructEdgeTableBySlot_`
 - `EdgeTableConstructor::InitializeEdgeTable_`
 - `EdgeTableConstructor::ReadEdgeControl_`
-- `EdgeTableConstructor::ReadEdgeHeader_`
+- `EdgeTableConstructor::ReadChildDomainControl_`
 - `EdgeTableConstructor::ReadParentHandle_`
 - `EdgeTableConstructor::ReserveEdgeDomain_`
 - `EdgeTableConstructor::ReserveEdgeRow_`
@@ -1885,7 +1885,7 @@ The following list was cross-checked against every class-qualified member defini
 - `EdgeTableConstructor::ConstructEdgeTableBySlot_`
 - `EdgeTableConstructor::InitializeEdgeTable_`
 - `EdgeTableConstructor::ReadEdgeControl_`
-- `EdgeTableConstructor::ReadEdgeHeader_`
+- `EdgeTableConstructor::ReadChildDomainControl_`
 - `EdgeTableConstructor::ReadParentHandle_`
 - `EdgeTableConstructor::ReserveEdgeDomain_`
 - `EdgeTableConstructor::ReserveEdgeRow_`

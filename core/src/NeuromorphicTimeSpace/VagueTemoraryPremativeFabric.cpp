@@ -219,7 +219,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -282,7 +282,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -328,7 +328,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -376,7 +376,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -431,7 +431,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -468,7 +468,7 @@ namespace BidirectionalInMemGraph
             {
                 EdgeBuilder::EdgeData after{};
                 if (
-                    ReadEdgeHeader_(edge_table, parent_slot, after) &&
+                    ReadChildDomainControl_(edge_table, parent_slot, after) &&
                     SameHeader_(before, after) &&
                     IsOpenAPCGeneration_(parent_slot, parent_generation)
                 )
@@ -509,7 +509,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -564,7 +564,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -611,7 +611,7 @@ namespace BidirectionalInMemGraph
             {
                 EdgeBuilder::EdgeData after{};
                 if (
-                    ReadEdgeHeader_(edge_table, parent_slot, after) &&
+                    ReadChildDomainControl_(edge_table, parent_slot, after) &&
                     SameHeader_(before, after) &&
                     IsOpenAPCGeneration_(parent_slot, parent_generation)
                 )
@@ -642,7 +642,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -1264,12 +1264,12 @@ namespace BidirectionalInMemGraph
         EdgeBuilder::EdgeData vertical{};
 
         if (
-            !ReadEdgeHeader_(
+            !ReadChildDomainControl_(
                 FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
                 slot,
                 horizontal
             ) ||
-            !ReadEdgeHeader_(
+            !ReadChildDomainControl_(
                 FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
                 slot,
                 vertical

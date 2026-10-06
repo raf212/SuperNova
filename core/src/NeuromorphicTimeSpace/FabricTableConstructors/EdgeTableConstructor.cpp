@@ -109,25 +109,21 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    bool EdgeTableConstructor::ReadEdgeControl_(
-        FabricSegments edge_table,
-        uint32_t row_slot,
-        EdgeBuilder::EdgeDomain domain,
-        EdgeBuilder::EdgeData &edge) noexcept
-    {
-        const size_t index = EdgeControlCellIndex_(edge_table, row_slot, domain);
-        if (index == SIZE_MAX)
-        {
-            edge = {};
-            return false;
-        }
+    // bool EdgeTableConstructor::ReadEdgeControl_(
+    //     FabricSegments edge_table,
+    //     uint32_t row_slot,
+    //     EdgeBuilder::EdgeDomain domain,
+    //     EdgeBuilder::EdgeData &edge) noexcept
+    // {
+    //     edge = {};
+    //     if (domain == EB::EdgeDomain::PARENT_RELATIONS)
+    //     {
 
-        edge = EdgeBuilder::UnpackEdgeHeader(
-            std::atomic_ref<const uint64_t>(SlabBasePtr_[index]).load(std::memory_order_acquire));
-        return edge.IsValid;
-    }
+    //     }
+        
+    // }
 
-    bool EdgeTableConstructor::ReadEdgeHeader_(
+    bool EdgeTableConstructor::ReadChildDomainControl_(
         FabricSegments edge_table,
         uint32_t row_slot,
         EdgeBuilder::EdgeData &edge) noexcept

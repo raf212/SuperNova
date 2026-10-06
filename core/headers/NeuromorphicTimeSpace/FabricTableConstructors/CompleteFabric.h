@@ -88,7 +88,7 @@ namespace BidirectionalInMemGraph
             EdgeBuilder::EdgeData& edge
         ) noexcept;
 
-        bool ReadEdgeHeader_(
+        bool ReadChildDomainControl_(
             FabricSegments edge_table,
             uint32_t row_slot,
             EdgeBuilder::EdgeData& edge

@@ -123,6 +123,43 @@ namespace BidirectionalInMemGraph
         {
             return static_cast<size_t>(slot) * HANDLE_TABLE_WIDTH;
         }
+
+        static constexpr bool ValidParentControl(const ParentRowControl& control) noexcept
+        {
+            const bool known =
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::FREE ||
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::RESERVED ||
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::LIVE;
+
+            const bool parity =
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::RESERVED
+                ? (control.SeqLock & 1u) != 0u
+                : (control.SeqLock & 1u) == 0u;
+
+            return known && parity;
+        }
+
+        static constexpr bool ValidChildControl(const ChildListControl& control, uint32_t tail) noexcept
+        {
+            const bool known =
+                control.Status == EdgeBuilder::EdgeStatus::FREE ||
+                control.Status == EdgeBuilder::EdgeStatus::RESERVED ||
+                control.Status == EdgeBuilder::EdgeStatus::LIVE;
+
+            const bool parity =
+                control.Status == EdgeBuilder::EdgeStatus::RESERVED ? 
+                    (control.SeqLockChild & 1u) != 0u : (control.SeqLockChild & 1u) == 0u;
+
+            const bool tail_state =
+                control.Status != EdgeBuilder::EdgeStatus::FREE ||
+                tail == EdgeBuilder::RELATION_NULL;
+
+            return known && parity && tail_state;
+        }
     };
 
     struct APCRelocationDef : public CoreOfFabricCoordinator

@@ -13,11 +13,11 @@ namespace BidirectionalInMemGraph
     static_assert(sizeof(EB::ParentRelation) == 16u);
 
     ////
-    using HAC = HandleOfAPCStatic;
-    static_assert(std::atomic<HAC::LifeCycleControl>::is_always_lock_free == true);
-    static_assert(std::atomic<HAC::ParentRowControl>::is_always_lock_free == true);
-    static_assert(std::atomic<HAC::ChildListControl>::is_always_lock_free == true);
-    static_assert(sizeof(HAC::StructuralHotRow) ==  8 * sizeof(uint64_t));
+    using HAS = HandleOfAPCStatic;
+    static_assert(std::atomic<HAS::LifeCycleControl>::is_always_lock_free == true);
+    static_assert(std::atomic<HAS::ParentRowControl>::is_always_lock_free == true);
+    static_assert(std::atomic<HAS::ChildListControl>::is_always_lock_free == true);
+    static_assert(sizeof(HAS::StructuralHotRow) ==  8 * sizeof(uint64_t));
     static_assert((HandleOfAPCStatic::ACTIVE_COUNT_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
     static_assert((HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
     static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
