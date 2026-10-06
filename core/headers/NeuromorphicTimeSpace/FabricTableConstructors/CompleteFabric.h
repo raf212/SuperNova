@@ -63,24 +63,18 @@ namespace BidirectionalInMemGraph
     protected:
 
         EdgeTableRowView EdgeTableRow_(FabricSegments edge_table, uint32_t row_slot) noexcept;
-        
+        std::span<EB::ParentMaskBlock> ParentMask_(FabricSegments edge_table, uint32_t row_slot) noexcept
+        {
+            return EdgeTableRow_(edge_table, row_slot).Masks;
+        }
+        std::span<EB::ParentRelation> ParentRelations_(FabricSegments edge_table, uint32_t row_slot) noexcept
+        {
+            return EdgeTableRow_(edge_table, row_slot).Relations;
+        }
+
+        bool ConstructEdgeTableBySlot_(FabricSegments edge_table, uint32_t slot) noexcept;
+
         EdgeTableRange ReadAnEdgeTableRange_(
-            FabricSegments edge_table,
-            uint32_t row_slot
-        ) noexcept;
-
-        size_t EdgeControlCellIndex_(
-            FabricSegments edge_table,
-            uint32_t row_slot,
-            EdgeBuilder::EdgeDomain domain
-        ) noexcept;
-
-        std::span<EdgeBuilder::ParentRelation> ParentRelations_(
-            FabricSegments edge_table,
-            uint32_t row_slot
-        ) noexcept;
-
-        bool ConstructParentRelationObjects_(
             FabricSegments edge_table,
             uint32_t row_slot
         ) noexcept;

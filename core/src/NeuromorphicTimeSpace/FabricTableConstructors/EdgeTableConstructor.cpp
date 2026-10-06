@@ -29,16 +29,38 @@ namespace BidirectionalInMemGraph
         return view;
     }
 
-    size_t EdgeTableConstructor::EdgeControlCellIndex_(
-        FabricSegments edge_table,
-        uint32_t row_slot,
-        EdgeBuilder::EdgeDomain domain) noexcept
+    bool EdgeTableConstructor::ConstructEdgeTableBySlot_(FabricSegments edge_table, uint32_t slot) noexcept
     {
-        const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, row_slot);
-        return range.IsValid
-                   ? range.BeginIndex + EdgeBuilder::ControlOffset(domain)
-                   : SIZE_MAX;
+        const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, slot);
+        if (!range.IsValid)
+        {
+            return false;
+        }
+        
+        const uint32_t k = FabCache_->MaxDirectParentsPerAxis_;
+        const uint32_t mask_words = EB::ParentMaskWordCount(k);
+
+        EB::ParentMaskBlock* const mask_begin = reinterpret_cast<EB::ParentMaskBlock*>(
+            SlabBasePtr_ + range.BeginIndex
+        );
+
+        EB::ParentRelation* const relation_begin = reinterpret_cast<EB::ParentRelation*>(
+            SlabBasePtr_ + range.BeginIndex + mask_words
+        );
+
+        for (uint32_t i = 0; i < mask_words; i++)
+        {
+            std::construct_at(mask_begin + i, EB::ParentMaskBlock{});
+        }
+
+        for (uint32_t i = 0; i < k; i++)
+        {
+            std::construct_at(relation_begin + i, EB::ParentRelation{});
+        }
+
+        return true;
     }
+
 
     EdgeTableConstructor::EdgeTableRange
     EdgeTableConstructor::ReadAnEdgeTableRange_(
@@ -66,45 +88,6 @@ namespace BidirectionalInMemGraph
         return range;
     }
 
-    std::span<EdgeBuilder::ParentRelation>
-    EdgeTableConstructor::ParentRelations_(
-        FabricSegments edge_table,
-        uint32_t row_slot) noexcept
-    {
-        const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, row_slot);
-        if (!range.IsValid)
-        {
-            return {};
-        }
-
-        auto *const first = std::launder(
-            reinterpret_cast<EdgeBuilder::ParentRelation *>(
-                SlabBasePtr_ + range.BeginIndex +
-                EdgeBuilder::PARENT_RELATION_ARRAY_OFFSET));
-        return {first, static_cast<size_t>(FabCache_->MaxDirectParentsPerAxis_)};
-    }
-
-    bool EdgeTableConstructor::ConstructParentRelationObjects_(
-        FabricSegments edge_table,
-        uint32_t row_slot) noexcept
-    {
-        const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, row_slot);
-        if (!range.IsValid)
-        {
-            return false;
-        }
-
-        auto *const first = reinterpret_cast<EdgeBuilder::ParentRelation *>(
-            SlabBasePtr_ + range.BeginIndex +
-            EdgeBuilder::PARENT_RELATION_ARRAY_OFFSET);
-        for (uint8_t ordinal = 0u;
-             ordinal < FabCache_->MaxDirectParentsPerAxis_;
-             ++ordinal)
-        {
-            std::construct_at(first + ordinal);
-        }
-        return true;
-    }
 
     bool EdgeTableConstructor::InitializeEdgeTable_(
         FabricSegments edge_table) noexcept
@@ -118,31 +101,10 @@ namespace BidirectionalInMemGraph
              row_slot < FabCache_->CountOfAPC_;
              ++row_slot)
         {
-            const EdgeTableRange range =
-                ReadAnEdgeTableRange_(edge_table, row_slot);
-            if (
-                !range.IsValid ||
-                !ConstructParentRelationObjects_(edge_table, row_slot))
+            if (!ConstructEdgeTableBySlot_(edge_table, row_slot))
             {
                 return false;
             }
-
-            EdgeBuilder::EdgeData child_list{};
-            child_list.TailLocator = EdgeBuilder::RELATION_NULL;
-            child_list.Status = EdgeBuilder::EdgeStatus::FREE;
-            child_list.IsValid = true;
-
-            EdgeBuilder::EdgeData parent_relations{};
-            parent_relations.TailLocator = EdgeBuilder::RELATION_NULL;
-            parent_relations.Status = EdgeBuilder::EdgeStatus::LIVE;
-            parent_relations.IsValid = true;
-
-            SlabBasePtr_[range.BeginIndex +
-                         EdgeBuilder::CHILD_LIST_CONTROL_OFFSET] =
-                EdgeBuilder::PackEdgeHeader(child_list);
-            SlabBasePtr_[range.BeginIndex +
-                         EdgeBuilder::PARENT_RELATION_CONTROL_OFFSET] =
-                EdgeBuilder::PackEdgeHeader(parent_relations);
         }
         return true;
     }

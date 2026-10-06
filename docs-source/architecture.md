@@ -759,7 +759,7 @@ Validates a copied/borrowed image before attachment: format version, supplied sl
 | `ReadAnEdgeTableRange_` | H/V, row slot | range | Returns absolute edge-row cell span. |
 | `EdgeControlCellIndex_` | H/V,row,domain | size_t or `SIZE_MAX` | Returns absolute control-cell index for parent-relations or child-list domain. |
 | `ParentRelations_` | H/V,row | span<ParentRelation> | Typed relation-array span for row. |
-| `ConstructParentRelationObjects_` | H/V,row | bool | Placement-constructs K empty relation records. |
+| `ConstructEdgeTableBySlot_` | H/V,row | bool | Placement-constructs K empty relation records. |
 | `InitializeEdgeTable_` | H/V | bool | Initializes controls/relations for all rows. Child-list starts FREE/null; parent-relations starts LIVE/empty. |
 | `ReadEdgeControl_` | H/V,row,domain,out EdgeData | bool | Acquire-load + unpack/validate chosen domain. |
 | `ReadEdgeHeader_` | H/V,row,out | bool | Convenience child-list-domain read. |
@@ -1644,7 +1644,7 @@ This index is intentionally redundant: use it when you know a symbol name but no
 - `EdgeTableConstructor::ReadAnEdgeTableRange_`
 - `EdgeTableConstructor::EdgeControlCellIndex_`
 - `EdgeTableConstructor::ParentRelations_`
-- `EdgeTableConstructor::ConstructParentRelationObjects_`
+- `EdgeTableConstructor::ConstructEdgeTableBySlot_`
 - `EdgeTableConstructor::InitializeEdgeTable_`
 - `EdgeTableConstructor::ReadEdgeControl_`
 - `EdgeTableConstructor::ReadEdgeHeader_`
@@ -1882,7 +1882,7 @@ The following list was cross-checked against every class-qualified member defini
 - `EdgeTableConstructor::EdgeControlCellIndex_`
 - `EdgeTableConstructor::ReadAnEdgeTableRange_`
 - `EdgeTableConstructor::ParentRelations_`
-- `EdgeTableConstructor::ConstructParentRelationObjects_`
+- `EdgeTableConstructor::ConstructEdgeTableBySlot_`
 - `EdgeTableConstructor::InitializeEdgeTable_`
 - `EdgeTableConstructor::ReadEdgeControl_`
 - `EdgeTableConstructor::ReadEdgeHeader_`
