@@ -259,7 +259,7 @@ namespace BidirectionalInMemGraph
         uint32_t slot,
         EdgeBuilder::EdgeStatus required_status,
         EdgeBuilder::EdgeData& before,
-        uint32_t max_tries = DEFAULT_MAX_TRIES
+        uint32_t max_tries
     ) noexcept
     {
         HAS::ParentRowControl* const parent_row_ptr = ParentRowControl_(edge_table, slot);
@@ -311,7 +311,7 @@ namespace BidirectionalInMemGraph
         uint32_t slot,
         EdgeBuilder::EdgeStatus required_status,
         EdgeBuilder::EdgeData& before,
-        uint32_t max_tries = DEFAULT_MAX_TRIES
+        uint32_t max_tries
     ) noexcept
     {
         HAS::ChildListControl* const ptr  = ChildListControl_(edge_table, slot);
@@ -361,7 +361,6 @@ namespace BidirectionalInMemGraph
         return SeqLockedOperation::RETRY;
     }
 
-
     EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveEdgeDomain_(
         FabricSegments edge_table,
         uint32_t slot,
@@ -388,26 +387,10 @@ namespace BidirectionalInMemGraph
         return ReserveChildDomain_(edge_table, slot, required_status, before, max_tries);
     }
 
-    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveEdgeRow_(
-        FabricSegments edge_table,
-        uint32_t row_slot,
-        EdgeBuilder::EdgeStatus required_status,
-        EdgeBuilder::EdgeData &before,
-        uint32_t max_tries) noexcept
-    {
-        return ReserveEdgeDomain_(
-            edge_table,
-            row_slot,
-            EdgeBuilder::EdgeDomain::CHILD_LIST,
-            required_status,
-            before,
-            max_tries);
-    }
-
     void EdgeTableConstructor::StoreReservedParentHandle_(
         FabricSegments edge_table,
         uint32_t slot,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         const EB::ParentIDGeneration& parent
     ) noexcept
     {
@@ -418,7 +401,7 @@ namespace BidirectionalInMemGraph
     void EdgeTableConstructor::StoreReservedSiblingLocators_(
         FabricSegments edge_table,
         uint32_t slot,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         const EB::SiblingLinks& sibbling
     ) noexcept
     {
@@ -434,14 +417,55 @@ namespace BidirectionalInMemGraph
         uint32_t desired_tail,
         EdgeBuilder::EdgeStatus desired_status) noexcept
     {
-        const size_t index = EdgeControlCellIndex_(edge_table, row_slot, domain);
-        EdgeBuilder::EdgeData published{};
-        published.TailLocator = desired_tail;
-        published.SeqLock = EdgeBuilder::NextSequence(
-            EdgeBuilder::NextSequence(before.SeqLock));
-        published.Status = desired_status;
-        published.IsValid = true;
-        std::atomic_ref<uint64_t>(SlabBasePtr_[index]).store(EdgeBuilder::PackEdgeHeader(published), std::memory_order_release);
+        const uint32_t published_sequense = EB::NextSequence(EB::NextSequence(
+            before.SeqLock
+        ));
+
+        auto PublishParentDomain___ = [&]() noexcept -> void
+        {
+            HAS::ParentRowControl* const ptr = ParentRowControl_(edge_table, row_slot);
+            if (!ptr)
+            {
+                return;
+            }
+            HAS::ParentRowControl published{};
+            published.SeqLock = published_sequense;
+            published.Status = desired_status;
+            std::atomic_ref<HAS::ParentRowControl>(*ptr).store(
+                published,
+                std::memory_order_release
+            );
+        };
+
+        auto PublishChildDomain___ = [&]() noexcept -> void
+        {
+            HAS::ChildListControl* const ptr = ChildListControl_(edge_table, row_slot);
+            uint32_t* const tail_ptr = ChildTailPtr_(edge_table, row_slot);
+            if (!ptr || !tail_ptr)
+            {
+                return;
+            }
+            std::atomic_ref<uint32_t>(*tail_ptr).store(
+                desired_tail,
+                std::memory_order_relaxed
+            );
+
+            HAS::ChildListControl published{};
+            published.SeqLockChild = published_sequense;
+            published.Status = desired_status;
+            
+            std::atomic_ref<HAS::ChildListControl>(*ptr).store(
+                published,
+                std::memory_order_release
+            );
+        };
+
+        if (domain == EB::EdgeDomain::PARENT_RELATIONS)
+        {
+            return PublishParentDomain___();
+        }
+        
+        return PublishChildDomain___();
     }
 
     void EdgeTableConstructor::PublishReservedEdgeRow_(

@@ -126,25 +126,17 @@ namespace BidirectionalInMemGraph
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;
 
-        SeqLockedOperation ReserveEdgeRow_(
-            FabricSegments edge_table,
-            uint32_t row_slot,
-            EdgeBuilder::EdgeStatus required_status,
-            EdgeBuilder::EdgeData& before,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
-        ) noexcept;
-
         void StoreReservedParentHandle_(
             FabricSegments edge_table,
             uint32_t slot,
-            uint8_t relation_ordinal,
+            uint32_t relation_ordinal,
             const EB::ParentIDGeneration& parent
         ) noexcept;
 
         void StoreReservedSiblingLocators_(
             FabricSegments edge_table,
             uint32_t slot,
-            uint8_t relation_ordinal,
+            uint32_t relation_ordinal,
             const EB::SiblingLinks& sibblings
         ) noexcept;
 
