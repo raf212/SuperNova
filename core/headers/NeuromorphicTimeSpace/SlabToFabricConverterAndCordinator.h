@@ -135,13 +135,13 @@ namespace BidirectionalInMemGraph
         DAGRelationDelta* FindOrInsertRelationDelta_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint8_t ordinal
+            uint32_t ordinal
         ) noexcept;
 
         DAGRelationDelta* EditReservedParentHandle_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint8_t ordinal
+            uint32_t ordinal
         ) noexcept;
 
         DAGRelationDelta* EditReservedSiblingLocators_(
@@ -172,7 +172,7 @@ namespace BidirectionalInMemGraph
         void PrepareConditionalParentPublication_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint8_t relation_ordinal,
+            uint32_t relation_ordinal,
             ConditionalParentPublication* publication
         ) noexcept;
     };
@@ -251,43 +251,31 @@ namespace BidirectionalInMemGraph
         }
 
     protected:
-        static constexpr bool SameHeader_(
-            const EdgeBuilder::EdgeData& left,
-            const EdgeBuilder::EdgeData& right
-        ) noexcept
-        {
-            return
-                left.IsValid &&
-                right.IsValid &&
-                left.TailLocator == right.TailLocator &&
-                left.SeqLock == right.SeqLock &&
-                left.Status == right.Status;
-        }
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
 
         struct ParentRowScan
         {
-            uint8_t MatchOrdinal = UINT8_MAX;
-            uint8_t OtherOrdinal = UINT8_MAX;
-            uint8_t EmptyOrdinal = UINT8_MAX;
-            uint64_t MatchParentHandle = FABRIC_CELL_SENTINAL;
+            uint32_t MatchOrdinal = EB::RELATION_NULL;
+            uint32_t OtherOrdinal = EB::RELATION_NULL;
+            uint32_t EmptyOrdinal = EB::RELATION_NULL;
+            EB::ParentIDGeneration MatchParent{};
         };
 
-        static constexpr bool SameRelation_(
-            const EdgeBuilder::ParentRelation& left,
-            const EdgeBuilder::ParentRelation& right
-        ) noexcept
+        static constexpr bool SameHeader_(const EdgeBuilder::EdgeData& left, const EdgeBuilder::EdgeData& right) noexcept
         {
-            return
-                left.ParentHandle == right.ParentHandle &&
-                left.SiblingLocators == right.SiblingLocators;
+            return left == right;
+        }
+
+        static constexpr bool SameRelation_(const EB::ParentRelation& left, const EB::ParentRelation& right) noexcept
+        {
+            return left == right;
         }
 
         bool ScanReservedParentRow_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint64_t wanted_parent_handle,
-            uint64_t other_parent_handle,
+            EB::ParentIDGeneration wanted_parent_handle,
+            EB::ParentIDGeneration other_parent_handle,
             ParentRowScan& scan
         ) noexcept;
 

@@ -42,8 +42,8 @@ namespace BidirectionalInMemGraph
             uint32_t FirstFreeIdx_{UNSIGNED_ZERO};
 
             // EDGE GEOMETRY
-            uint8_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
-            uint16_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
+            uint32_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
+            uint64_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
 
             ///MATRIX CONSTRUCTION
             uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
@@ -59,8 +59,6 @@ namespace BidirectionalInMemGraph
             uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
             bool HasDefaultRegionTable_{false};
 
-            ///alignment
-            uint64_t Reserved = UNSIGNED_ZERO;
         };
 
         struct DetachFabric final

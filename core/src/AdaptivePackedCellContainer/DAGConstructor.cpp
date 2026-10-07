@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph
     void DAGMutationConf::PrepareConditionalParentPublication_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         ConditionalParentPublication* publication
     ) noexcept
     {
@@ -320,11 +320,10 @@ namespace BidirectionalInMemGraph
         return SeqLockedOperation::FOUND;
     }
 
-    DAGMutationConf::DAGRelationDelta*
-    DAGMutationConf::FindOrInsertRelationDelta_(
+    DAGMutationConf::DAGRelationDelta* DAGMutationConf::FindOrInsertRelationDelta_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint8_t ordinal
+        uint32_t ordinal
     ) noexcept
     {
         if (
@@ -362,12 +361,8 @@ namespace BidirectionalInMemGraph
             transaction.Relations[transaction.RelationCount++];
         inserted.ChildSlot = child_slot;
         inserted.Ordinal = ordinal;
-        inserted.Before.ParentHandle = std::atomic_ref<const uint64_t>(
-            relations[ordinal].ParentHandle
-        ).load(std::memory_order_relaxed);
-        inserted.Before.SiblingLocators = std::atomic_ref<const uint64_t>(
-            relations[ordinal].SiblingLocators
-        ).load(std::memory_order_relaxed);
+        inserted.Before.Parent = std::atomic_ref<const EB::ParentIDGeneration>(relations[ordinal].Parent).load(std::memory_order_relaxed);
+        inserted.Before.Siblings = std::atomic_ref<const EB::SiblingLinks>(relations[ordinal].Siblings).load(std::memory_order_relaxed);
         inserted.Work = inserted.Before;
         return &inserted;
     }
@@ -376,7 +371,7 @@ namespace BidirectionalInMemGraph
     DAGMutationConf::EditReservedParentHandle_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint8_t ordinal
+        uint32_t ordinal
     ) noexcept
     {
         DAGRowParticipant* const owner = FindRowParticipant_(
@@ -537,11 +532,12 @@ namespace BidirectionalInMemGraph
     }
 
 
+
     bool ConstructDAGOnEachAxis::ScanReservedParentRow_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint64_t wanted_parent_handle,
-        uint64_t other_parent_handle,
+        EB::ParentIDGeneration wanted_parent_handle,
+        EB::ParentIDGeneration other_parent_handle,
         ParentRowScan& scan
     ) noexcept
     {
@@ -562,14 +558,12 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        for (uint8_t ordinal = 0u;
+        for (uint32_t ordinal = 0u;
             ordinal < FabCache_->MaxDirectParentsPerAxis_;
             ++ordinal)
         {
-            const uint64_t handle = std::atomic_ref<const uint64_t>(
-                relations[ordinal].ParentHandle
-            ).load(std::memory_order_relaxed);
-            if (handle == FABRIC_CELL_SENTINAL)
+            const EB::ParentIDGeneration handle = std::atomic_ref<const EB::ParentIDGeneration>(relations[ordinal].Parent).load(std::memory_order_relaxed);
+            if (!HAS::IsGenerationValid(handle.Generation) || !APCDataStructure::IsValid32BitAPCUnit(handle.Slot))
             {
                 if (scan.EmptyOrdinal == UINT8_MAX)
                 {
@@ -584,10 +578,10 @@ namespace BidirectionalInMemGraph
                     return false;
                 }
                 scan.MatchOrdinal = ordinal;
-                scan.MatchParentHandle = handle;
+                scan.MatchParent = handle;
             }
             if (
-                other_parent_handle != FABRIC_CELL_SENTINAL &&
+                APCDataStructure::IsValid32BitAPCUnit(handle.Slot) &&
                 handle == other_parent_handle
             )
             {

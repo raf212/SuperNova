@@ -31,7 +31,7 @@ namespace BidirectionalInMemGraph
             uint64_t Block = UNSIGNED_ZERO;
         };
 
-        struct ParentIDGeneration
+        struct alignas(uint64_t) ParentIDGeneration
         {
             uint32_t Generation = RELATION_NULL;
             uint32_t Slot = RELATION_NULL;
@@ -41,7 +41,7 @@ namespace BidirectionalInMemGraph
             ) noexcept = default;
         };
 
-        struct SiblingLinks
+        struct alignas(uint64_t) SiblingLinks
         {
             uint32_t Previous = RELATION_NULL;
             uint32_t Next = RELATION_NULL;
@@ -67,6 +67,10 @@ namespace BidirectionalInMemGraph
             uint32_t SeqLock = 0u;
             EdgeStatus Status = EdgeStatus::FREE;
             bool IsValid = false;
+            friend constexpr bool operator==(
+                const EdgeData&,
+                const EdgeData&
+            ) noexcept = default;
         };
         static constexpr uint32_t RELATION_NULL = UINT32_MAX;
 
@@ -77,16 +81,16 @@ namespace BidirectionalInMemGraph
             return (k + PARENT_MASK_BITS_PER_BLOCK - 1u) / PARENT_MASK_BITS_PER_BLOCK;
         }
         
-        static constexpr uint32_t RawEdgeTableRecordWidth(uint32_t max_direct_parents) noexcept
+        static constexpr uint64_t RawEdgeTableRecordWidth(uint32_t max_direct_parents) noexcept
         {
-            return ParentMaskWordCount(max_direct_parents) + 
+            return static_cast<uint64_t>(ParentMaskWordCount(max_direct_parents)) + 
                 max_direct_parents * (sizeof(ParentRelation) / sizeof(uint64_t));
         }
 
-        static constexpr uint32_t EdgeTableRecordWidth(uint32_t max_direct_parents) noexcept
+        static constexpr uint64_t EdgeTableRecordWidth(uint32_t max_direct_parents) noexcept
         {
             constexpr uint32_t cells_per_cacheline = ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
-            const uint32_t raw = RawEdgeTableRecordWidth(max_direct_parents);
+            const uint64_t raw = RawEdgeTableRecordWidth(max_direct_parents);
             return (raw + cells_per_cacheline - 1u) & ~(cells_per_cacheline - 1u);
         }
 
