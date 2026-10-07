@@ -24,8 +24,8 @@ namespace BidirectionalInMemGraph
             SlabBasePtr_ + range.BeginIndex + mask_words
         ));
 
-        view.Masks = std::span<EB::ParentMaskBlock>(mask_begin, mask_words);
-        view.Relations = std::span<EB::ParentRelation>(relations_begin, k);
+        view.Masks = EB::PMSpan(mask_begin, mask_words);
+        view.Relations = EB::PRSpan(relations_begin, k);
         return view;
     }
 
@@ -203,7 +203,7 @@ namespace BidirectionalInMemGraph
     {
         parent_handle = {};
         HAS::ParentRowControl* const control = ParentRowControl_(edge_table, slot);
-        std::span<EB::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, slot);
+        EB::PRSpan relations = EdgeRelationsPerSlot_(edge_table, slot);
 
         if (
             !control ||
@@ -394,7 +394,7 @@ namespace BidirectionalInMemGraph
         const EB::ParentIDGeneration& parent
     ) noexcept
     {
-        std::span<EB::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, slot);
+        EB::PRSpan relations = EdgeRelationsPerSlot_(edge_table, slot);
         std::atomic_ref<EB::ParentIDGeneration>(relations[relation_ordinal].Parent).store(parent, std::memory_order_relaxed);
     }
 
@@ -405,7 +405,7 @@ namespace BidirectionalInMemGraph
         const EB::SiblingLinks& sibbling
     ) noexcept
     {
-        std::span<EB::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, slot);
+        EB::PRSpan relations = EdgeRelationsPerSlot_(edge_table, slot);
         std::atomic_ref<EB::SiblingLinks>(relations[relation_ordinal].Siblings).store(sibbling, std::memory_order_relaxed);
     }
 

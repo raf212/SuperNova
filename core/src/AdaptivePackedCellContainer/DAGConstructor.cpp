@@ -57,60 +57,6 @@ namespace BidirectionalInMemGraph
             publication->Publish(publication->Context, relation_ordinal);
     }
 
-    CompiledDAGTableConstructor::CompiledDAGRecord* CompiledDAGTableConstructor::CompiledDAGRow_(uint32_t row_slot) noexcept
-    {
-        if (!SlabBasePtr_ || row_slot >= FabCache_->CountOfAPC_)
-        {
-            return nullptr;
-        }
-        
-        const size_t row_begin = static_cast<size_t>(FabCache_->CompiledDAGTableBeginIdx_) +
-            (static_cast<size_t>(row_slot) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
-        
-        if (
-            row_begin >= FabCache_->SlabCellCount_ ||
-            CoreOfFabricCoordinator::COMPILED_DAG_LEN > FabCache_->SlabCellCount_ - row_begin
-        )
-        {
-            return nullptr;
-        }
-
-        return std::launder(reinterpret_cast<CompiledDAGRecord*>(SlabBasePtr_ + row_begin));
-    }
-
-
-    bool CompiledDAGTableConstructor::InitializeCompiledDAGTAble_() noexcept
-    {
-        RecordBookConf::FabricSegmentBounds bounds{};
-        if (!GetRecordMapCarrierRanges_(FabricSegments::EDGE_TOPOLOGY_BITMAP, bounds))
-        {
-            return false;
-        }
-
-        const size_t required_cells = static_cast<size_t>(FabCache_->CountOfAPC_) * CoreOfFabricCoordinator::COMPILED_DAG_LEN;
-
-        if (
-            bounds.EndIndex - bounds.BeginIndex != required_cells ||
-            bounds.EndIndex > FabCache_->SlabCellCount_
-        )
-        {
-            return false;
-        }
-
-        FabCache_->CompiledDAGTableBeginIdx_ = bounds.BeginIndex;
-
-        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
-        {
-            const size_t row_begin = static_cast<size_t>(FabCache_->CompiledDAGTableBeginIdx_) +
-                (static_cast<size_t>(i) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
-
-            std::construct_at(reinterpret_cast<CompiledDAGRecord*>(SlabBasePtr_ + row_begin), CompiledDAGRecord{});
-        }
-        
-        return true;
-    }
-
-
     void CompiledDAGTableConstructor::CompiledDAGRelation_(
         FabricSegments edge_table,
         uint32_t child_slot,
@@ -128,98 +74,34 @@ namespace BidirectionalInMemGraph
             return;
         }
 
-        CompiledDAGRecord* record = CompiledDAGRow_(child_slot);
-
-        if (!record)
+        EB::PMSpan mask = ParentMask_(edge_table, child_slot);
+        const uint32_t word_index = relation_ordinal / EB::PARENT_MASK_BITS_PER_BLOCK;
+        const uint32_t bit_index = relation_ordinal / EB::PARENT_MASK_BITS_PER_BLOCK;
+        if (word_index >= mask.size())
         {
             return;
         }
+        
+        EB::ParentMaskBlock block = std::atomic_ref<const EB::ParentMaskBlock>(mask[word_index]).load(std::memory_order_relaxed);
+        std::bitset<EB::PARENT_MASK_BITS_PER_BLOCK> bits(block.Block);
 
-        uint64_t& stored_mask = edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H ? 
-            record->ValueParentMask : record->VolatileParentMask;
-
-        std::atomic_ref<uint64_t> mask(stored_mask);
-
-        const uint64_t relation_bit = EdgeBuilder::DirtyBit(relation_ordinal);
-
-        if (EdgeBuilder::IsEmpty(relation))
-        {
-            mask.fetch_and(~relation_bit, std::memory_order_release);
-        }
-        else
-        {
-            mask.fetch_or(relation_bit, std::memory_order_release);
-        }
+        bits.set(bit_index, !EB::IsParentEmpty(relation));
+        block.Block = bits.to_ullong();
+        std::atomic_ref<EB::ParentMaskBlock>(mask[word_index]).store(
+            block,
+            std::memory_order_relaxed
+        );
     }
 
 
-    CompiledDAGTableConstructor::SeqLockedOperation
-    CompiledDAGTableConstructor::ReadCompiledDAGParentMask_(
+    CompiledDAGTableConstructor::SeqLockedOperation CompiledDAGTableConstructor::ReadCompiledDAGParentMask_(
         FabricSegments edge_table,
         uint32_t child_slot,
         uint64_t& return_mask,
         uint32_t max_tries
     ) noexcept
     {
-        return_mask = 0u;
-        if (
-            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            child_slot >= FabCache_->CountOfAPC_
-        )
-        {
-            return SeqLockedOperation::NONE;
-        }
 
-        CompiledDAGRecord* const record = CompiledDAGRow_(child_slot);
-        const size_t control_index = EdgeControlCellIndex_(
-            edge_table,
-            child_slot,
-            EdgeBuilder::EdgeDomain::PARENT_RELATIONS
-        );
-        if (!record || control_index == SIZE_MAX)
-        {
-            return SeqLockedOperation::NONE;
-        }
-
-        uint64_t& stored_mask =
-            edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H
-                ? record->ValueParentMask
-                : record->VolatileParentMask;
-        std::atomic_ref<const uint64_t> seq_lock_ref(
-            SlabBasePtr_[control_index]
-        );
-
-        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
-        {
-            const uint64_t before_raw =
-                seq_lock_ref.load(std::memory_order_acquire);
-            const EdgeBuilder::EdgeData before =
-                EdgeBuilder::UnpackEdgeHeader(before_raw);
-            if (!before.IsValid)
-            {
-                return SeqLockedOperation::NONE;
-            }
-            if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
-            {
-                continue;
-            }
-            if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
-            {
-                return SeqLockedOperation::NONE;
-            }
-
-            const uint64_t observed_mask = std::atomic_ref<const uint64_t>(
-                stored_mask
-            ).load(std::memory_order_relaxed);
-            if (before_raw != seq_lock_ref.load(std::memory_order_acquire))
-            {
-                continue;
-            }
-
-            return_mask = observed_mask;
-            return SeqLockedOperation::FOUND;
-        }
-        return SeqLockedOperation::RETRY;
     }
 
     bool DAGMutationConf::AddRowParticipant_(
@@ -446,7 +328,7 @@ namespace BidirectionalInMemGraph
                     transaction.EdgeTable,
                     delta.ChildSlot,
                     delta.Ordinal,
-                    delta.Work.ParentHandle
+                    delta.Work.Parent
                 );
                 if (
                     EdgeBuilder::IsParentEmpty(delta.Before) !=
@@ -467,7 +349,7 @@ namespace BidirectionalInMemGraph
                     transaction.EdgeTable,
                     delta.ChildSlot,
                     delta.Ordinal,
-                    delta.Work.SiblingLocators
+                    delta.Work.Siblings
                 );
             }
         }

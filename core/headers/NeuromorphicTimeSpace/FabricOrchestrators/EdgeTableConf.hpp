@@ -1,6 +1,7 @@
 #pragma once 
 #include "CoreOfFabricCoordinator.hpp"
 #include <span>
+#include <bitset>
 
 namespace BidirectionalInMemGraph
 {
@@ -73,10 +74,13 @@ namespace BidirectionalInMemGraph
             ) noexcept = default;
         };
 
+        using PMSpan = std::span<ParentMaskBlock>;
+        using PRSpan = std::span<ParentRelation>;
+
         struct EdgeTableRowView 
         {
-            std::span<ParentMaskBlock> Masks{};
-            std::span<ParentRelation> Relations{};
+            PMSpan Masks{};
+            PRSpan Relations{};
             explicit constexpr operator bool() const noexcept
             {
                 return

@@ -82,10 +82,10 @@ namespace BidirectionalInMemGraph
 
         struct ConditionalParentPublication final
         {
-            using PublishFunction = void(*) (void*, uint8_t) noexcept;
+            using PublishFunction = void(*) (void*, uint32_t) noexcept;
             uint32_t ExpectedRowSequence = UINT32_MAX;
             uint32_t PublishedRowSequence = UINT32_MAX;
-            uint8_t PublishedOrdinal = UINT8_MAX;
+            uint32_t PublishedOrdinal = UINT8_MAX;
             bool SequenceMismatch = false;
             void* Context = nullptr;
             PublishFunction Publish = nullptr;

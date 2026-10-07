@@ -78,11 +78,11 @@ namespace BidirectionalInMemGraph
     protected:
 
         EdgeTableRowView EdgeTableRow_(FabricSegments edge_table, uint32_t row_slot) noexcept;
-        std::span<EB::ParentMaskBlock> ParentMask_(FabricSegments edge_table, uint32_t row_slot) noexcept
+        EB::PMSpan ParentMask_(FabricSegments edge_table, uint32_t row_slot) noexcept
         {
             return EdgeTableRow_(edge_table, row_slot).Masks;
         }
-        std::span<EB::ParentRelation> EdgeRelationsPerSlot_(FabricSegments edge_table, uint32_t row_slot) noexcept
+        EB::PRSpan EdgeRelationsPerSlot_(FabricSegments edge_table, uint32_t row_slot) noexcept
         {
             return EdgeTableRow_(edge_table, row_slot).Relations;
         }
@@ -162,17 +162,7 @@ namespace BidirectionalInMemGraph
     class CompiledDAGTableConstructor : public EdgeTableConstructor
     {
     protected:
-        struct alignas(uint64_t) CompiledDAGRecord final
-        {
-            uint64_t ValueParentMask = UNSIGNED_ZERO;   
-            uint64_t VolatileParentMask = UNSIGNED_ZERO;
-        };
-
         std::atomic<uint64_t> SealedDAGRevision_{UNSIGNED_ZERO};
-
-        CompiledDAGRecord* CompiledDAGRow_(uint32_t row_slot) noexcept;
-
-        bool InitializeCompiledDAGTAble_() noexcept;
         
         void CompiledDAGRelation_(
             FabricSegments edge_table,
