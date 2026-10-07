@@ -12,7 +12,6 @@ namespace BidirectionalInMemGraph
         static constexpr size_t WORK_RECORD_WIDTH_OF_FABRIC = 0u;
         static constexpr size_t DEFAULT_FABRIC_CONTROLIO_LENGTH = 512u;
         ///--------------------------
-        static constexpr size_t COMPILED_DAG_LEN = 2u;
 
         static constexpr uint32_t FABRIC_MAGIC = 0x41504643u;
         static constexpr uint32_t FABRIC_META_EOF = 0x41474946u;

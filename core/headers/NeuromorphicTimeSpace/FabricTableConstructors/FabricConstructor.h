@@ -12,6 +12,8 @@ namespace BidirectionalInMemGraph
         friend class RegionViewConstructor;
         
     protected:
+        static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
+
         uint64_t* SlabBasePtr_{nullptr};
 
         FabricCache* FabCache_{nullptr};
@@ -23,6 +25,8 @@ namespace BidirectionalInMemGraph
         using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
 
         using DSA = DescriptionOfAPC;
+
+        ADS::RangeOfAPC GetSegmentPoolRange(uint64_t single_description_index) noexcept;
 
         bool ReadAFabricU64Directly(
             size_t slab_index,
@@ -128,6 +132,8 @@ namespace BidirectionalInMemGraph
 
     class APCHandleAndRetirement : public MatrixViewConstructor
     {
+        friend class FabricToAPCLinker;
+
     protected:
 
         using HAS = HandleOfAPCStatic;
@@ -153,6 +159,25 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> ReadFirstFreeAPCIdx_() noexcept;
 
         void UpdateFirstFreeIdx_(uint32_t& expected_value, uint32_t desired_value) noexcept;
+
+        SeqLockedOperation SwitchDescriptionState(
+            uint32_t slot,
+            StateOfAPC updated_state,
+            StateOfAPC desired_state,
+            uint32_t max_tries = DEFAULT_MAX_TRIES
+        ) noexcept;
+
+        SeqLockedOperation ReadAPCStateAtomically_(
+            uint32_t slot,
+            HAS::LifeCycleControl& life_cycle,
+            uint32_t max_tries = DEFAULT_INTERNAL_TRIES__
+        ) noexcept;
+
+        HAS::LifeCycleControl* LifeCycleControl_(uint32_t slot) noexcept
+        {
+            HAS::StructuralHotRow* const row = GetStructuralHotRow_(slot);
+            return row ? &row->LifeCycle : nullptr;
+        }
 
         bool IsOpenAPCGeneration_(
             uint32_t slot,

@@ -93,15 +93,66 @@ namespace BidirectionalInMemGraph
         );
     }
 
-
     CompiledDAGTableConstructor::SeqLockedOperation CompiledDAGTableConstructor::ReadCompiledDAGParentMask_(
         FabricSegments edge_table,
-        uint32_t child_slot,
+        uint32_t slot,
         uint64_t& return_mask,
         uint32_t max_tries
     ) noexcept
     {
+        return_mask = 0u;
 
+        if (
+            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
+            slot >= FabCache_->CountOfAPC_ ||
+            FabCache_->MaxDirectParentsPerAxis_ > 64u ||
+            max_tries == 0u
+        )
+        {
+            return SeqLockedOperation::NONE;
+        }
+
+        HAS::ParentRowControl* const control = ParentRowControl_(edge_table, slot);
+        EB::PMSpan mask = ParentMask_(edge_table, slot);
+
+        if (!control || mask.empty())
+        {
+            return SeqLockedOperation::NONE;
+        }
+
+        for (size_t i = 0; i < max_tries; i++)
+        {
+            const HAS::ParentRowControl before = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (!HAS::ValidParentControl(before))
+            {
+                return SeqLockedOperation::NONE;
+            }
+
+            if (before.Status == EB::EdgeStatus::RESERVED)
+            {
+                continue;
+            }
+
+            if (before.Status != EB::EdgeStatus::LIVE)
+            {
+                return SeqLockedOperation::NONE;
+            }
+
+            const EB::ParentMaskBlock observed = std::atomic_ref<const EB::ParentMaskBlock>(mask.front()).load(std::memory_order_acquire);
+
+            const HAS::ParentRowControl after = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (before != after)
+            {
+                continue;
+            }
+            
+            return_mask = observed.Block;
+            return SeqLockedOperation::FOUND;
+        }
+        
+        return SeqLockedOperation::RETRY;
     }
 
     bool DAGMutationConf::AddRowParticipant_(

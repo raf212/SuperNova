@@ -251,7 +251,6 @@ namespace BidirectionalInMemGraph
         }
 
     protected:
-        static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
 
         struct ParentRowScan
         {

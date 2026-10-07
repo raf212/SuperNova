@@ -374,8 +374,6 @@ Fields: `SeqLock`, `StateOfTheAPC`, `IsValid`. The source enforces: RESERVED ⇢
 
 | Function | Args | Return | What it does | Do not use incorrectly |
 | --- | --- | --- | --- | --- |
-| `ComposeSeqLockAndState(files)` | mutable `SeqLockAndStateStruct&` | packed u64 or sentinel | Validates sequence/state pairing then packs sequence and state into one 64-bit word. | Do not bypass `ValidateStateAgainstSeqLock` by hand-packing arbitrary state. |
-| `GetSeqLockAndLifeCycle(raw,values)` | raw u64 + output struct | bool | Unpacks low sequence/high state and validates parity/state. | False means the packed lifecycle cannot be trusted. |
 | `ValidateStateAgainstSeqLock(files)` | struct ref | bool | Checks sentinel/range and parity rule. | Does not check whether a transition from previous state is legal. |
 | `IsTransitionStateLeagal(current,desired)` | two states | bool | Allows only the explicitly enumerated lifecycle transitions. | Do not add direct FREE→LIVE or LIVE→RETIRED transitions outside this state machine. |
 

@@ -29,29 +29,7 @@ namespace BidirectionalInMemGraph
 
     };
 
-
-    class APCLifeCycle : public RecordBookConstructor
-    {
-        friend class FabricToAPCLinker;
-    protected:
-    
-        std::optional<uint64_t> GetDescriptionLockIdxInFabric_(uint64_t description_idx) noexcept;
-
-        ADS::RangeOfAPC GetSegmentPoolRange(uint64_t single_description_index) noexcept;
-
-        /// @return previous ID_STATE -> raw value for reverting safely 
-        bool SwitchDescriptionState(
-            uint64_t description_idx,
-            StateOfAPC updated_state,
-            StateOfAPC desired_state,
-            uint32_t max_tries = DEFAULT_MAX_TRIES
-        ) noexcept;
-
-        DescriptionOfAPC::SeqLockAndStateStruct ReadAPCStateAtomically_(uint64_t apc_description_index) noexcept;
-
-    };
-
-    class EdgeTableConstructor : public APCLifeCycle
+    class EdgeTableConstructor : public RecordBookConstructor
     {
     public:
         using EdgeTableRange = ADS::RangeOfAPC;
@@ -173,7 +151,7 @@ namespace BidirectionalInMemGraph
 
         SeqLockedOperation ReadCompiledDAGParentMask_(
             FabricSegments edge_table,
-            uint32_t child_slot,
+            uint32_t slot,
             uint64_t& return_mask,
             uint32_t max_tries = DEFAULT_MAX_TRIES
         ) noexcept;

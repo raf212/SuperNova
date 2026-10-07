@@ -160,6 +160,29 @@ namespace BidirectionalInMemGraph
 
             return known && parity && tail_state;
         }
+
+        static constexpr bool ValidateLifeCycle(const LifeCycleControl& files) noexcept
+        {
+            if (!ADS::IsValidFabricUnit(files.SeqLock))
+            {
+                return false;
+            }
+            if (
+                files.State == StateOfAPC::RESERVED &&
+                ADS::IsValidEven64(files.SeqLock)
+            )
+            {
+                return false;
+            }
+            if (
+                files.State != StateOfAPC::RESERVED &&
+                !ADS::IsValidEven64(files.SeqLock)
+            )
+            {
+                return false;
+            }
+            return true;
+        }
     };
 
     struct APCRelocationDef : public CoreOfFabricCoordinator
