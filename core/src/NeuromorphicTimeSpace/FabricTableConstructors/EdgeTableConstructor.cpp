@@ -164,7 +164,7 @@ namespace BidirectionalInMemGraph
         {
             edge.TailLocator = EdgeBuilder::RELATION_NULL;
             edge.SeqLock = after.SeqLockChild;
-            edge.Status = after.Status;
+            edge.Status = EB::EdgeStatus::RESERVED;
             edge.IsValid = true;
             return true;
         }
@@ -254,54 +254,138 @@ namespace BidirectionalInMemGraph
         return SeqLockedOperation::RETRY;
     }
 
-    EdgeTableConstructor::SeqLockedOperation
-    EdgeTableConstructor::ReserveEdgeDomain_(
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveParentDomain_(
         FabricSegments edge_table,
-        uint32_t row_slot,
-        EdgeBuilder::EdgeDomain domain,
+        uint32_t slot,
         EdgeBuilder::EdgeStatus required_status,
-        EdgeBuilder::EdgeData &before,
-        uint32_t max_tries) noexcept
+        EdgeBuilder::EdgeData& before,
+        uint32_t max_tries = DEFAULT_MAX_TRIES
+    ) noexcept
     {
-        const size_t index = EdgeControlCellIndex_(edge_table, row_slot, domain);
-        if (index == SIZE_MAX)
+        HAS::ParentRowControl* const parent_row_ptr = ParentRowControl_(edge_table, slot);
+        if (!parent_row_ptr)
         {
             return SeqLockedOperation::NONE;
         }
-
-        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
+        
+        std::atomic_ref<HAS::ParentRowControl> control(*parent_row_ptr);
+        for (size_t i = 0; i < max_tries; i++)
         {
-            uint64_t observed_raw = std::atomic_ref<const uint64_t>(SlabBasePtr_[index]).load(std::memory_order_acquire);
-            EdgeBuilder::EdgeData observed = EdgeBuilder::UnpackEdgeHeader(observed_raw);
-            if (!observed.IsValid)
+            HAS::ParentRowControl observed = control.load(std::memory_order_acquire);
+            if (!HAS::ValidParentControl(observed))
             {
-                return SeqLockedOperation::NONE;
+                return SeqLockedOperation::NONE; 
             }
+            
             if (observed.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
                 continue;
             }
+
             if (observed.Status != required_status)
             {
                 return SeqLockedOperation::NONE;
             }
 
-            EdgeBuilder::EdgeData reserved = observed;
-            reserved.SeqLock = EdgeBuilder::NextSequence(observed.SeqLock);
-            reserved.Status = EdgeBuilder::EdgeStatus::RESERVED;
-            reserved.IsValid = true;
-            /// Can Fail Spontenuiusly if used compare_exchange_weak()
-            if (CompareExchangeStrongFromFabric(
-                    index,
-                    observed_raw,
-                    EdgeBuilder::PackEdgeHeader(reserved)))
+            HAS::ParentRowControl desired = observed;
+            desired.SeqLock = EB::NextSequence(observed.SeqLock);
+            desired.Status = EB::EdgeStatus::RESERVED;
+            if (control.compare_exchange_strong(
+                observed, desired,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire
+            ))
             {
-                before = observed;
+                before.TailLocator = EB::RELATION_NULL;
+                before.SeqLock = observed.SeqLock;
+                before.Status = observed.Status;
+                before.IsValid = true;
                 return SeqLockedOperation::FOUND;
             }
-            ///
         }
         return SeqLockedOperation::RETRY;
+    }
+
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveChildDomain_(
+        FabricSegments edge_table,
+        uint32_t slot,
+        EdgeBuilder::EdgeStatus required_status,
+        EdgeBuilder::EdgeData& before,
+        uint32_t max_tries = DEFAULT_MAX_TRIES
+    ) noexcept
+    {
+        HAS::ChildListControl* const ptr  = ChildListControl_(edge_table, slot);
+        uint32_t* const tail_ptr = ChildTailPtr_(edge_table, slot);
+        if (!ptr || !tail_ptr)
+        {
+            return SeqLockedOperation::NONE;
+        }
+        
+        std::atomic_ref<HAS::ChildListControl> control(*ptr);
+        for (uint32_t i = 0; i < max_tries; i++)
+        {
+            HAS::ChildListControl observed = control.load(std::memory_order_acquire);
+            const uint32_t observed_tail = std::atomic_ref<const uint32_t>(*tail_ptr).load(std::memory_order_relaxed);
+            if (!HAS::ValidChildControl(observed, observed_tail))
+            {
+                return SeqLockedOperation::NONE;
+            }
+            
+            if (observed.Status == EdgeBuilder::EdgeStatus::RESERVED)
+            {
+                continue;
+            }
+
+            if (observed.Status != required_status)
+            {
+                return SeqLockedOperation::NONE;
+            }
+            
+            HAS::ChildListControl desired = observed;
+            desired.SeqLockChild = EB::NextSequence(observed.SeqLockChild);
+            desired.Status = EB::EdgeStatus::RESERVED;
+            if (control.compare_exchange_strong(
+                observed, desired,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire
+            ))
+            {
+                before.TailLocator = std::atomic_ref<const uint32_t>(*tail_ptr).load(std::memory_order_acquire);
+                before.SeqLock = observed.SeqLockChild;
+                before.Status = observed.Status;
+                before.IsValid = true;
+                return SeqLockedOperation::FOUND;
+            }
+        }
+        
+        return SeqLockedOperation::RETRY;
+    }
+
+
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveEdgeDomain_(
+        FabricSegments edge_table,
+        uint32_t slot,
+        EdgeBuilder::EdgeDomain domain,
+        EdgeBuilder::EdgeStatus required_status,
+        EdgeBuilder::EdgeData &before,
+        uint32_t max_tries) noexcept
+    {
+        before = {};
+        if (
+            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
+            slot >= FabCache_->CountOfAPC_ ||
+            max_tries == UNSIGNED_ZERO
+        )
+        {
+            return SeqLockedOperation::NONE;
+        }
+        
+        if (domain == EdgeBuilder::EdgeDomain::PARENT_RELATIONS)
+        {
+            return ReserveParentDomain_(edge_table, slot, required_status, before, max_tries);
+        }
+        
+        return ReserveChildDomain_(edge_table, slot, required_status, before, max_tries);
     }
 
     EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveEdgeRow_(

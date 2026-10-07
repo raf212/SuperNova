@@ -58,6 +58,23 @@ namespace BidirectionalInMemGraph
         using EB = EdgeBuilder;
         using EdgeTableRowView = EB::EdgeTableRowView;
 
+    private:
+        SeqLockedOperation ReserveParentDomain_(
+            FabricSegments edge_table,
+            uint32_t slot,
+            EdgeBuilder::EdgeStatus required_status,
+            EdgeBuilder::EdgeData& before,
+            uint32_t max_tries = DEFAULT_MAX_TRIES
+        ) noexcept;
+
+        SeqLockedOperation ReserveChildDomain_(
+            FabricSegments edge_table,
+            uint32_t slot,
+            EdgeBuilder::EdgeStatus required_status,
+            EdgeBuilder::EdgeData& before,
+            uint32_t max_tries = DEFAULT_MAX_TRIES
+        ) noexcept;
+
     protected:
 
         EdgeTableRowView EdgeTableRow_(FabricSegments edge_table, uint32_t row_slot) noexcept;

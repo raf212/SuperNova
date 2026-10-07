@@ -72,6 +72,19 @@ namespace BidirectionalInMemGraph
                 const EdgeData&
             ) noexcept = default;
         };
+
+        struct EdgeTableRowView 
+        {
+            std::span<ParentMaskBlock> Masks{};
+            std::span<ParentRelation> Relations{};
+            explicit constexpr operator bool() const noexcept
+            {
+                return
+                    !Masks.empty() &&
+                    !Relations.empty();
+            }
+        };
+
         static constexpr uint32_t RELATION_NULL = UINT32_MAX;
 
         static constexpr uint8_t PARENT_MASK_BITS_PER_BLOCK = sizeof(uint64_t) * LEN_OF_BYTE_IN_BITS;
@@ -102,34 +115,6 @@ namespace BidirectionalInMemGraph
         static constexpr bool IsValidRelationOrdinal(uint32_t ordinal, uint32_t configured_capacity) noexcept
         {
             return ordinal < configured_capacity;
-        }
-
-        static constexpr bool IsBoundedRelationLoatorSize(uint32_t slot_count, uint32_t max_parent) noexcept
-        {
-            if (slot_count == UNSIGNED_ZERO)
-            {
-                return false;
-            }
-
-            const uint64_t highest_locator = static_cast<uint64_t>(slot_count - 1u) * max_parent + (max_parent - 1u);
-            
-            return highest_locator < ADS::APC_INDEX_BOUND_SENTINAL;
-        }
-
-        static constexpr uint32_t RelationSlotandOrdinal(uint32_t locator, uint32_t max_parent) noexcept
-        {
-            return locator % max_parent;
-        }
-
-        static constexpr bool IsValidRelationLocator(
-            uint32_t locator, uint32_t slot_count, 
-            uint32_t capacity, uint32_t max_parent
-        ) noexcept
-        {
-            return locator != RELATION_NULL &&
-                RelationSlotandOrdinal(locator, max_parent) < slot_count &&
-                RelationSlotandOrdinal(locator, max_parent) < capacity;
-
         }
 
         static constexpr uint32_t NextSequence(uint32_t current) noexcept
@@ -185,17 +170,96 @@ namespace BidirectionalInMemGraph
             return parent_slot < child_slot;
         }
 
-        struct EdgeTableRowView 
+        static constexpr bool IsConfigurableNumberOfParent(uint32_t k, uint32_t slot_count) noexcept
         {
-            std::span<ParentMaskBlock> Masks{};
-            std::span<ParentRelation> Relations{};
-            explicit constexpr operator bool() const noexcept
+            return k != UNSIGNED_ZERO && slot_count != UNSIGNED_ZERO && k <= slot_count;
+        }
+
+        static constexpr bool IsBoundedRelationLocatorSize(uint32_t k, uint32_t slot_count) noexcept
+        {
+            if (IsValidConfigurableParentCapacity(k, slot_count))
             {
-                return
-                    !Masks.empty() &&
-                    !Relations.empty();
+                return false;
             }
-        };
+
+            const uint64_t address_count = static_cast<uint64_t>(k) * slot_count;
+            return address_count <= RELATION_NULL;
+        }
+
+        static constexpr uint32_t PackRelationLocator(uint32_t slot, uint32_t ordinal, uint32_t k) noexcept
+        {
+            if (
+                k == UNSIGNED_ZERO ||
+                ordinal >= k 
+            )
+            {
+                return RELATION_NULL;
+            }
+            
+            const uint64_t locator = static_cast<uint64_t>(slot) * k + ordinal;
+            return locator < RELATION_NULL ? static_cast<uint32_t>(locator) : RELATION_NULL;
+        }
+
+        static constexpr uint32_t RelationSLot(uint32_t locator, uint32_t k) noexcept
+        {
+            return locator != RELATION_NULL && k != UNSIGNED_ZERO ? locator / k : RELATION_NULL;
+        }
+
+        static constexpr uint32_t RelationOrdinal(uint32_t locator, uint32_t k) noexcept
+        {
+            return locator != RELATION_NULL && k != UNSIGNED_ZERO ? locator % k : RELATION_NULL;
+        }
+
+        static constexpr bool IsValidRelationLocator(
+            uint32_t locator,
+            uint32_t slot_count,
+            uint32_t k
+        ) noexcept
+        {
+            if (
+                locator == RELATION_NULL ||
+                !IsValidConfigurableParentCapacity(k, slot_count)
+            )
+            {
+                return false;
+            }
+            
+            return 
+                RelationSLot(locator, k) < slot_count && RelationOrdinal(locator, k) < k;
+        }
+
+
+        static constexpr bool MaskContains(uint64_t mask, uint32_t ordinal) noexcept
+        {
+            if (ordinal >= PARENT_MASK_BITS_PER_BLOCK)
+            {
+                return false;
+            }
+            
+            return std::bitset<PARENT_MASK_BITS_PER_BLOCK>(mask).test(ordinal);
+        }
+
+        static constexpr bool MaskContqainsGlobally(
+            std::span<const ParentMaskBlock> masks,
+            uint32_t global_ordinal
+        ) noexcept
+        {
+            if (masks.empty())
+            {
+                return false;
+            }
+            
+            const uint32_t block_idx = global_ordinal / PARENT_MASK_BITS_PER_BLOCK;
+            if (block_idx >= masks.size())
+            {
+                return false;
+            }
+            
+            const uint32_t local_ordinal = global_ordinal % PARENT_MASK_BITS_PER_BLOCK;
+            const uint64_t block = std::atomic_ref<const uint64_t>(masks[block_idx].Block).load(std::memory_order_relaxed);
+
+            return std::bitset<PARENT_MASK_BITS_PER_BLOCK>(block).test(local_ordinal);
+        }
 
     };
 
