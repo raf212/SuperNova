@@ -923,23 +923,23 @@ namespace BidirectionalInMemGraph
 
         std::optional<uint32_t> maybe_First_free = ReadFirstFreeAPCIdx_();
 
+        HAS::LifeCycleControl current{};
+
         if (maybe_First_free.has_value())
         {
             for (uint32_t description_idx = maybe_First_free.value(); description_idx < FabCache_->CountOfAPC_; description_idx++)
             {
-                const DSA::SeqLockAndStateStruct current = ReadAPCStateAtomically_(description_idx);
+
                 if (
-                    !current.IsValid ||
-                    current.StateOfTheAPC != StateOfAPC::FREE
+                    ReadAPCStateAtomically_(description_idx, current) != SeqLockedOperation::FOUND ||
+                    current.State != StateOfAPC::FREE
                 )
                 {
                     continue;
                 }
-                if (!SwitchDescriptionState(
-                    description_idx,
-                    StateOfAPC::RESERVED,
-                    StateOfAPC::FREE
-                ))
+                if (
+                    SwitchDescriptionState(description_idx, StateOfAPC::RESERVED, StateOfAPC::FREE) != SeqLockedOperation::FOUND
+                )
                 {
                     continue;
                 }
@@ -957,11 +957,9 @@ namespace BidirectionalInMemGraph
         
         for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; slot++)
         {
-            const DSA::SeqLockAndStateStruct current = ReadAPCStateAtomically_(slot);
-
             if (
-                current.IsValid &&
-                current.StateOfTheAPC == StateOfAPC::RETIRED &&
+                ReadAPCStateAtomically_(slot, current) == SeqLockedOperation::FOUND &&
+                current.State == StateOfAPC::RETIRED &&
                 ReclaimRetiredSlotTemp_(slot)
             )
             {
@@ -1119,15 +1117,15 @@ namespace BidirectionalInMemGraph
                 ordinal < FabCache_->MaxDirectParentsPerAxis_;
                 ++ordinal)
             {
-                const uint64_t parent = std::atomic_ref<const uint64_t>(
-                    relations[ordinal].ParentHandle
+                const EB::ParentIDGeneration parent = std::atomic_ref<const EB::ParentIDGeneration>(
+                    relations[ordinal].Parent
                 ).load(std::memory_order_relaxed);
-                const uint64_t siblings = std::atomic_ref<const uint64_t>(
-                    relations[ordinal].SiblingLocators
+                const EB::SiblingLinks siblings = std::atomic_ref<const EB::SiblingLinks>(
+                    relations[ordinal].Siblings
                 ).load(std::memory_order_relaxed);
                 if (
-                    parent != FABRIC_CELL_SENTINAL ||
-                    siblings != FABRIC_CELL_SENTINAL
+                    parent != EB::ParentIDGeneration{EB::RELATION_NULL, EB::RELATION_NULL} ||
+                    siblings != EB::SiblingLinks{EB::RELATION_NULL, EB::RELATION_NULL}
                 )
                 {
                     return false;
@@ -1148,23 +1146,23 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        if (!SwitchDescriptionState(
+        if (SwitchDescriptionState(
             slot,
             StateOfAPC::RESERVED,
             StateOfAPC::LIVE,
             max_tries
-        ))
+        ) != SeqLockedOperation::FOUND)
         {
             OpenAPCGeneration_(slot, generation);
             ReleaseDomains___();
             return false;
         }
-        if (!SwitchDescriptionState(
+        if (SwitchDescriptionState(
             slot,
             StateOfAPC::RETIRED,
             StateOfAPC::RESERVED,
             max_tries
-        ))
+        ) != SeqLockedOperation::FOUND)
         {
             SwitchDescriptionState(
                 slot,
@@ -1228,12 +1226,12 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        if (!SwitchDescriptionState(
+        if (SwitchDescriptionState(
             slot,
             StateOfAPC::RESERVED,
             StateOfAPC::RETIRED,
             DEFAULT_MAX_TRIES
-        ))
+        ) != SeqLockedOperation::FOUND)
         {
             return false;
         }
@@ -1287,11 +1285,11 @@ namespace BidirectionalInMemGraph
                 ++ordinal)
             {
                 EdgeBuilder::ParentRelation relation{};
-                relation.ParentHandle = std::atomic_ref<uint64_t>(
-                    relations[ordinal].ParentHandle
+                relation.Parent = std::atomic_ref<EB::ParentIDGeneration>(
+                    relations[ordinal].Parent
                 ).load(std::memory_order_acquire);
-                relation.SiblingLocators = std::atomic_ref<uint64_t>(
-                    relations[ordinal].SiblingLocators
+                relation.Siblings = std::atomic_ref<EB::SiblingLinks>(
+                    relations[ordinal].Siblings
                 ).load(std::memory_order_acquire);
 
                 if (!EdgeBuilder::IsEmpty(relation))
@@ -1322,16 +1320,9 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const size_t lifecycle_index =
-            range.BeginIndex +
-            static_cast<size_t>(ADS::HeaderIdentifierOfAPC::APC_LIFE_CYCLE);
-
         for (size_t idx = range.BeginIndex; idx < range.EndIndex; ++idx)
         {
-            if (idx != lifecycle_index)
-            {
-                DirectlyStoreFabricUnit64(idx, 0u);
-            }
+            DirectlyStoreFabricUnit64(idx, 0u);
         }
 
         return HandleOfAPCStatic::IsGenerationValid(new_generation);
