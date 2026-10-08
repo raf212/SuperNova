@@ -109,7 +109,7 @@ namespace BidirectionalInMemGraph
         }
 
         return BindExistingAPCSnapshot_(
-            EdgeBuilder::RelationSlot(locator),
+            EdgeBuilder::RelationSlot(locator, FabCache_->MaxDirectParentsPerAxis_),
             child
         )
             ? SeqLockedOperation::FOUND
@@ -207,10 +207,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
-        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
-            parent_slot,
-            parent_generation
-        );
+        const EB::ParentIDGeneration expected_parent {parent_generation, parent_slot};
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -236,11 +233,11 @@ namespace BidirectionalInMemGraph
             }
 
             const uint32_t tail = before.TailLocator;
-            uint64_t tail_parent = FABRIC_CELL_SENTINAL;
+            EB::ParentIDGeneration tail_parent{};
             const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
-                EdgeBuilder::RelationSlot(tail),
-                EdgeBuilder::RelationOrdinal(tail),
+                EdgeBuilder::RelationSlot(tail, FabCache_->MaxDirectParentsPerAxis_),
+                EdgeBuilder::RelationOrdinal(tail, FabCache_->MaxDirectParentsPerAxis_),
                 tail_parent,
                 1u
             );
@@ -254,12 +251,12 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            const std::span<EdgeBuilder::ParentRelation> tail_row =
-                EdgeRelationsPerSlot_(edge_table, EdgeBuilder::RelationSlot(tail));
-            const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
-                tail_row[EdgeBuilder::RelationOrdinal(tail)].SiblingLocators
-            ).load(std::memory_order_relaxed);
-            const uint32_t first = TwinU32ToU64::ExtractHigh32Of64(sibling_raw);
+            const std::span<EdgeBuilder::ParentRelation> tail_row = EdgeRelationsPerSlot_(
+                edge_table, 
+                EdgeBuilder::RelationSlot(tail, FabCache_->MaxDirectParentsPerAxis_)
+            );
+            const EB::SiblingLinks sibling_raw = std::atomic_ref<const EB::SiblingLinks>(tail_row[EdgeBuilder::RelationOrdinal(tail, FabCache_->MaxDirectParentsPerAxis_)].Siblings).load(std::memory_order_relaxed);
+            const uint32_t first = sibling_raw.Previous;
 
             AdaptivePackedCellContainer child{};
             if (

@@ -197,6 +197,7 @@ namespace BidirectionalInMemGraph
                 cache.PerAPCRuntimeCellCount_ > UINT32_MAX ||
                 !ADS::IsCapacityOfAPCValid(cache.PerAPCRuntimeCellCount_) ||
                 !EdgeBuilder::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_)||
+                !EdgeBuilder::IsBoundedRelationLocatorSize(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_) ||
                 cache.EdgeTableRecordWidth_ != EdgeBuilder::EdgeTableRecordWidth(cache.MaxDirectParentsPerAxis_) ||
                 cache.ActiveRegionMask_ == UNSIGNED_ZERO ||
                 (cache.ActiveRegionMask_ & ~ADS::ValidRegionMask()) != UNSIGNED_ZERO ||
