@@ -2,6 +2,31 @@
 
 namespace BidirectionalInMemGraph
 {
+    using HAS = HandleOfAPCStatic;
+
+
+    ADS::RangeOfAPC FabricConstructor::GetSegmentPoolRange(uint64_t single_description_index) noexcept
+    {
+        ADS::RangeOfAPC desired_segment_pool_range{};
+
+        if (
+            single_description_index >= FabCache_->CountOfAPC_ ||
+            FabCache_->PerAPCRuntimeCellCount_ == UNSIGNED_ZERO
+        )
+        {
+            return desired_segment_pool_range;
+        }
+
+        const uint64_t apc_count_offset = single_description_index * FabCache_->PerAPCRuntimeCellCount_;
+        desired_segment_pool_range.BeginIndex = FabCache_->SegmentPoolBegin_ + static_cast<size_t>(apc_count_offset);
+        desired_segment_pool_range.EndIndex = desired_segment_pool_range.BeginIndex + static_cast<size_t>(FabCache_->PerAPCRuntimeCellCount_);
+        desired_segment_pool_range.IsValid =
+            desired_segment_pool_range.BeginIndex >= FabCache_->SegmentPoolBegin_ &&
+            desired_segment_pool_range.BeginIndex < desired_segment_pool_range.EndIndex &&
+            desired_segment_pool_range.EndIndex <= FabCache_->SlabCellCount_;
+
+        return desired_segment_pool_range;
+    }
 
     bool FabricConstructor::ReadAFabricU64Directly(
         size_t slab_index,
@@ -30,10 +55,6 @@ namespace BidirectionalInMemGraph
         return_value = desired_cell_raw;
         return true;
     }
-
-
-
-
 
     void FabricConstructor::DirectlyStoreFabricUnit64(size_t slab_index, uint64_t fabric_unit) noexcept
     {
@@ -121,181 +142,6 @@ namespace BidirectionalInMemGraph
             number_of_cells * sizeof(uint64_t)
         );
         return true;
-    }
-
-    uint64_t* APCHandleAndRetirement::GetAPCGenerationPtr_(uint32_t slot) noexcept
-    {
-        if (
-            !SlabBasePtr_ ||
-            slot >= FabCache_->CountOfAPC_ ||
-            FabCache_->HandleTableBeginIndex_ >= FabCache_->SlabCellCount_
-        )
-        {
-            return nullptr;
-        }
-        
-        const size_t idx = FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
-
-        return idx < FabCache_->SlabCellCount_ ? &SlabBasePtr_[idx] : nullptr;
-    }
-
-    bool APCHandleAndRetirement::InitializeAPCGenerationTable_() noexcept
-    {
-        for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; slot++)
-        {
-            uint64_t* cell = GetAPCGenerationPtr_(slot);
-            if (!cell)
-            {
-                return false;
-            }
-
-            HandleOfAPCStatic::ControlValues values{};
-            values.Generation = HandleOfAPCStatic::FIRST_GENERATION;
-            values.ActiveAccess = UNSIGNED_ZERO;
-            values.Closed = true;
-
-
-            std::atomic_ref<uint64_t>(*cell).store(
-                HandleOfAPCStatic::MakeControlCell(values),
-                std::memory_order_relaxed
-            );
-        }
-        return true;
-    }
-
-    bool APCHandleAndRetirement::OpenAPCGeneration_(uint32_t slot, uint32_t generation) noexcept
-    {
-        uint64_t* cell = GetAPCGenerationPtr_(slot);
-
-        if (!cell || !HandleOfAPCStatic::IsGenerationValid(generation))
-        {
-            return false;
-        }
-
-        HandleOfAPCStatic::ControlValues values{};
-        values.Generation = generation;
-        values.ActiveAccess = UNSIGNED_ZERO;
-        values.Closed = true;
-        
-        uint64_t expected = HandleOfAPCStatic::MakeControlCell(values);
-        //desired
-        values.Closed = false;
-
-        return std::atomic_ref<uint64_t>(*cell).compare_exchange_strong(
-            expected,
-            HandleOfAPCStatic::MakeControlCell(values),
-            std::memory_order_acq_rel,
-            std::memory_order_acquire
-        );
-    }
-
-    bool APCHandleAndRetirement::AdvanceClosedAPCGeneration_(uint32_t slot, uint32_t& generation_new) noexcept
-    {
-        generation_new = UNSIGNED_ZERO;
-        uint64_t* cell = GetAPCGenerationPtr_(slot);
-
-        if (!cell)
-        {
-            return false;
-        }
-
-        std::atomic_ref<uint64_t> control(*cell);
-        uint64_t observed = control.load(std::memory_order_acquire);
-
-        const HandleOfAPCStatic::ControlValues values = HandleOfAPCStatic::ReadControlCell(observed);
-
-        HandleOfAPCStatic::ControlValues desired_values{};
-
-
-        const uint32_t desired_generation = HandleOfAPCStatic::NextGeneration(values.Generation);
-
-        desired_values.Generation = desired_generation;
-        desired_values.ActiveAccess = UNSIGNED_ZERO;
-        desired_values.Closed = true;
-
-        const uint64_t desired = HandleOfAPCStatic::MakeControlCell(desired_values);
-        
-        if (
-            !values.Closed ||
-            values.ActiveAccess != UNSIGNED_ZERO ||
-            desired_generation == UNSIGNED_ZERO 
-        )
-        {
-            return false;
-        }
-        
-        if (
-            !control.compare_exchange_strong(observed, desired, std::memory_order_acq_rel, std::memory_order_acquire)
-        )
-        {
-            return false;
-        }
-        
-        generation_new = desired_generation;
-        return true;
-    }
-
-
-    bool APCHandleAndRetirement::CloseAPCGeneration_(uint32_t slot, uint32_t generation) noexcept
-    {
-        uint64_t* cell = GetAPCGenerationPtr_(slot);
-        if (
-            !cell ||
-            !HandleOfAPCStatic::IsGenerationValid(generation)
-        )
-        {
-            return false;
-        }
-
-        HandleOfAPCStatic::ControlValues values{};
-        values.Generation = generation;
-        values.ActiveAccess = UNSIGNED_ZERO;
-        values.Closed = false;
-        
-        uint64_t expected = HandleOfAPCStatic::MakeControlCell(values);
-
-        values.Closed = true;
-        const uint64_t desired = HandleOfAPCStatic::MakeControlCell(values);
-
-        return std::atomic_ref<uint64_t>(*cell).compare_exchange_strong(
-            expected,
-            desired,
-            std::memory_order_acq_rel,
-            std::memory_order_acquire
-        );  
-    }
-
-
-    std::optional<uint32_t> APCHandleAndRetirement::ReadFirstFreeAPCIdx_() noexcept
-    {
-        if (!FabCache_)
-        {
-            return std::nullopt;
-        }
-
-        const uint32_t first_free = std::atomic_ref<const uint32_t>(FabCache_->FirstFreeIdx_).load(std::memory_order_acquire);
-
-        if (!ADS::IsValid32BitAPCUnit(first_free))
-        {
-            return std::nullopt;
-        }
-        
-        return first_free;
-    }
-
-    void APCHandleAndRetirement::UpdateFirstFreeIdx_(uint32_t& expected_value, uint32_t desired_value) noexcept
-    {
-        if (!FabCache_)
-        {
-            return;
-        }
-        
-        std::atomic_ref<uint32_t>(FabCache_->FirstFreeIdx_).compare_exchange_strong(
-            expected_value,
-            desired_value,
-            std::memory_order_acq_rel,
-            std::memory_order_acquire
-        );
     }
 
 

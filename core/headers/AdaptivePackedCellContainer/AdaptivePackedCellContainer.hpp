@@ -61,7 +61,7 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
 
         AdaptivePackedCellContainer FindParent(
             FabricSegments edge_table,
-            uint8_t relation_ordinal,
+            uint32_t relation_ordinal,
             RelationOparation* parent_relation = nullptr,
             uint32_t max_tries = REALTION_FIND_TRIES
         ) noexcept;

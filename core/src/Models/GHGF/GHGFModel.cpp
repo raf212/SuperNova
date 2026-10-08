@@ -48,11 +48,13 @@ namespace BidirectionalInMemGraph
         GHGFCache_.ModelPrepared_ = false;
     }
 
-    uint64_t GHGFModel::GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept
+    uint64_t GHGFModel::GHGFParentMask_(
+        uint32_t slot, FabricSegments axis, uint32_t max_tries
+    ) noexcept
     {
-        CompiledDAGRecord* record = CompiledDAGRow_(slot);
-        return axis == FabricSegments::VALUE_PARENT_EDGE_TABLE_H ?
-            record->ValueParentMask : record->VolatileParentMask;
+        uint64_t mask = UNSIGNED_ZERO;
+        return ReadCompiledDAGParentMask_(axis, slot, mask, max_tries) == SeqLockedOperation::FOUND ?
+            mask : UNSIGNED_ZERO;
     }
 
 
@@ -106,12 +108,12 @@ namespace BidirectionalInMemGraph
         
         InvalidateGHGFModel_();
 
-        const std::span<EdgeBuilder::ParentRelation> retations = ParentRelations_(connection.Edge, connection.Child);
-        for (uint8_t i = 0; i < FabCache_->MaxDirectParentsPerAxis_; i++)
+        const std::span<EdgeBuilder::ParentRelation> retations = EdgeRelationsPerSlot_(connection.Edge, connection.Child);
+        for (uint32_t i = 0; i < FabCache_->MaxDirectParentsPerAxis_; i++)
         {
             if (
                 !EdgeBuilder::IsEmpty(retations[i]) &&
-                EdgeBuilder::ParentSlot(retations[i]) == connection.Parent
+                retations[i].Parent.Slot == connection.Parent
             )
             {
                 GHGFRegion_(connection.Child, GHGFCache_.WeightCellOffset_)[GM::CouplingIndex(connection.Edge, i, FabCache_->MaxDirectParentsPerAxis_)] = connection.Coupling;
@@ -326,7 +328,8 @@ namespace BidirectionalInMemGraph
         return HandleOfAPCStatic::IsGenerationValid(generation);
     }
 
-    FabricToAPCLinker::SeqLockedOperation GHGFModel::ReadGHGFParentExecutionSnapshot_(
+    FabricToAPCLinker::SeqLockedOperation
+    GHGFModel::ReadGHGFParentExecutionSnapshot_(
         uint32_t child,
         FabricSegments edge,
         GM::GHGFParentExecutionSnapshot& snapshot,
@@ -334,118 +337,132 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         using Operation = FabricToAPCLinker::SeqLockedOperation;
-        using Domain = EdgeBuilder::EdgeDomain;
 
         snapshot = {};
+
         if (
             !IsGHGFModelReady_() ||
             child >= FabCache_->CountOfAPC_ ||
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge) ||
-            max_tries == UNSIGNED_ZERO
+            max_tries == 0u
         )
         {
             return Operation::NONE;
         }
 
-        const std::span<EdgeBuilder::ParentRelation> relations = ParentRelations_(edge, child);
-        CompiledDAGRecord* const compiled = CompiledDAGRow_(child);
+        const auto relations =
+            EdgeRelationsPerSlot_(edge, child);
+
+        const auto masks =
+            ParentMask_(edge, child);
+
+        HAS::ParentRowControl* const control =
+            ParentRowControl_(edge, child);
+
         float* const weights = GHGFWeight_(child);
 
         if (
-            !compiled || !weights ||
-            relations.size() != FabCache_->MaxDirectParentsPerAxis_
+            !control ||
+            masks.empty() ||
+            !weights ||
+            relations.size() !=
+                FabCache_->MaxDirectParentsPerAxis_
         )
         {
             return Operation::NONE;
         }
 
-        uint64_t& stored_mask =
-            edge == FabricSegments::VALUE_PARENT_EDGE_TABLE_H
-                ? compiled->ValueParentMask
-                : compiled->VolatileParentMask;
-
-        // Construction-time static model: preserve the direct compiled-table path.
-        if (!GHGFCache_.StructuralLearningActive_)
+        for (uint32_t attempt = 0u;
+            attempt < max_tries;
+            ++attempt)
         {
-            snapshot.ParentMask = stored_mask;
-            for (uint8_t ordinal = 0;
-                ordinal < FabCache_->MaxDirectParentsPerAxis_;
-                ++ordinal)
+            const HAS::ParentRowControl before =
+                std::atomic_ref<const HAS::ParentRowControl>(
+                    *control
+                ).load(std::memory_order_acquire);
+
+            if (!HAS::ValidParentControl(before))
             {
-                if ((snapshot.ParentMask & EdgeBuilder::DirtyBit(ordinal)) == 0u)
-                    continue;
-
-                snapshot.ParentHandles[ordinal] = relations[ordinal].ParentHandle;
-                snapshot.Couplings[ordinal] = weights[GM::CouplingIndex(edge, ordinal, Profile_.MaxDirectParentPerAxis)];
+                return Operation::NONE;
             }
-            return Operation::FOUND;
-        }
 
-        const size_t control_index = EdgeControlCellIndex_(
-            edge,
-            child,
-            Domain::PARENT_RELATIONS
-        );
-        if (control_index == SIZE_MAX)
-            return Operation::NONE;
-
-        std::atomic_ref<const uint64_t> control(SlabBasePtr_[control_index]);
-        const uint64_t allowed_mask = MaskLowBitsForU64(FabCache_->MaxDirectParentsPerAxis_);
-
-        for (uint32_t attempt = 0; attempt < max_tries; ++attempt)
-        {
-            const uint64_t before_raw = control.load(std::memory_order_acquire);
-            const EdgeBuilder::EdgeData before =
-                EdgeBuilder::UnpackEdgeHeader(before_raw);
-
-            if (!before.IsValid)
-                return Operation::NONE;
-            if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
+            if (before.Status == EB::EdgeStatus::RESERVED)
+            {
                 continue;
-            if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
+            }
+
+            if (before.Status != EB::EdgeStatus::LIVE)
+            {
                 return Operation::NONE;
+            }
 
             GM::GHGFParentExecutionSnapshot local{};
             local.RowSequence = before.SeqLock;
-            local.ParentMask = std::atomic_ref<const uint64_t>(stored_mask).load(
-                std::memory_order_relaxed);
-
-            if ((local.ParentMask & ~allowed_mask) != 0u)
-                return Operation::NONE;
+            local.ParentMask =
+                std::atomic_ref<const EB::ParentMaskBlock>(
+                    masks.front()
+                ).load(std::memory_order_relaxed).Block;
 
             bool valid = true;
-            for (uint8_t ordinal = 0;
+
+            for (uint32_t ordinal = 0u;
                 ordinal < FabCache_->MaxDirectParentsPerAxis_;
                 ++ordinal)
             {
-                if ((local.ParentMask & EdgeBuilder::DirtyBit(ordinal)) == 0u)
+                if (!EB::MaskContains(local.ParentMask, ordinal))
+                {
                     continue;
+                }
 
-                local.ParentHandles[ordinal] =
-                    std::atomic_ref<const uint64_t>(
-                        relations[ordinal].ParentHandle).load(
-                            std::memory_order_relaxed);
+                const EB::ParentIDGeneration parent =
+                    std::atomic_ref<
+                        const EB::ParentIDGeneration
+                    >(
+                        relations[ordinal].Parent
+                    ).load(std::memory_order_relaxed);
 
-                const uint32_t parameter = GM::CouplingIndex(edge, ordinal, Profile_.MaxDirectParentPerAxis);
-                local.Couplings[ordinal] = std::atomic_ref<const float>(weights[parameter]).load(std::memory_order_relaxed);
+                const uint32_t parameter =
+                    GM::CouplingIndex(
+                        edge,
+                        static_cast<uint8_t>(ordinal),
+                        Profile_.MaxDirectParentPerAxis
+                    );
 
-                const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(local.ParentHandles[ordinal]);
-                valid = valid &&
-                    local.ParentHandles[ordinal] != FABRIC_CELL_SENTINAL &&
-                    parent < child &&
-                    std::isfinite(local.Couplings[ordinal]);
+                local.Couplings[ordinal] =
+                    std::atomic_ref<const float>(
+                        weights[parameter]
+                    ).load(std::memory_order_relaxed);
+
+                local.ParentHandles[ordinal] = parent;
+
+                valid =
+                    valid &&
+                    !EB::IsParentEmpty(parent) &&
+                    parent.Slot < child &&
+                    std::isfinite(
+                        local.Couplings[ordinal]
+                    );
             }
 
-            const uint64_t after_raw = control.load(std::memory_order_acquire);
-            if (before_raw != after_raw)
+            const HAS::ParentRowControl after =
+                std::atomic_ref<const HAS::ParentRowControl>(
+                    *control
+                ).load(std::memory_order_acquire);
+
+            if (before != after)
+            {
                 continue;
+            }
 
             if (!valid)
+            {
                 return Operation::NONE;
+            }
 
             snapshot = local;
             return Operation::FOUND;
         }
+
         return Operation::RETRY;
     }
 

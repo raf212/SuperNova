@@ -7,18 +7,15 @@ namespace BidirectionalInMemGraph
     struct CoreOfFabricCoordinator
     {
         /// UNCHECKED
-        static constexpr size_t RELATION_WIDTH_OF_FABRIC = 0u;
         static constexpr size_t DEVICE_PLANNER_RECORD_LEN = 0u;
         static constexpr size_t WORK_RECORD_WIDTH_OF_FABRIC = 0u;
         static constexpr size_t DEFAULT_FABRIC_CONTROLIO_LENGTH = 512u;
         ///--------------------------
-        static constexpr size_t COMPILED_DAG_LEN = 2u;
 
         static constexpr uint32_t FABRIC_MAGIC = 0x41504643u;
         static constexpr uint32_t FABRIC_META_EOF = 0x41474946u;
-        static constexpr uint8_t EACH_TABLE_RECORD_SENTINAL = UINT8_MAX;
 
-        static constexpr uint8_t FORMAT_VERSION = 1u;
+        static constexpr uint8_t FORMAT_VERSION = 2u;
 
         enum class FabricBackigOwnership : uint8_t
         {
@@ -27,7 +24,7 @@ namespace BidirectionalInMemGraph
             BORROWED = 2
         };
 
-        struct alignas(uint64_t) FabricCache 
+        struct alignas(64) FabricCache 
         {
             uint32_t FormateVersion_{UNSIGNED_ZERO};
             ///FABRIC CONSTRUCTION
@@ -42,8 +39,8 @@ namespace BidirectionalInMemGraph
             uint32_t FirstFreeIdx_{UNSIGNED_ZERO};
 
             // EDGE GEOMETRY
-            uint8_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
-            uint16_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
+            uint32_t MaxDirectParentsPerAxis_{UNSIGNED_ZERO};
+            uint64_t EdgeTableRecordWidth_{UNSIGNED_ZERO};
 
             ///MATRIX CONSTRUCTION
             uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
@@ -55,13 +52,11 @@ namespace BidirectionalInMemGraph
             // HOT TABLE BEGIN INDICES
             uint64_t HorizontalEdgeBeginIdx_{UNSIGNED_ZERO};
             uint64_t VerticalEdgeBeginIdx_{UNSIGNED_ZERO};
-            uint64_t CompiledDAGTableBeginIdx_{UNSIGNED_ZERO};
             uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
             uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
             bool HasDefaultRegionTable_{false};
 
         };
-
 
         struct DetachFabric final
         {
@@ -75,9 +70,6 @@ namespace BidirectionalInMemGraph
             }
         };
         
-
-        static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
-
         enum class RecordBookInternalIndexing : uint8_t
         {
             BEGIN64 = 0,
@@ -110,9 +102,6 @@ namespace BidirectionalInMemGraph
             return entry;        
         }
 
-
-
-    
     };
 
 

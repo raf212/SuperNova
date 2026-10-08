@@ -109,7 +109,7 @@ namespace BidirectionalInMemGraph
         }
 
         return BindExistingAPCSnapshot_(
-            EdgeBuilder::RelationSlot(locator),
+            EdgeBuilder::RelationSlot(locator, FabCache_->MaxDirectParentsPerAxis_),
             child
         )
             ? SeqLockedOperation::FOUND
@@ -121,7 +121,7 @@ namespace BidirectionalInMemGraph
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         FabricToAPCLinker::RelationOparation* result_ptr,
         uint32_t max_tries
     ) noexcept
@@ -148,7 +148,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            uint64_t parent_handle = FABRIC_CELL_SENTINAL;
+            EB::ParentIDGeneration parent_handle{};
             const SeqLockedOperation read = ReadParentHandle_(
                 edge_table,
                 child_slot,
@@ -168,9 +168,9 @@ namespace BidirectionalInMemGraph
             parent = {};
             if (
                 !BindExistingAPCSnapshot_(
-                    TwinU32ToU64::ExtractLow32Of64(parent_handle),
+                    parent_handle.Slot,
                     parent,
-                    TwinU32ToU64::ExtractHigh32Of64(parent_handle)
+                    parent_handle.Generation
                 ) ||
                 !IsOpenAPCGeneration_(child_slot, child_generation)
             )
@@ -180,7 +180,8 @@ namespace BidirectionalInMemGraph
 
             result.RelationLocator_ = EdgeBuilder::PackRelationLocator(
                 child_slot,
-                relation_ordinal
+                relation_ordinal,
+                FabCache_->MaxDirectParentsPerAxis_
             );
             result.MutationOP_ = SeqLockedOperation::FOUND;
             if (result_ptr)
@@ -207,10 +208,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
-        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
-            parent_slot,
-            parent_generation
-        );
+        const EB::ParentIDGeneration expected_parent {parent_generation, parent_slot};
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -219,7 +217,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -236,11 +234,11 @@ namespace BidirectionalInMemGraph
             }
 
             const uint32_t tail = before.TailLocator;
-            uint64_t tail_parent = FABRIC_CELL_SENTINAL;
+            EB::ParentIDGeneration tail_parent{};
             const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
-                EdgeBuilder::RelationSlot(tail),
-                EdgeBuilder::RelationOrdinal(tail),
+                EdgeBuilder::RelationSlot(tail, FabCache_->MaxDirectParentsPerAxis_),
+                EdgeBuilder::RelationOrdinal(tail, FabCache_->MaxDirectParentsPerAxis_),
                 tail_parent,
                 1u
             );
@@ -254,12 +252,12 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            const std::span<EdgeBuilder::ParentRelation> tail_row =
-                ParentRelations_(edge_table, EdgeBuilder::RelationSlot(tail));
-            const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
-                tail_row[EdgeBuilder::RelationOrdinal(tail)].SiblingLocators
-            ).load(std::memory_order_relaxed);
-            const uint32_t first = TwinU32ToU64::ExtractHigh32Of64(sibling_raw);
+            const std::span<EdgeBuilder::ParentRelation> tail_row = EdgeRelationsPerSlot_(
+                edge_table, 
+                EdgeBuilder::RelationSlot(tail, FabCache_->MaxDirectParentsPerAxis_)
+            );
+            const EB::SiblingLinks sibling_raw = std::atomic_ref<const EB::SiblingLinks>(tail_row[EdgeBuilder::RelationOrdinal(tail, FabCache_->MaxDirectParentsPerAxis_)].Siblings).load(std::memory_order_relaxed);
+            const uint32_t first = sibling_raw.Next;
 
             AdaptivePackedCellContainer child{};
             if (
@@ -282,7 +280,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -316,10 +314,8 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         FabricToAPCLinker::RelationOparation result{};
-        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
-            parent_slot,
-            parent_generation
-        );
+        const EB::ParentIDGeneration expected_parent {parent_generation, parent_slot};
+
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -328,7 +324,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -344,12 +340,12 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            uint64_t owner = FABRIC_CELL_SENTINAL;
+            EB::ParentIDGeneration owner{};
             const uint32_t tail = before.TailLocator;
             const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
-                EdgeBuilder::RelationSlot(tail),
-                EdgeBuilder::RelationOrdinal(tail),
+                EdgeBuilder::RelationSlot(tail, FabCache_->MaxDirectParentsPerAxis_),
+                EdgeBuilder::RelationOrdinal(tail, FabCache_->MaxDirectParentsPerAxis_),
                 owner,
                 1u
             );
@@ -376,7 +372,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -419,10 +415,8 @@ namespace BidirectionalInMemGraph
         {
             return {};
         }
-        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
-            parent_slot,
-            parent_generation
-        );
+        const EB::ParentIDGeneration expected_parent {parent_generation, parent_slot};
+
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -431,7 +425,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -447,11 +441,11 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            uint64_t owner = FABRIC_CELL_SENTINAL;
+            EB::ParentIDGeneration owner{};
             const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
-                EdgeBuilder::RelationSlot(current_relation_locator),
-                EdgeBuilder::RelationOrdinal(current_relation_locator),
+                EdgeBuilder::RelationSlot(current_relation_locator, FabCache_->MaxDirectParentsPerAxis_),
+                EdgeBuilder::RelationOrdinal(current_relation_locator, FabCache_->MaxDirectParentsPerAxis_),
                 owner,
                 1u
             );
@@ -468,7 +462,7 @@ namespace BidirectionalInMemGraph
             {
                 EdgeBuilder::EdgeData after{};
                 if (
-                    ReadEdgeHeader_(edge_table, parent_slot, after) &&
+                    ReadChildDomainControl_(edge_table, parent_slot, after) &&
                     SameHeader_(before, after) &&
                     IsOpenAPCGeneration_(parent_slot, parent_generation)
                 )
@@ -478,15 +472,15 @@ namespace BidirectionalInMemGraph
                 continue;
             }
 
-            const std::span<EdgeBuilder::ParentRelation> row = ParentRelations_(
+            const std::span<EdgeBuilder::ParentRelation> row = EdgeRelationsPerSlot_(
                 edge_table,
-                EdgeBuilder::RelationSlot(current_relation_locator)
+                EdgeBuilder::RelationSlot(current_relation_locator, FabCache_->MaxDirectParentsPerAxis_)
             );
-            const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
-                row[EdgeBuilder::RelationOrdinal(current_relation_locator)]
-                    .SiblingLocators
-            ).load(std::memory_order_relaxed);
-            const uint32_t next = TwinU32ToU64::ExtractHigh32Of64(sibling_raw);
+            const EB::SiblingLinks sibling_raw = std::atomic_ref<const EB::SiblingLinks>(row[EdgeBuilder::RelationOrdinal(
+                current_relation_locator, FabCache_->MaxDirectParentsPerAxis_
+            )].Siblings).load(std::memory_order_relaxed);
+
+            const uint32_t next = sibling_raw.Next;
 
             AdaptivePackedCellContainer child{};
             if (
@@ -509,7 +503,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -552,10 +546,8 @@ namespace BidirectionalInMemGraph
         {
             return {};
         }
-        const uint64_t expected_parent = EdgeBuilder::MakeParentHandle(
-            parent_slot,
-            parent_generation
-        );
+
+        const EB::ParentIDGeneration expected_parent {parent_generation, parent_slot};
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -564,7 +556,7 @@ namespace BidirectionalInMemGraph
                 return {};
             }
             EdgeBuilder::EdgeData before{};
-            if (!ReadEdgeHeader_(edge_table, parent_slot, before))
+            if (!ReadChildDomainControl_(edge_table, parent_slot, before))
             {
                 return {};
             }
@@ -580,11 +572,11 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            uint64_t owner = FABRIC_CELL_SENTINAL;
+            EB::ParentIDGeneration owner{};
             const SeqLockedOperation owner_read = ReadParentHandle_(
                 edge_table,
-                EdgeBuilder::RelationSlot(current_relation_locator),
-                EdgeBuilder::RelationOrdinal(current_relation_locator),
+                EdgeBuilder::RelationSlot(current_relation_locator, FabCache_->MaxDirectParentsPerAxis_),
+                EdgeBuilder::RelationOrdinal(current_relation_locator, FabCache_->MaxDirectParentsPerAxis_),
                 owner,
                 1u
             );
@@ -597,21 +589,21 @@ namespace BidirectionalInMemGraph
                 return {};
             }
 
-            const std::span<EdgeBuilder::ParentRelation> row = ParentRelations_(
+            const EB::PRSpan row = EdgeRelationsPerSlot_(
                 edge_table,
-                EdgeBuilder::RelationSlot(current_relation_locator)
+                EdgeBuilder::RelationSlot(current_relation_locator, FabCache_->MaxDirectParentsPerAxis_)
             );
-            const uint64_t sibling_raw = std::atomic_ref<const uint64_t>(
-                row[EdgeBuilder::RelationOrdinal(current_relation_locator)]
-                    .SiblingLocators
+            const EB::SiblingLinks sibling_raw = std::atomic_ref<const EB::SiblingLinks>(
+                row[EdgeBuilder::RelationOrdinal(current_relation_locator, FabCache_->MaxDirectParentsPerAxis_)]
+                    .Siblings
             ).load(std::memory_order_relaxed);
-            const uint32_t previous = TwinU32ToU64::ExtractLow32Of64(sibling_raw);
+            const uint32_t previous = sibling_raw.Previous;
 
             if (previous == before.TailLocator)
             {
                 EdgeBuilder::EdgeData after{};
                 if (
-                    ReadEdgeHeader_(edge_table, parent_slot, after) &&
+                    ReadChildDomainControl_(edge_table, parent_slot, after) &&
                     SameHeader_(before, after) &&
                     IsOpenAPCGeneration_(parent_slot, parent_generation)
                 )
@@ -642,7 +634,7 @@ namespace BidirectionalInMemGraph
 
             EdgeBuilder::EdgeData after{};
             if (
-                !ReadEdgeHeader_(edge_table, parent_slot, after) ||
+                !ReadChildDomainControl_(edge_table, parent_slot, after) ||
                 !SameHeader_(before, after) ||
                 !IsOpenAPCGeneration_(parent_slot, parent_generation)
             )
@@ -870,7 +862,7 @@ namespace BidirectionalInMemGraph
         const auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept
         {
             const std::span<EdgeBuilder::ParentRelation> relations =
-                ParentRelations_(table, slot);
+                EdgeRelationsPerSlot_(table, slot);
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {
                 return false;
@@ -880,12 +872,8 @@ namespace BidirectionalInMemGraph
                 ++ordinal)
             {
                 if (
-                    std::atomic_ref<const uint64_t>(
-                        relations[ordinal].ParentHandle
-                    ).load(std::memory_order_relaxed) != FABRIC_CELL_SENTINAL ||
-                    std::atomic_ref<const uint64_t>(
-                        relations[ordinal].SiblingLocators
-                    ).load(std::memory_order_relaxed) != FABRIC_CELL_SENTINAL
+                    std::atomic_ref<const EB::ParentIDGeneration>(relations[ordinal].Parent).load(std::memory_order_relaxed) != EB::ParentIDGeneration{EB::RELATION_NULL, EB::RELATION_NULL} ||
+                    std::atomic_ref<const EB::SiblingLinks>(relations[ordinal].Siblings).load(std::memory_order_relaxed) != EB::SiblingLinks{EB::RELATION_NULL, EB::RELATION_NULL}
                 )
                 {
                     return false;
@@ -899,12 +887,12 @@ namespace BidirectionalInMemGraph
             v_list_before.TailLocator != EdgeBuilder::RELATION_NULL ||
             !ReservedRowIsEmpty___(H) ||
             !ReservedRowIsEmpty___(V) ||
-            !SwitchDescriptionState(
+            SwitchDescriptionState(
                 slot,
                 StateOfAPC::LIVE,
                 StateOfAPC::RESERVED,
                 internal_max_tries
-            )
+            ) != SeqLockedOperation::FOUND
         )
         {
             AbortCreation___();
@@ -935,23 +923,23 @@ namespace BidirectionalInMemGraph
 
         std::optional<uint32_t> maybe_First_free = ReadFirstFreeAPCIdx_();
 
+        HAS::LifeCycleControl current{};
+
         if (maybe_First_free.has_value())
         {
             for (uint32_t description_idx = maybe_First_free.value(); description_idx < FabCache_->CountOfAPC_; description_idx++)
             {
-                const DSA::SeqLockAndStateStruct current = ReadAPCStateAtomically_(description_idx);
+
                 if (
-                    !current.IsValid ||
-                    current.StateOfTheAPC != StateOfAPC::FREE
+                    ReadAPCStateAtomically_(description_idx, current) != SeqLockedOperation::FOUND ||
+                    current.State != StateOfAPC::FREE
                 )
                 {
                     continue;
                 }
-                if (!SwitchDescriptionState(
-                    description_idx,
-                    StateOfAPC::RESERVED,
-                    StateOfAPC::FREE
-                ))
+                if (
+                    SwitchDescriptionState(description_idx, StateOfAPC::RESERVED, StateOfAPC::FREE) != SeqLockedOperation::FOUND
+                )
                 {
                     continue;
                 }
@@ -969,11 +957,9 @@ namespace BidirectionalInMemGraph
         
         for (uint32_t slot = 0; slot < FabCache_->CountOfAPC_; slot++)
         {
-            const DSA::SeqLockAndStateStruct current = ReadAPCStateAtomically_(slot);
-
             if (
-                current.IsValid &&
-                current.StateOfTheAPC == StateOfAPC::RETIRED &&
+                ReadAPCStateAtomically_(slot, current) == SeqLockedOperation::FOUND &&
+                current.State == StateOfAPC::RETIRED &&
                 ReclaimRetiredSlotTemp_(slot)
             )
             {
@@ -1122,7 +1108,7 @@ namespace BidirectionalInMemGraph
         const auto ReservedRowIsEmpty___ = [&](FabricSegments table) noexcept
         {
             const std::span<EdgeBuilder::ParentRelation> relations =
-                ParentRelations_(table, slot);
+                EdgeRelationsPerSlot_(table, slot);
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {
                 return false;
@@ -1131,15 +1117,15 @@ namespace BidirectionalInMemGraph
                 ordinal < FabCache_->MaxDirectParentsPerAxis_;
                 ++ordinal)
             {
-                const uint64_t parent = std::atomic_ref<const uint64_t>(
-                    relations[ordinal].ParentHandle
+                const EB::ParentIDGeneration parent = std::atomic_ref<const EB::ParentIDGeneration>(
+                    relations[ordinal].Parent
                 ).load(std::memory_order_relaxed);
-                const uint64_t siblings = std::atomic_ref<const uint64_t>(
-                    relations[ordinal].SiblingLocators
+                const EB::SiblingLinks siblings = std::atomic_ref<const EB::SiblingLinks>(
+                    relations[ordinal].Siblings
                 ).load(std::memory_order_relaxed);
                 if (
-                    parent != FABRIC_CELL_SENTINAL ||
-                    siblings != FABRIC_CELL_SENTINAL
+                    parent != EB::ParentIDGeneration{EB::RELATION_NULL, EB::RELATION_NULL} ||
+                    siblings != EB::SiblingLinks{EB::RELATION_NULL, EB::RELATION_NULL}
                 )
                 {
                     return false;
@@ -1160,23 +1146,23 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        if (!SwitchDescriptionState(
+        if (SwitchDescriptionState(
             slot,
             StateOfAPC::RESERVED,
             StateOfAPC::LIVE,
             max_tries
-        ))
+        ) != SeqLockedOperation::FOUND)
         {
             OpenAPCGeneration_(slot, generation);
             ReleaseDomains___();
             return false;
         }
-        if (!SwitchDescriptionState(
+        if (SwitchDescriptionState(
             slot,
             StateOfAPC::RETIRED,
             StateOfAPC::RESERVED,
             max_tries
-        ))
+        ) != SeqLockedOperation::FOUND)
         {
             SwitchDescriptionState(
                 slot,
@@ -1240,12 +1226,12 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        if (!SwitchDescriptionState(
+        if (SwitchDescriptionState(
             slot,
             StateOfAPC::RESERVED,
             StateOfAPC::RETIRED,
             DEFAULT_MAX_TRIES
-        ))
+        ) != SeqLockedOperation::FOUND)
         {
             return false;
         }
@@ -1264,12 +1250,12 @@ namespace BidirectionalInMemGraph
         EdgeBuilder::EdgeData vertical{};
 
         if (
-            !ReadEdgeHeader_(
+            !ReadChildDomainControl_(
                 FabricSegments::VALUE_PARENT_EDGE_TABLE_H,
                 slot,
                 horizontal
             ) ||
-            !ReadEdgeHeader_(
+            !ReadChildDomainControl_(
                 FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
                 slot,
                 vertical
@@ -1287,7 +1273,7 @@ namespace BidirectionalInMemGraph
         auto FreeRowIsEmpty___ = [&](FabricSegments table) noexcept
         {
             std::span<EdgeBuilder::ParentRelation> relations =
-                ParentRelations_(table, slot);
+                EdgeRelationsPerSlot_(table, slot);
 
             if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
             {
@@ -1299,11 +1285,11 @@ namespace BidirectionalInMemGraph
                 ++ordinal)
             {
                 EdgeBuilder::ParentRelation relation{};
-                relation.ParentHandle = std::atomic_ref<uint64_t>(
-                    relations[ordinal].ParentHandle
+                relation.Parent = std::atomic_ref<EB::ParentIDGeneration>(
+                    relations[ordinal].Parent
                 ).load(std::memory_order_acquire);
-                relation.SiblingLocators = std::atomic_ref<uint64_t>(
-                    relations[ordinal].SiblingLocators
+                relation.Siblings = std::atomic_ref<EB::SiblingLinks>(
+                    relations[ordinal].Siblings
                 ).load(std::memory_order_acquire);
 
                 if (!EdgeBuilder::IsEmpty(relation))
@@ -1334,16 +1320,9 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const size_t lifecycle_index =
-            range.BeginIndex +
-            static_cast<size_t>(ADS::HeaderIdentifierOfAPC::APC_LIFE_CYCLE);
-
         for (size_t idx = range.BeginIndex; idx < range.EndIndex; ++idx)
         {
-            if (idx != lifecycle_index)
-            {
-                DirectlyStoreFabricUnit64(idx, 0u);
-            }
+            DirectlyStoreFabricUnit64(idx, 0u);
         }
 
         return HandleOfAPCStatic::IsGenerationValid(new_generation);

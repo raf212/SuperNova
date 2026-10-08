@@ -32,7 +32,7 @@ namespace BidirectionalInMemGraph
         float* FBRowGHGF_(uint32_t slot, GM::GHGFMessageFBackward row) noexcept;
         bool GetGHGFNode_(uint32_t slot, GHGFNode& node, APCUseScope& use) noexcept;
         void InvalidateGHGFModel_() noexcept;
-        uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis) noexcept;
+        uint64_t GHGFParentMask_(uint32_t slot, FabricSegments axis, uint32_t  = DEFAULT_MAX_TRIES) noexcept;
         std::optional<float> GetGHGFParameter_(uint32_t slot, uint32_t index) noexcept;
         bool SetGHGFParameter_(uint32_t slot, uint32_t index, float value) noexcept;
         FabricToAPCLinker::SeqLockedOperation ReadGHGFParentExecutionSnapshot_(
@@ -76,7 +76,7 @@ namespace BidirectionalInMemGraph
             float Coupling = GM::StorageConst::ZERO;
         };
 
-        static void PublishCoupling_(void* context, uint8_t ordinal) noexcept;
+        static void PublishCoupling_(void* context, uint32_t ordinal) noexcept;
 
     public:
         GM::GHGFConcurrentOperation ReadStructureSnapshotConcurrently(

@@ -1,13 +1,62 @@
 #pragma once 
 #include "EdgeTableConf.hpp"
+#include <bitset>
 
 namespace BidirectionalInMemGraph
 {
 
     struct HandleOfAPCStatic
     {
+        struct LifeCycleControl 
+        {
+            uint32_t SeqLock = 2u;
+            StateOfAPC State = StateOfAPC::FREE;
+            uint8_t Reserved[3]{};
+            friend constexpr bool operator==(
+                const LifeCycleControl&,
+                const LifeCycleControl&
+            ) noexcept = default;
+        };
 
-        static constexpr uint8_t HANDLE_TABLE_WIDTH = 1u;
+        struct ParentRowControl 
+        {
+            uint32_t SeqLock = 0u;
+            EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::LIVE;
+            uint8_t Reserved[3]{};
+            friend constexpr bool operator==(
+                const ParentRowControl&,
+                const ParentRowControl&
+            ) noexcept = default;
+        };
+
+
+        struct ChildListControl
+        {
+            uint32_t SeqLockChild = 0u;
+            EdgeBuilder::EdgeStatus Status = EdgeBuilder::EdgeStatus::FREE;
+            uint8_t Reserved[3]{};
+
+            friend constexpr bool operator==(
+                const ChildListControl&,
+                const ChildListControl&
+            ) noexcept = default;
+        };
+
+
+        struct alignas(64) StructuralHotRow final
+        {
+            uint64_t GenerationControl = FABRIC_CELL_SENTINAL;
+            LifeCycleControl LifeCycle{};
+            ParentRowControl ValueParentControl{};
+            ChildListControl ValueChildControl{};
+            ParentRowControl VolatileParentControl{};
+            ChildListControl VolatileChildControl{};
+            uint32_t ValueChildTail = EdgeBuilder::RELATION_NULL;
+            uint32_t VolatileChildTail = EdgeBuilder::RELATION_NULL;
+            uint64_t RESERVED = UNSIGNED_ZERO;
+        };
+
+        static constexpr uint8_t HANDLE_TABLE_WIDTH = sizeof(StructuralHotRow) / sizeof(uint64_t);
 
         static constexpr uint8_t ACTIVE_OPERATION_LEN = 32u;
         static constexpr uint8_t GENERATION_LEN = 31u;
@@ -70,16 +119,69 @@ namespace BidirectionalInMemGraph
 
         static constexpr size_t CellOffset(uint32_t slot) noexcept
         {
-            return static_cast<size_t>(slot);
+            return static_cast<size_t>(slot) * HANDLE_TABLE_WIDTH;
+        }
+
+        static constexpr bool ValidParentControl(const ParentRowControl& control) noexcept
+        {
+            const bool known =
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::FREE ||
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::RESERVED ||
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::LIVE;
+
+            const bool parity =
+                control.Status ==
+                    EdgeBuilder::EdgeStatus::RESERVED
+                ? (control.SeqLock & 1u) != 0u
+                : (control.SeqLock & 1u) == 0u;
+
+            return known && parity;
+        }
+
+        static constexpr bool ValidChildControl(const ChildListControl& control, uint32_t tail) noexcept
+        {
+            const bool known =
+                control.Status == EdgeBuilder::EdgeStatus::FREE ||
+                control.Status == EdgeBuilder::EdgeStatus::RESERVED ||
+                control.Status == EdgeBuilder::EdgeStatus::LIVE;
+
+            const bool parity =
+                control.Status == EdgeBuilder::EdgeStatus::RESERVED ? 
+                    (control.SeqLockChild & 1u) != 0u : (control.SeqLockChild & 1u) == 0u;
+
+            const bool tail_state =
+                control.Status != EdgeBuilder::EdgeStatus::FREE ||
+                tail == EdgeBuilder::RELATION_NULL;
+
+            return known && parity && tail_state;
+        }
+
+        static constexpr bool ValidateLifeCycle(const LifeCycleControl& files) noexcept
+        {
+            if (!ADS::IsValidFabricUnit(files.SeqLock))
+            {
+                return false;
+            }
+            if (
+                files.State == StateOfAPC::RESERVED &&
+                ADS::IsValidEven64(files.SeqLock)
+            )
+            {
+                return false;
+            }
+            if (
+                files.State != StateOfAPC::RESERVED &&
+                !ADS::IsValidEven64(files.SeqLock)
+            )
+            {
+                return false;
+            }
+            return true;
         }
     };
-    static_assert(
-        (HandleOfAPCStatic::ACTIVE_COUNT_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u
-    );
-
-    static_assert(
-        (HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u
-    );
 
     struct APCRelocationDef : public CoreOfFabricCoordinator
     {
@@ -92,10 +194,10 @@ namespace BidirectionalInMemGraph
                 cache.SlabCellCount_ >= FABRIC_CELL_SENTINAL ||
                 cache.CountOfAPC_ == UNSIGNED_ZERO ||
                 cache.CountOfAPC_ > UINT32_MAX ||
-                cache.CountOfAPC_ > (uint64_t{1u} << EdgeBuilder::RELATION_SLOT_BITS) ||
                 cache.PerAPCRuntimeCellCount_ > UINT32_MAX ||
                 !ADS::IsCapacityOfAPCValid(cache.PerAPCRuntimeCellCount_) ||
-                !EdgeBuilder::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_) ||
+                !EdgeBuilder::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_)||
+                !EdgeBuilder::IsBoundedRelationLocatorSize(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_) ||
                 cache.EdgeTableRecordWidth_ != EdgeBuilder::EdgeTableRecordWidth(cache.MaxDirectParentsPerAxis_) ||
                 cache.ActiveRegionMask_ == UNSIGNED_ZERO ||
                 (cache.ActiveRegionMask_ & ~ADS::ValidRegionMask()) != UNSIGNED_ZERO ||

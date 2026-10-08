@@ -3,32 +3,75 @@
 namespace BidirectionalInMemGraph
 {
     using EdgeTableRange = ADS::RangeOfAPC;
+    using EB = EdgeBuilder;
+    using EdgeTableRowView = EB::EdgeTableRowView;
 
-    size_t EdgeTableConstructor::EdgeControlCellIndex_(
-        FabricSegments edge_table,
-        uint32_t row_slot,
-        EdgeBuilder::EdgeDomain domain
-    ) noexcept
+    EdgeTableRowView EdgeTableConstructor::EdgeTableRow_(FabricSegments edge_table, uint32_t row_slot) noexcept
     {
+        EdgeTableRowView view{};
         const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, row_slot);
-        return range.IsValid
-            ? range.BeginIndex + EdgeBuilder::ControlOffset(domain)
-            : SIZE_MAX;
+        if (!range.IsValid)
+        {
+            return view;
+        }
+
+        const uint32_t k = FabCache_->MaxDirectParentsPerAxis_;
+        const uint64_t mask_words = EB::ParentMaskWordCount(k);
+
+        EB::ParentMaskBlock* const mask_begin = std::launder(reinterpret_cast<EB::ParentMaskBlock*>(
+            SlabBasePtr_ + range.BeginIndex));
+        EB::ParentRelation* const relations_begin = std::launder(reinterpret_cast<EB::ParentRelation*>(
+            SlabBasePtr_ + range.BeginIndex + mask_words
+        ));
+
+        view.Masks = EB::PMSpan(mask_begin, mask_words);
+        view.Relations = EB::PRSpan(relations_begin, k);
+        return view;
+    }
+
+    bool EdgeTableConstructor::ConstructEdgeTableBySlot_(FabricSegments edge_table, uint32_t slot) noexcept
+    {
+        const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, slot);
+        if (!range.IsValid)
+        {
+            return false;
+        }
+        
+        const uint32_t k = FabCache_->MaxDirectParentsPerAxis_;
+        const uint32_t mask_words = EB::ParentMaskWordCount(k);
+
+        EB::ParentMaskBlock* const mask_begin = reinterpret_cast<EB::ParentMaskBlock*>(
+            SlabBasePtr_ + range.BeginIndex
+        );
+
+        EB::ParentRelation* const relation_begin = reinterpret_cast<EB::ParentRelation*>(
+            SlabBasePtr_ + range.BeginIndex + mask_words
+        );
+
+        for (uint32_t i = 0; i < mask_words; i++)
+        {
+            std::construct_at(mask_begin + i, EB::ParentMaskBlock{});
+        }
+
+        for (uint32_t i = 0; i < k; i++)
+        {
+            std::construct_at(relation_begin + i, EB::ParentRelation{});
+        }
+
+        return true;
     }
 
 
     EdgeTableConstructor::EdgeTableRange
     EdgeTableConstructor::ReadAnEdgeTableRange_(
         FabricSegments edge_table,
-        uint32_t row_slot
-    ) noexcept
+        uint32_t row_slot) noexcept
     {
         EdgeTableRange range{};
 
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            row_slot >= FabCache_->CountOfAPC_
-        )
+            row_slot >= FabCache_->CountOfAPC_)
         {
             return range;
         }
@@ -39,60 +82,15 @@ namespace BidirectionalInMemGraph
                 : FabCache_->VerticalEdgeBeginIdx_;
 
         range.BeginIndex = table_begin +
-            static_cast<uint64_t>(row_slot) * FabCache_->EdgeTableRecordWidth_;
+                           static_cast<uint64_t>(row_slot) * FabCache_->EdgeTableRecordWidth_;
         range.EndIndex = range.BeginIndex + FabCache_->EdgeTableRecordWidth_;
         range.IsValid = true;
         return range;
     }
 
-    std::span<EdgeBuilder::ParentRelation>
-    EdgeTableConstructor::ParentRelations_(
-        FabricSegments edge_table,
-        uint32_t row_slot
-    ) noexcept
-    {
-        const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, row_slot);
-        if (!range.IsValid)
-        {
-            return {};
-        }
-
-        auto* const first = std::launder(
-            reinterpret_cast<EdgeBuilder::ParentRelation*>(
-                SlabBasePtr_ + range.BeginIndex +
-                EdgeBuilder::PARENT_RELATION_ARRAY_OFFSET
-            )
-        );
-        return {first, static_cast<size_t>(FabCache_->MaxDirectParentsPerAxis_)};
-    }
-
-    bool EdgeTableConstructor::ConstructParentRelationObjects_(
-        FabricSegments edge_table,
-        uint32_t row_slot
-    ) noexcept
-    {
-        const EdgeTableRange range = ReadAnEdgeTableRange_(edge_table, row_slot);
-        if (!range.IsValid)
-        {
-            return false;
-        }
-
-        auto* const first = reinterpret_cast<EdgeBuilder::ParentRelation*>(
-            SlabBasePtr_ + range.BeginIndex +
-            EdgeBuilder::PARENT_RELATION_ARRAY_OFFSET
-        );
-        for (uint8_t ordinal = 0u;
-            ordinal < FabCache_->MaxDirectParentsPerAxis_;
-            ++ordinal)
-        {
-            std::construct_at(first + ordinal);
-        }
-        return true;
-    }
 
     bool EdgeTableConstructor::InitializeEdgeTable_(
-        FabricSegments edge_table
-    ) noexcept
+        FabricSegments edge_table) noexcept
     {
         if (!CoreOfFabricCoordinator::IsValidEdgeTable(edge_table))
         {
@@ -100,261 +98,382 @@ namespace BidirectionalInMemGraph
         }
 
         for (uint32_t row_slot = 0u;
-            row_slot < FabCache_->CountOfAPC_;
-            ++row_slot)
+             row_slot < FabCache_->CountOfAPC_;
+             ++row_slot)
         {
-            const EdgeTableRange range =
-                ReadAnEdgeTableRange_(edge_table, row_slot);
-            if (
-                !range.IsValid ||
-                !ConstructParentRelationObjects_(edge_table, row_slot)
-            )
+            if (!ConstructEdgeTableBySlot_(edge_table, row_slot))
             {
                 return false;
             }
-
-            EdgeBuilder::EdgeData child_list{};
-            child_list.TailLocator = EdgeBuilder::RELATION_NULL;
-            child_list.Status = EdgeBuilder::EdgeStatus::FREE;
-            child_list.IsValid = true;
-
-            EdgeBuilder::EdgeData parent_relations{};
-            parent_relations.TailLocator = EdgeBuilder::RELATION_NULL;
-            parent_relations.Status = EdgeBuilder::EdgeStatus::LIVE;
-            parent_relations.IsValid = true;
-
-            SlabBasePtr_[range.BeginIndex +
-                EdgeBuilder::CHILD_LIST_CONTROL_OFFSET] =
-                EdgeBuilder::PackEdgeHeader(child_list);
-            SlabBasePtr_[range.BeginIndex +
-                EdgeBuilder::PARENT_RELATION_CONTROL_OFFSET] =
-                EdgeBuilder::PackEdgeHeader(parent_relations);
         }
         return true;
     }
 
     bool EdgeTableConstructor::ReadEdgeControl_(
         FabricSegments edge_table,
-        uint32_t row_slot,
+        uint32_t slot,
         EdgeBuilder::EdgeDomain domain,
-        EdgeBuilder::EdgeData& edge
-    ) noexcept
+        EdgeBuilder::EdgeData &edge) noexcept
     {
-        const size_t index = EdgeControlCellIndex_(edge_table, row_slot, domain);
-        if (index == SIZE_MAX)
+        edge = {};
+        if (domain == EB::EdgeDomain::PARENT_RELATIONS)
         {
-            edge = {};
+            HAS::ParentRowControl* const p_row_ptr = ParentRowControl_(edge_table, slot);
+            if (!p_row_ptr)
+            {
+                return false;
+            }
+            
+            const HAS::ParentRowControl value = std::atomic_ref<const HAS::ParentRowControl>(*p_row_ptr).load(std::memory_order_acquire);
+            if (!HAS::ValidParentControl(value))
+            {
+                return false;
+            }
+
+            edge.TailLocator = EdgeBuilder::RELATION_NULL;
+            edge.SeqLock = value.SeqLock;
+            edge.Status = value.Status;
+            edge.IsValid = true;
+            return true;
+        }
+
+
+        HAS::ChildListControl* child_list_ptr = ChildListControl_(edge_table, slot);
+        uint32_t* const tail_ptr = ChildTailPtr_(edge_table, slot);
+
+        if (!child_list_ptr || !tail_ptr)
+        {
             return false;
         }
 
-        edge = EdgeBuilder::UnpackEdgeHeader(
-            std::atomic_ref<const uint64_t>(SlabBasePtr_[index]).load(
-                std::memory_order_acquire
-            )
-        );
-        return edge.IsValid;
+        HAS::ChildListControl before = std::atomic_ref<const HAS::ChildListControl>(*child_list_ptr).load(std::memory_order_acquire);
+
+        if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
+        {
+            edge.TailLocator = EdgeBuilder::RELATION_NULL;
+            edge.SeqLock = before.SeqLockChild;
+            edge.Status = before.Status;
+            edge.IsValid = true;
+            return true;
+        }
+
+        const uint32_t tail = std::atomic_ref<const uint32_t>(*tail_ptr).load(std::memory_order_relaxed);
+        HAS::ChildListControl after = std::atomic_ref<const HAS::ChildListControl>(*child_list_ptr).load(std::memory_order_acquire);
+
+        if (before != after)
+        {
+            edge.TailLocator = EdgeBuilder::RELATION_NULL;
+            edge.SeqLock = after.SeqLockChild;
+            edge.Status = EB::EdgeStatus::RESERVED;
+            edge.IsValid = true;
+            return true;
+        }
+        
+        if (!HAS::ValidChildControl(before, tail))
+        {
+            return false;
+        }
+        
+        edge.TailLocator = tail;
+        edge.SeqLock = before.SeqLockChild;
+        edge.Status = before.Status;
+        edge.IsValid = true;
+        return true;
     }
 
-
-    bool EdgeTableConstructor::ReadEdgeHeader_(
+    bool EdgeTableConstructor::ReadChildDomainControl_(
         FabricSegments edge_table,
         uint32_t row_slot,
-        EdgeBuilder::EdgeData& edge
-    ) noexcept
+        EdgeBuilder::EdgeData &edge) noexcept
     {
         return ReadEdgeControl_(
             edge_table,
             row_slot,
             EdgeBuilder::EdgeDomain::CHILD_LIST,
-            edge
-        );
+            edge);
     }
 
-    EdgeTableConstructor::SeqLockedOperation
-    EdgeTableConstructor::ReadParentHandle_(
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReadParentHandle_(
         FabricSegments edge_table,
-        uint32_t child_slot,
-        uint8_t relation_ordinal,
-        uint64_t& parent_handle,
+        uint32_t slot,
+        uint32_t relation_ordinal,
+        EB::ParentIDGeneration& parent_handle,
         uint32_t max_tries
     ) noexcept
     {
-        parent_handle = FABRIC_CELL_SENTINAL;
-        const size_t control_index = EdgeControlCellIndex_(
-            edge_table,
-            child_slot,
-            EdgeBuilder::EdgeDomain::PARENT_RELATIONS
-        );
-        const std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(edge_table, child_slot);
+        parent_handle = {};
+        HAS::ParentRowControl* const control = ParentRowControl_(edge_table, slot);
+        EB::PRSpan relations = EdgeRelationsPerSlot_(edge_table, slot);
+
         if (
-            control_index == SIZE_MAX ||
+            !control ||
             relations.size() != FabCache_->MaxDirectParentsPerAxis_ ||
-            !EdgeBuilder::IsValidRelationOrdinal(
-                relation_ordinal,
-                FabCache_->MaxDirectParentsPerAxis_
-            )
+            !EB::IsValidRelationOrdinal(relation_ordinal, FabCache_->MaxDirectParentsPerAxis_)
         )
         {
             return SeqLockedOperation::NONE;
         }
 
-        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
+        for (uint32_t i = 0; i < max_tries; i++)
         {
-            const uint64_t before_raw = std::atomic_ref<const uint64_t>(
-                SlabBasePtr_[control_index]
-            ).load(std::memory_order_acquire);
-            const EdgeBuilder::EdgeData before =
-                EdgeBuilder::UnpackEdgeHeader(before_raw);
-            if (!before.IsValid)
+            const HAS::ParentRowControl before = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (!HAS::ValidParentControl(before))
             {
                 return SeqLockedOperation::NONE;
             }
+
             if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
                 continue;
             }
+            
             if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
             {
                 return SeqLockedOperation::NONE;
             }
 
-            const uint64_t observed = std::atomic_ref<const uint64_t>(
-                relations[relation_ordinal].ParentHandle
-            ).load(std::memory_order_relaxed);
-            const uint64_t after_raw = std::atomic_ref<const uint64_t>(
-                SlabBasePtr_[control_index]
-            ).load(std::memory_order_acquire);
-            if (before_raw != after_raw)
+            const EB::ParentIDGeneration observed = std::atomic_ref<const EB::ParentIDGeneration>(relations[relation_ordinal].Parent).load(std::memory_order_relaxed);
+            
+            const HAS::ParentRowControl after = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (before != after)
             {
                 continue;
             }
 
+            if (EB::IsParentEmpty(observed))
+            {
+                return SeqLockedOperation::NONE;
+            }
+            
             parent_handle = observed;
-            return observed == FABRIC_CELL_SENTINAL
-                ? SeqLockedOperation::NONE
-                : SeqLockedOperation::FOUND;
+            return SeqLockedOperation::FOUND;
         }
+        
         return SeqLockedOperation::RETRY;
     }
-        
-    EdgeTableConstructor::SeqLockedOperation
-    EdgeTableConstructor::ReserveEdgeDomain_(
+
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveParentDomain_(
         FabricSegments edge_table,
-        uint32_t row_slot,
-        EdgeBuilder::EdgeDomain domain,
+        uint32_t slot,
         EdgeBuilder::EdgeStatus required_status,
         EdgeBuilder::EdgeData& before,
         uint32_t max_tries
     ) noexcept
     {
-        const size_t index = EdgeControlCellIndex_(edge_table, row_slot, domain);
-        if (index == SIZE_MAX)
+        HAS::ParentRowControl* const parent_row_ptr = ParentRowControl_(edge_table, slot);
+        if (!parent_row_ptr)
         {
             return SeqLockedOperation::NONE;
         }
-
-        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
+        
+        std::atomic_ref<HAS::ParentRowControl> control(*parent_row_ptr);
+        for (size_t i = 0; i < max_tries; i++)
         {
-            uint64_t observed_raw = std::atomic_ref<const uint64_t>(SlabBasePtr_[index]).load(std::memory_order_acquire);
-            EdgeBuilder::EdgeData observed = EdgeBuilder::UnpackEdgeHeader(observed_raw);
-            if (!observed.IsValid)
+            HAS::ParentRowControl observed = control.load(std::memory_order_acquire);
+            if (!HAS::ValidParentControl(observed))
             {
-                return SeqLockedOperation::NONE;
+                return SeqLockedOperation::NONE; 
             }
+            
             if (observed.Status == EdgeBuilder::EdgeStatus::RESERVED)
             {
                 continue;
             }
+
             if (observed.Status != required_status)
             {
                 return SeqLockedOperation::NONE;
             }
 
-            EdgeBuilder::EdgeData reserved = observed;
-            reserved.SeqLock = EdgeBuilder::NextSequence(observed.SeqLock);
-            reserved.Status = EdgeBuilder::EdgeStatus::RESERVED;
-            reserved.IsValid = true;
-            /// Can Fail Spontenuiusly if used compare_exchange_weak()
-            if (CompareExchangeStrongFromFabric(
-                index,
-                observed_raw,
-                EdgeBuilder::PackEdgeHeader(reserved)
+            HAS::ParentRowControl desired = observed;
+            desired.SeqLock = EB::NextSequence(observed.SeqLock);
+            desired.Status = EB::EdgeStatus::RESERVED;
+            if (control.compare_exchange_strong(
+                observed, desired,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire
             ))
             {
-                before = observed;
+                before.TailLocator = EB::RELATION_NULL;
+                before.SeqLock = observed.SeqLock;
+                before.Status = observed.Status;
+                before.IsValid = true;
                 return SeqLockedOperation::FOUND;
             }
-            ///
         }
         return SeqLockedOperation::RETRY;
     }
 
-
-    EdgeTableConstructor::SeqLockedOperation
-    EdgeTableConstructor::ReserveEdgeRow_(
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveChildDomain_(
         FabricSegments edge_table,
-        uint32_t row_slot,
+        uint32_t slot,
         EdgeBuilder::EdgeStatus required_status,
         EdgeBuilder::EdgeData& before,
         uint32_t max_tries
     ) noexcept
     {
-        return ReserveEdgeDomain_(
-            edge_table,
-            row_slot,
-            EdgeBuilder::EdgeDomain::CHILD_LIST,
-            required_status,
-            before,
-            max_tries
-        );
+        HAS::ChildListControl* const ptr  = ChildListControl_(edge_table, slot);
+        uint32_t* const tail_ptr = ChildTailPtr_(edge_table, slot);
+        if (!ptr || !tail_ptr)
+        {
+            return SeqLockedOperation::NONE;
+        }
+        
+        std::atomic_ref<HAS::ChildListControl> control(*ptr);
+        for (uint32_t i = 0; i < max_tries; i++)
+        {
+            HAS::ChildListControl observed = control.load(std::memory_order_acquire);
+            const uint32_t observed_tail = std::atomic_ref<const uint32_t>(*tail_ptr).load(std::memory_order_relaxed);
+            if (!HAS::ValidChildControl(observed, observed_tail))
+            {
+                return SeqLockedOperation::NONE;
+            }
+            
+            if (observed.Status == EdgeBuilder::EdgeStatus::RESERVED)
+            {
+                continue;
+            }
+
+            if (observed.Status != required_status)
+            {
+                return SeqLockedOperation::NONE;
+            }
+            
+            HAS::ChildListControl desired = observed;
+            desired.SeqLockChild = EB::NextSequence(observed.SeqLockChild);
+            desired.Status = EB::EdgeStatus::RESERVED;
+            if (control.compare_exchange_strong(
+                observed, desired,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire
+            ))
+            {
+                before.TailLocator = std::atomic_ref<const uint32_t>(*tail_ptr).load(std::memory_order_acquire);
+                before.SeqLock = observed.SeqLockChild;
+                before.Status = observed.Status;
+                before.IsValid = true;
+                return SeqLockedOperation::FOUND;
+            }
+        }
+        
+        return SeqLockedOperation::RETRY;
+    }
+
+    EdgeTableConstructor::SeqLockedOperation EdgeTableConstructor::ReserveEdgeDomain_(
+        FabricSegments edge_table,
+        uint32_t slot,
+        EdgeBuilder::EdgeDomain domain,
+        EdgeBuilder::EdgeStatus required_status,
+        EdgeBuilder::EdgeData &before,
+        uint32_t max_tries) noexcept
+    {
+        before = {};
+        if (
+            !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
+            slot >= FabCache_->CountOfAPC_ ||
+            max_tries == UNSIGNED_ZERO
+        )
+        {
+            return SeqLockedOperation::NONE;
+        }
+        
+        if (domain == EdgeBuilder::EdgeDomain::PARENT_RELATIONS)
+        {
+            return ReserveParentDomain_(edge_table, slot, required_status, before, max_tries);
+        }
+        
+        return ReserveChildDomain_(edge_table, slot, required_status, before, max_tries);
     }
 
     void EdgeTableConstructor::StoreReservedParentHandle_(
         FabricSegments edge_table,
-        uint32_t child_slot,
-        uint8_t relation_ordinal,
-        uint64_t parent_handle
+        uint32_t slot,
+        uint32_t relation_ordinal,
+        const EB::ParentIDGeneration& parent
     ) noexcept
     {
-        std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(edge_table, child_slot);
-        std::atomic_ref<uint64_t>(relations[relation_ordinal].ParentHandle).store(
-            parent_handle,
-            std::memory_order_relaxed
-        );
+        EB::PRSpan relations = EdgeRelationsPerSlot_(edge_table, slot);
+        std::atomic_ref<EB::ParentIDGeneration>(relations[relation_ordinal].Parent).store(parent, std::memory_order_relaxed);
+    }
+
+    void EdgeTableConstructor::StoreReservedSiblingLocators_(
+        FabricSegments edge_table,
+        uint32_t slot,
+        uint32_t relation_ordinal,
+        const EB::SiblingLinks& sibbling
+    ) noexcept
+    {
+        EB::PRSpan relations = EdgeRelationsPerSlot_(edge_table, slot);
+        std::atomic_ref<EB::SiblingLinks>(relations[relation_ordinal].Siblings).store(sibbling, std::memory_order_relaxed);
     }
 
     void EdgeTableConstructor::PublishReservedEdgeDomain_(
         FabricSegments edge_table,
         uint32_t row_slot,
         EdgeBuilder::EdgeDomain domain,
-        const EdgeBuilder::EdgeData& before,
+        const EdgeBuilder::EdgeData &before,
         uint32_t desired_tail,
-        EdgeBuilder::EdgeStatus desired_status
-    ) noexcept
+        EdgeBuilder::EdgeStatus desired_status) noexcept
     {
-        const size_t index = EdgeControlCellIndex_(edge_table, row_slot, domain);
-        EdgeBuilder::EdgeData published{};
-        published.TailLocator = desired_tail;
-        published.SeqLock = EdgeBuilder::NextSequence(
-            EdgeBuilder::NextSequence(before.SeqLock)
-        );
-        published.Status = desired_status;
-        published.IsValid = true;
-        std::atomic_ref<uint64_t>(SlabBasePtr_[index]).store(
-            EdgeBuilder::PackEdgeHeader(published),
-            std::memory_order_release
-        );
+        const uint32_t published_sequense = EB::NextSequence(EB::NextSequence(
+            before.SeqLock
+        ));
+
+        auto PublishParentDomain___ = [&]() noexcept -> void
+        {
+            HAS::ParentRowControl* const ptr = ParentRowControl_(edge_table, row_slot);
+            if (!ptr)
+            {
+                return;
+            }
+            HAS::ParentRowControl published{};
+            published.SeqLock = published_sequense;
+            published.Status = desired_status;
+            std::atomic_ref<HAS::ParentRowControl>(*ptr).store(
+                published,
+                std::memory_order_release
+            );
+        };
+
+        auto PublishChildDomain___ = [&]() noexcept -> void
+        {
+            HAS::ChildListControl* const ptr = ChildListControl_(edge_table, row_slot);
+            uint32_t* const tail_ptr = ChildTailPtr_(edge_table, row_slot);
+            if (!ptr || !tail_ptr)
+            {
+                return;
+            }
+            std::atomic_ref<uint32_t>(*tail_ptr).store(
+                desired_tail,
+                std::memory_order_relaxed
+            );
+
+            HAS::ChildListControl published{};
+            published.SeqLockChild = published_sequense;
+            published.Status = desired_status;
+            
+            std::atomic_ref<HAS::ChildListControl>(*ptr).store(
+                published,
+                std::memory_order_release
+            );
+        };
+
+        if (domain == EB::EdgeDomain::PARENT_RELATIONS)
+        {
+            return PublishParentDomain___();
+        }
+        
+        return PublishChildDomain___();
     }
 
     void EdgeTableConstructor::PublishReservedEdgeRow_(
         FabricSegments edge_table,
         uint32_t row_slot,
-        const EdgeBuilder::EdgeData& before,
+        const EdgeBuilder::EdgeData &before,
         uint32_t desired_tail,
-        EdgeBuilder::EdgeStatus desired_status
-    ) noexcept
+        EdgeBuilder::EdgeStatus desired_status) noexcept
     {
         PublishReservedEdgeDomain_(
             edge_table,
@@ -362,22 +481,8 @@ namespace BidirectionalInMemGraph
             EdgeBuilder::EdgeDomain::CHILD_LIST,
             before,
             desired_tail,
-            desired_status
-        );
+            desired_status);
     }
 
-    void EdgeTableConstructor::StoreReservedSiblingLocators_(
-        FabricSegments edge_table,
-        uint32_t child_slot,
-        uint8_t relation_ordinal,
-        uint64_t sibling_locators
-    ) noexcept
-    {
-        std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(edge_table, child_slot);
-        std::atomic_ref<uint64_t>(relations[relation_ordinal].SiblingLocators).store(
-            sibling_locators,
-            std::memory_order_relaxed
-        );
-    }
+
 }

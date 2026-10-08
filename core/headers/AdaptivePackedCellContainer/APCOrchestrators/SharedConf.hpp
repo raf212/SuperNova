@@ -57,10 +57,9 @@ namespace BidirectionalInMemGraph
         VALUE_PARENT_EDGE_TABLE_H = 2,
         VOLATILE_PARENT_EDGE_TABLE_V = 3,
         APC_HANDLE_TABLE = 4,
-        EDGE_TOPOLOGY_BITMAP = 5,
-        DEVICE_PLANNER_TABLE = 6,
-        WORK_QUEUE = 7,
-        SEGMENT_POOL = 8
+        DEVICE_PLANNER_TABLE = 5,
+        WORK_QUEUE = 6,
+        SEGMENT_POOL = 7
     };
 
     enum class StateOfAPC : uint8_t
@@ -71,11 +70,6 @@ namespace BidirectionalInMemGraph
         RETIRED = 3,
         HAULTED = 4
     };
-
-    static constexpr bool IsLiveSateOfAPC(std::optional<StateOfAPC> state) noexcept
-    {
-        return state.has_value() && state.value() == StateOfAPC::LIVE;
-    }
     
     static  constexpr uint64_t MaskLowBitsForU64(unsigned n) noexcept
     {

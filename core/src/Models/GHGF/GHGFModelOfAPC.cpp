@@ -124,7 +124,7 @@ namespace BidirectionalInMemGraph
                 EdgeBuilder::EdgeData header{};
 
                 if (
-                    !ReadEdgeHeader_(edge_table, i, header) ||
+                    !ReadChildDomainControl_(edge_table, i, header) ||
                     header.Status != EdgeBuilder::EdgeStatus::LIVE
                 )
                 {
@@ -133,7 +133,7 @@ namespace BidirectionalInMemGraph
 
                 has_child = has_child || header.TailLocator != EdgeBuilder::RELATION_NULL;
                 const uint64_t mask = GHGFParentMask_(i, edge_table);
-                const std::span<EdgeBuilder::ParentRelation> relations = ParentRelations_(edge_table, i);
+                const std::span<EdgeBuilder::ParentRelation> relations = EdgeRelationsPerSlot_(edge_table, i);
                 auto ValidMask___ = [&]() noexcept -> bool {return (mask & ~allowed_mask) == UNSIGNED_ZERO;};
                 if (
                     !ValidMask___() ||
@@ -146,7 +146,7 @@ namespace BidirectionalInMemGraph
                 for (uint8_t ordinal = 0; ordinal < FabCache_->MaxDirectParentsPerAxis_; ordinal++)
                 {
                     const EdgeBuilder::ParentRelation& relation = relations[ordinal];
-                    const bool occupied = (mask & EdgeBuilder::DirtyBit(ordinal)) != UNSIGNED_ZERO;
+                    const bool occupied = EB::MaskContains(mask, ordinal) != UNSIGNED_ZERO;
                     if (
                         EdgeBuilder::IsPartiallyEmpty(relation) ||
                         occupied == EdgeBuilder::IsEmpty(relation)
@@ -159,7 +159,7 @@ namespace BidirectionalInMemGraph
                         continue;
                     }
                     
-                    const uint32_t parent = EdgeBuilder::ParentSlot(relation);
+                    const uint32_t parent = relation.Parent.Slot;
                     GHGFNode parent_node;
                     APCUseScope parent_use;
                     auto ValidParent___ = [&]() noexcept -> bool {return parent < i;};
@@ -742,7 +742,7 @@ namespace BidirectionalInMemGraph
                     FabricSegments::VALUE_PARENT_EDGE_TABLE_H;
 
                 const auto h_relations =
-                    ParentRelations_(h_axis, child);
+                    EdgeRelationsPerSlot_(h_axis, child);
 
                 for (
                     uint64_t mask = GHGFParentMask_(child, h_axis);
@@ -755,10 +755,7 @@ namespace BidirectionalInMemGraph
                             std::countr_zero(mask)
                         );
 
-                    const uint32_t parent =
-                        EdgeBuilder::ParentSlot(
-                            h_relations[ordinal]
-                        );
+                    const uint32_t parent = h_relations[ordinal].Parent.Slot;
 
                     const uint32_t parameter_index =
                         GM::CouplingIndex(
@@ -812,7 +809,7 @@ namespace BidirectionalInMemGraph
                     FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V;
 
                 const auto v_relations =
-                    ParentRelations_(v_axis, child);
+                    EdgeRelationsPerSlot_(v_axis, child);
 
                 for (
                     uint64_t mask = GHGFParentMask_(child, v_axis);
@@ -825,10 +822,7 @@ namespace BidirectionalInMemGraph
                             std::countr_zero(mask)
                         );
 
-                    const uint32_t parent =
-                        EdgeBuilder::ParentSlot(
-                            v_relations[ordinal]
-                        );
+                    const uint32_t parent = v_relations[ordinal].Parent.Slot;
 
                     const uint32_t parameter_index =
                         GM::CouplingIndex(

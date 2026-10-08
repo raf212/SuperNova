@@ -58,15 +58,15 @@ namespace BidirectionalInMemGraph
         {
             GHGFConcurrentOperation Result = GHGFConcurrentOperation::REJECTED;
             uint32_t PublishedRowSequence = UINT32_MAX;
-            uint8_t PublishedOrdinal = UINT8_MAX;
+            uint32_t PublishedOrdinal = EB::RELATION_NULL;
         };
 
         struct GHGFParentExecutionSnapshot final
         {
             uint64_t ParentMask = UNSIGNED_ZERO;
             uint32_t RowSequence = UINT32_MAX;
-            std::array<uint64_t, ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS> ParentHandles{};
-            std::array<float, ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS> Couplings{};
+            std::array<EB::ParentIDGeneration, ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS > ParentHandles{};
+            std::array<float, ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS > Couplings{};
         };
     };
 
@@ -167,8 +167,8 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint32_t CouplingIndex(
             FabricSegments edge_table,
-            uint8_t relation_ordinal,
-            uint8_t max_direct_parent_per_axis
+            uint32_t relation_ordinal,
+            uint32_t max_direct_parent_per_axis
         ) noexcept
         {
             if (
@@ -201,7 +201,7 @@ namespace BidirectionalInMemGraph
             if (
                 batch_capacity == UNSIGNED_ZERO ||
                 max_direct_parent_per_axis == UNSIGNED_ZERO ||
-                max_direct_parent_per_axis > ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS
+                max_direct_parent_per_axis > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS 
             )
             {
                 return false;
@@ -310,7 +310,7 @@ namespace BidirectionalInMemGraph
                 profile.IsValid &&
                 profile.BatchCapacity != UNSIGNED_ZERO &&
                 profile.MaxDirectParentPerAxis != UNSIGNED_ZERO &&
-                profile.MaxDirectParentPerAxis <= ADS::COMPILED_MAX_DIRECT_PARENTS_PER_AXIS &&
+                profile.MaxDirectParentPerAxis <= ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS  &&
                 profile.ParameterCount == expected_paremeter_count &&
                 profile.ActiveRegionMask == expected_mask &&
                 profile.FabricConfig.ActiveRegionMask == expected_mask &&
