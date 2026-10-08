@@ -618,8 +618,8 @@ namespace BidirectionalInMemGraph
                     other,
                     scan
                 ) ||
-                scan.MatchOrdinal != UINT8_MAX ||
-                scan.EmptyOrdinal == UINT8_MAX
+                scan.MatchOrdinal != EB::RELATION_NULL ||
+                scan.EmptyOrdinal == EB::RELATION_NULL
             )
             {
                 AbortRowTransaction_(transaction);
@@ -827,7 +827,7 @@ namespace BidirectionalInMemGraph
                     other,
                     scan
                 ) ||
-                scan.MatchOrdinal == UINT8_MAX
+                scan.MatchOrdinal == EB::RELATION_NULL
             )
             {
                 AbortRowTransaction_(transaction);
@@ -1051,8 +1051,8 @@ namespace BidirectionalInMemGraph
                     new_parent_handle,
                     scan
                 ) ||
-                scan.MatchOrdinal == UINT8_MAX ||
-                scan.OtherOrdinal != UINT8_MAX
+                scan.MatchOrdinal == EB::RELATION_NULL ||
+                scan.OtherOrdinal != EB::RELATION_NULL
             )
             {
                 AbortRowTransaction_(transaction);

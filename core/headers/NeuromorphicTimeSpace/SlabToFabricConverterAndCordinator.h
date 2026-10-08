@@ -84,7 +84,7 @@ namespace BidirectionalInMemGraph
             using PublishFunction = void(*) (void*, uint32_t) noexcept;
             uint32_t ExpectedRowSequence = UINT32_MAX;
             uint32_t PublishedRowSequence = UINT32_MAX;
-            uint32_t PublishedOrdinal = UINT8_MAX;
+            uint32_t PublishedOrdinal = EB::RELATION_NULL;
             bool SequenceMismatch = false;
             void* Context = nullptr;
             PublishFunction Publish = nullptr;
@@ -186,22 +186,22 @@ namespace BidirectionalInMemGraph
     public:
         using MutationResult = AdaptivePackedCellContainer::MutationResult;
 
-        MutationResult ReplaceParentByHandle(
-            uint64_t old_parent_handle,
-            uint64_t new_parent_handle,
-            uint64_t child_handle,
+        MutationResult ReplaceParentByIdentity(
+            const EB::ParentIDGeneration& old_parent,
+            const EB::ParentIDGeneration& new_parent,
+            const EB::ParentIDGeneration& child,
             FabricSegments edge_table,
             uint32_t max_tries,
             uint32_t internal_max_tries
         ) noexcept
         {
             return ReplaceParentRelation_(
-                TwinU32ToU64::ExtractLow32Of64(old_parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(old_parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(new_parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(new_parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(child_handle),
-                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                old_parent.Slot,
+                old_parent.Generation,
+                new_parent.Slot,
+                new_parent.Generation,
+                child.Slot,
+                child.Generation,
                 edge_table,
                 nullptr,
                 max_tries,
@@ -209,19 +209,19 @@ namespace BidirectionalInMemGraph
             );
         }
 
-        MutationResult AddParenByHandle(
-            uint64_t parent_handle,
-            uint64_t child_handle,
+        MutationResult AddParentByIdentity(
+            const EB::ParentIDGeneration& parent,
+            const EB::ParentIDGeneration& child,
             FabricSegments edge_table,
             uint32_t max_tries,
             uint32_t internal_max_tries
         ) noexcept
         {
             return AddParentRelation_(
-                TwinU32ToU64::ExtractLow32Of64(parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(child_handle),
-                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                parent.Slot,
+                parent.Generation,
+                child.Slot,
+                child.Generation,
                 edge_table,
                 nullptr,
                 max_tries,
@@ -229,25 +229,26 @@ namespace BidirectionalInMemGraph
             );
         }
 
-        MutationResult RemoveParentByHandle(
-            uint64_t parent_handle,
-            uint64_t child_handle,
+        MutationResult RemoveParentByIdentity(
+            const EB::ParentIDGeneration& parent,
+            const EB::ParentIDGeneration& child,
             FabricSegments edge_table,
             uint32_t max_tries,
             uint32_t internal_max_tries
         ) noexcept
         {
             return RemoveParentRelation_(
-                TwinU32ToU64::ExtractLow32Of64(parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(child_handle),
-                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                parent.Slot,
+                parent.Generation,
+                child.Slot,
+                child.Generation,
                 edge_table,
                 nullptr,
                 max_tries,
                 internal_max_tries
             );
         }
+
 
     protected:
 
@@ -256,9 +257,12 @@ namespace BidirectionalInMemGraph
             uint32_t MatchOrdinal = EB::RELATION_NULL;
             uint32_t OtherOrdinal = EB::RELATION_NULL;
             uint32_t EmptyOrdinal = EB::RELATION_NULL;
+
+            uint32_t Reserved = 0u;
+
             EB::ParentIDGeneration MatchParent{};
         };
-
+        
         static constexpr bool SameHeader_(const EdgeBuilder::EdgeData& left, const EdgeBuilder::EdgeData& right) noexcept
         {
             return left == right;

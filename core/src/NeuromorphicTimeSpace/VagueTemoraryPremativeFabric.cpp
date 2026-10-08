@@ -257,7 +257,7 @@ namespace BidirectionalInMemGraph
                 EdgeBuilder::RelationSlot(tail, FabCache_->MaxDirectParentsPerAxis_)
             );
             const EB::SiblingLinks sibling_raw = std::atomic_ref<const EB::SiblingLinks>(tail_row[EdgeBuilder::RelationOrdinal(tail, FabCache_->MaxDirectParentsPerAxis_)].Siblings).load(std::memory_order_relaxed);
-            const uint32_t first = sibling_raw.Previous;
+            const uint32_t first = sibling_raw.Next;
 
             AdaptivePackedCellContainer child{};
             if (

@@ -167,8 +167,8 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint32_t CouplingIndex(
             FabricSegments edge_table,
-            uint8_t relation_ordinal,
-            uint8_t max_direct_parent_per_axis
+            uint32_t relation_ordinal,
+            uint32_t max_direct_parent_per_axis
         ) noexcept
         {
             if (

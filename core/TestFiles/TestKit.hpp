@@ -42,10 +42,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <memory>
 #include <shared_mutex>
 #include <optional>
 #include <span>
@@ -387,13 +389,13 @@ public:
     bool Initialize(
         std::size_t node_count,
         std::size_t payload_words,
-        std::uint8_t parent_capacity)
+        std::uint32_t parent_capacity)
     {
         if (
             node_count == 0u ||
             node_count > UINT32_MAX ||
             parent_capacity == 0u ||
-            parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS  ||
+            parent_capacity > node_count ||
             payload_words > UINT32_MAX ||
             node_count > UINT32_MAX / static_cast<std::size_t>(parent_capacity)
         )
@@ -415,7 +417,7 @@ public:
 
     std::size_t NodeCount() const noexcept { return NodeCount_; }
     std::size_t PayloadWords() const noexcept { return PayloadWords_; }
-    std::uint8_t ParentCapacity() const noexcept { return ParentCapacity_; }
+    std::uint32_t ParentCapacity() const noexcept { return ParentCapacity_; }
 
     bool AddUnlocked(std::size_t parent, std::size_t child, Axis axis) noexcept
     {
@@ -507,7 +509,7 @@ public:
     ReadResult FindParent(
         std::size_t child,
         Axis axis,
-        std::uint8_t ordinal) const noexcept
+        std::uint32_t ordinal) const noexcept
     {
         if (child >= NodeCount_ || ordinal >= ParentCapacity_)
         {
@@ -641,13 +643,13 @@ private:
     std::size_t NodeCount_ = 0u;
     std::size_t PayloadWords_ = 0u;
     std::size_t RelationCount_ = 0u;
-    std::uint8_t ParentCapacity_ = 0u;
+    std::uint32_t ParentCapacity_ = 0u;
     std::vector<Node> Nodes_{};
     std::vector<Relation> HRelations_{};
     std::vector<Relation> VRelations_{};
     std::vector<std::uint64_t> Payload_{};
 
-    std::uint32_t Locator_(std::size_t child, std::uint8_t ordinal) const noexcept
+    std::uint32_t Locator_(std::size_t child, std::uint32_t ordinal) const noexcept
     {
         return static_cast<std::uint32_t>(
             child * static_cast<std::size_t>(ParentCapacity_) + ordinal);
@@ -702,7 +704,7 @@ private:
             return NIL;
         }
 
-        for (std::uint8_t ordinal = 0u; ordinal < ParentCapacity_; ++ordinal)
+        for (std::uint32_t ordinal = 0u; ordinal < ParentCapacity_; ++ordinal)
         {
             const std::uint32_t locator = Locator_(child, ordinal);
             if (Relations_(axis)[locator].Parent == parent)
@@ -715,7 +717,7 @@ private:
 
     std::uint32_t FindVacancy_(std::size_t child, Axis axis) const noexcept
     {
-        for (std::uint8_t ordinal = 0u; ordinal < ParentCapacity_; ++ordinal)
+        for (std::uint32_t ordinal = 0u; ordinal < ParentCapacity_; ++ordinal)
         {
             const std::uint32_t locator = Locator_(child, ordinal);
             if (Relations_(axis)[locator].Parent == NIL)
@@ -752,7 +754,7 @@ public:
     bool Initialize(
         std::size_t node_count,
         std::size_t payload_words,
-        std::uint8_t parent_capacity)
+        std::uint32_t parent_capacity)
     {
         return Storage_.Initialize(node_count, payload_words, parent_capacity);
     }
@@ -807,7 +809,7 @@ public:
     bool Initialize(
         std::size_t node_count,
         std::size_t payload_words,
-        std::uint8_t parent_capacity)
+        std::uint32_t parent_capacity)
     {
         if (!Storage_.Initialize(node_count, payload_words, parent_capacity))
         {
@@ -909,15 +911,18 @@ public:
         return use ? APCCache_.CurrentGeneration_ : 0u;
     }
 
-    std::uint64_t HandleForTest() noexcept
+    EdgeBuilder::ParentIDGeneration IdentityForTest() noexcept
     {
         APCUseScope use = AcquireAPCUse_();
+
         return use
-            ? EdgeBuilder::MakeParentHandle(
-                APCCache_.APCSlotIdx_,
-                APCCache_.CurrentGeneration_)
-            : FABRIC_CELL_SENTINAL;
+            ? EdgeBuilder::ParentIDGeneration{
+                APCCache_.CurrentGeneration_,
+                APCCache_.APCSlotIdx_
+            }
+            : EdgeBuilder::ParentIDGeneration{};
     }
+
 
     std::byte* RawAPCBaseForTest() noexcept
     {
@@ -959,142 +964,151 @@ public:
                 FabCache_->PerAPCRuntimeCellCount_);
     }
 
-    ReadResult FindParentByHandleForTest(
-        std::uint64_t child_handle,
+    ReadResult FindParentByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& child,
         FabricSegments edge_table,
-        std::uint8_t ordinal,
-        std::uint32_t max_tries = 1u) noexcept
+        std::uint32_t ordinal,
+        std::uint32_t max_tries = 1u
+    ) noexcept
     {
         TestAPC::RelationOperationForTest op{};
-        AdaptivePackedCellContainer found = FindParent_(
-            TwinU32ToU64::ExtractLow32Of64(child_handle),
-            TwinU32ToU64::ExtractHigh32Of64(child_handle),
-            edge_table, ordinal, &op, max_tries);
+
+        AdaptivePackedCellContainer found =
+            FindParent_(
+                child.Slot,
+                child.Generation,
+                edge_table,
+                ordinal,
+                &op,
+                max_tries
+            );
+
         return ReadConvert_(found, op);
     }
 
-    ReadResult FindFirstChildByHandleForTest(
-        std::uint64_t parent_handle,
+
+    ReadResult FindFirstChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindFirstChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, &op, max_tries);
         return ReadConvert_(found, op);
     }
 
-    ReadResult FindLastChildByHandleForTest(
-        std::uint64_t parent_handle,
+    ReadResult FindLastChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindLastChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, &op, max_tries);
         return ReadConvert_(found, op);
     }
 
-    ReadResult FindNextChildByHandleForTest(
-        std::uint64_t parent_handle,
+    ReadResult FindNextChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t locator,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindNextChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, locator, &op, max_tries);
         return ReadConvert_(found, op);
     }
 
-    ReadResult FindPreviousChildByHandleForTest(
-        std::uint64_t parent_handle,
+    ReadResult FindPreviousChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t locator,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindPreviousChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, locator, &op, max_tries);
         return ReadConvert_(found, op);
     }
 
-    BenchmarkReadResult BenchmarkFindParentByHandleForTest(
-        std::uint64_t child_handle,
+    BenchmarkReadResult BenchmarkFindParentByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& child,
         FabricSegments edge_table,
-        std::uint8_t ordinal,
+        std::uint32_t ordinal,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindParent_(
-            TwinU32ToU64::ExtractLow32Of64(child_handle),
-            TwinU32ToU64::ExtractHigh32Of64(child_handle),
+            child.Slot,
+            child.Generation,
             edge_table, ordinal, &op, max_tries);
         (void)found;
         return BenchmarkConvert_(op, BenchmarkReadResult::NO_NODE);
     }
 
-    BenchmarkReadResult BenchmarkFindFirstChildByHandleForTest(
-        std::uint64_t parent_handle,
+    BenchmarkReadResult BenchmarkFindFirstChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindFirstChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, &op, max_tries);
         (void)found;
         return BenchmarkChildConvert_(op);
     }
 
-    BenchmarkReadResult BenchmarkFindLastChildByHandleForTest(
-        std::uint64_t parent_handle,
+    BenchmarkReadResult BenchmarkFindLastChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindLastChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, &op, max_tries);
         (void)found;
         return BenchmarkChildConvert_(op);
     }
 
-    BenchmarkReadResult BenchmarkFindNextChildByHandleForTest(
-        std::uint64_t parent_handle,
+    BenchmarkReadResult BenchmarkFindNextChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t locator,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindNextChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, locator, &op, max_tries);
         (void)found;
         return BenchmarkChildConvert_(op);
     }
 
-    BenchmarkReadResult BenchmarkFindPreviousChildByHandleForTest(
-        std::uint64_t parent_handle,
+    BenchmarkReadResult BenchmarkFindPreviousChildByIdentityForTest(
+        const EdgeBuilder::ParentIDGeneration& parent,
         FabricSegments edge_table,
         std::uint32_t locator,
         std::uint32_t max_tries = 1u) noexcept
     {
         TestAPC::RelationOperationForTest op{};
         AdaptivePackedCellContainer found = FindPreviousChild_(
-            TwinU32ToU64::ExtractLow32Of64(parent_handle),
-            TwinU32ToU64::ExtractHigh32Of64(parent_handle),
+            parent.Slot,
+            parent.Generation,
             edge_table, locator, &op, max_tries);
         (void)found;
         return BenchmarkChildConvert_(op);
@@ -1158,12 +1172,12 @@ private:
 // -----------------------------------------------------------------------------
 // Small correctness fixture used only by Tests 4, 5 and the structural part of
 // Test 7.  It is intentionally not a benchmark backend: the real representation
-// remains inside Fabric, mutations go through the public *ByHandle API, and the
+// remains inside Fabric, mutations go through the public *ByIdentity API, and the
 // few APC facade objects exist only because Test 4 explicitly checks the public
 // object-side AttachMyChild/DetachMyChild symmetry.
 // -----------------------------------------------------------------------------
 
-template <std::size_t NodeCount, std::uint8_t ParentCapacity>
+template <std::size_t NodeCount, std::uint32_t ParentCapacity>
 class SmallFabricFixture
 {
 public:
@@ -1172,7 +1186,7 @@ public:
     bool Initialize() noexcept
     {
         static_assert(NodeCount > 0u && NodeCount <= UINT32_MAX);
-        static_assert(ParentCapacity > 0u);
+        static_assert(ParentCapacity > 0u && ParentCapacity <= NodeCount);
 
         const SD::FabricRegionConfig config{
             ADS::RegionBit(MacroColumnOfAPC::BOTTOM_UP_SLOT), 0u, 1u};
@@ -1200,10 +1214,10 @@ public:
         for (std::size_t i = 0u; i < NodeCount; ++i)
         {
             if (!Fabric_.CreateAPC(Nodes_[i], schemas)) return false;
-            Handles_[i] = Nodes_[i].HandleForTest();
+            Identities_[i] = Nodes_[i].IdentityForTest();
             if (
                 Nodes_[i].GetThisSlotIdx() != i ||
-                Handles_[i] == FABRIC_CELL_SENTINAL)
+                EdgeBuilder::IsParentEmpty(Identities_[i]))
             {
                 return false;
             }
@@ -1211,9 +1225,11 @@ public:
         return true;
     }
 
-    std::uint64_t Handle(std::size_t node) const noexcept
+    EdgeBuilder::ParentIDGeneration Identity(std::size_t node) const noexcept
     {
-        return node < NodeCount ? Handles_[node] : FABRIC_CELL_SENTINAL;
+        return node < NodeCount
+            ? Identities_[node]
+            : EdgeBuilder::ParentIDGeneration{};
     }
 
     TestAPC& Node(std::size_t node) noexcept { return Nodes_[node]; }
@@ -1227,8 +1243,8 @@ public:
         std::uint32_t internal = AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         return Valid_(parent) && Valid_(child)
-            ? Fabric_.AddParenByHandle(
-                Handles_[parent], Handles_[child], EdgeTableForAxis(axis),
+            ? Fabric_.AddParentByIdentity(
+                Identities_[parent], Identities_[child], EdgeTableForAxis(axis),
                 tries, internal)
             : MutationResult::INVALID;
     }
@@ -1241,8 +1257,8 @@ public:
         std::uint32_t internal = AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         return Valid_(parent) && Valid_(child)
-            ? Fabric_.RemoveParentByHandle(
-                Handles_[parent], Handles_[child], EdgeTableForAxis(axis),
+            ? Fabric_.RemoveParentByIdentity(
+                Identities_[parent], Identities_[child], EdgeTableForAxis(axis),
                 tries, internal)
             : MutationResult::INVALID;
     }
@@ -1256,8 +1272,8 @@ public:
         std::uint32_t internal = AdaptivePackedCellContainer::INTERNAL_RECURSION) noexcept
     {
         return Valid_(old_parent) && Valid_(new_parent) && Valid_(child)
-            ? Fabric_.ReplaceParentByHandle(
-                Handles_[old_parent], Handles_[new_parent], Handles_[child],
+            ? Fabric_.ReplaceParentByIdentity(
+                Identities_[old_parent], Identities_[new_parent], Identities_[child],
                 EdgeTableForAxis(axis), tries, internal)
             : MutationResult::INVALID;
     }
@@ -1285,17 +1301,17 @@ public:
     }
 
     ReadResult FindParent(
-        std::size_t child, Axis axis, std::uint8_t ordinal,
+        std::size_t child, Axis axis, std::uint32_t ordinal,
         std::uint32_t tries = 1u) noexcept
     {
         return Valid_(child)
-            ? Fabric_.FindParentByHandleForTest(
-                Handles_[child], EdgeTableForAxis(axis), ordinal, tries)
+            ? Fabric_.FindParentByIdentityForTest(
+                Identities_[child], EdgeTableForAxis(axis), ordinal, tries)
             : ReadResult{};
     }
 
     ReadResult StableFindParent(
-        std::size_t child, Axis axis, std::uint8_t ordinal,
+        std::size_t child, Axis axis, std::uint32_t ordinal,
         std::uint32_t tries = 1u) noexcept
     {
         return FindParent(child, axis, ordinal, tries);
@@ -1305,8 +1321,8 @@ public:
         std::size_t parent, Axis axis, std::uint32_t tries = 1u) noexcept
     {
         return Valid_(parent)
-            ? Fabric_.FindFirstChildByHandleForTest(
-                Handles_[parent], EdgeTableForAxis(axis), tries)
+            ? Fabric_.FindFirstChildByIdentityForTest(
+                Identities_[parent], EdgeTableForAxis(axis), tries)
             : ReadResult{};
     }
 
@@ -1314,8 +1330,8 @@ public:
         std::size_t parent, Axis axis, std::uint32_t tries = 1u) noexcept
     {
         return Valid_(parent)
-            ? Fabric_.FindLastChildByHandleForTest(
-                Handles_[parent], EdgeTableForAxis(axis), tries)
+            ? Fabric_.FindLastChildByIdentityForTest(
+                Identities_[parent], EdgeTableForAxis(axis), tries)
             : ReadResult{};
     }
 
@@ -1324,8 +1340,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return Valid_(parent)
-            ? Fabric_.FindNextChildByHandleForTest(
-                Handles_[parent], EdgeTableForAxis(axis), locator, tries)
+            ? Fabric_.FindNextChildByIdentityForTest(
+                Identities_[parent], EdgeTableForAxis(axis), locator, tries)
             : ReadResult{};
     }
 
@@ -1334,29 +1350,31 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return Valid_(parent)
-            ? Fabric_.FindPreviousChildByHandleForTest(
-                Handles_[parent], EdgeTableForAxis(axis), locator, tries)
+            ? Fabric_.FindPreviousChildByIdentityForTest(
+                Identities_[parent], EdgeTableForAxis(axis), locator, tries)
             : ReadResult{};
     }
 
 private:
     bool Valid_(std::size_t node) const noexcept
     {
-        return node < NodeCount && Handles_[node] != FABRIC_CELL_SENTINAL;
+        return
+            node < NodeCount &&
+            !EdgeBuilder::IsParentEmpty(Identities_[node]);
     }
 
     ResolverTestFabric Fabric_{};
     std::array<TestAPC, NodeCount> Nodes_{};
-    std::array<std::uint64_t, NodeCount> Handles_{};
+    std::array<EdgeBuilder::ParentIDGeneration, NodeCount> Identities_{};
 };
 
 // -----------------------------------------------------------------------------
 // Runtime APC/Fabric adapter used by performance Tests 1-3.
-// Runtime state is intentionally minimal: one packed 64-bit handle per node.
+// Runtime state is intentionally minimal: one typed ParentIDGeneration identity per node.
 // APC bases are derived from slab geometry; no persistent APC facade, slot table,
 // raw-pointer table, or RegionView array is kept. Mutation timing therefore reaches
-// the production public AddParenByHandle/RemoveParentByHandle/ReplaceParentByHandle
-// APIs after only bounds checks and three compact handle loads.
+// the production public AddParentByIdentity/RemoveParentByIdentity/ReplaceParentByIdentity
+// APIs after only bounds checks and three compact identity loads.
 // -----------------------------------------------------------------------------
 
 class RuntimeAPCFabricBackend
@@ -1367,14 +1385,14 @@ public:
     bool Initialize(
         std::size_t node_count,
         std::size_t payload_words,
-        std::uint8_t parent_capacity,
+        std::uint32_t parent_capacity,
         bool single_payload_region)
     {
         if (
             node_count == 0u || node_count > UINT32_MAX ||
             payload_words == 0u || payload_words > UINT32_MAX ||
             parent_capacity == 0u ||
-            parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS )
+            parent_capacity > node_count)
         {
             return false;
         }
@@ -1382,7 +1400,7 @@ public:
         NodeCount_ = node_count;
         PayloadWords_ = payload_words;
         SinglePayloadRegion_ = single_payload_region;
-        Handles_ = std::make_unique<std::uint64_t[]>(NodeCount_);
+        Identities_ = std::make_unique<EdgeBuilder::ParentIDGeneration[]>(NodeCount_);
 
         const std::uint32_t matrix_width =
             static_cast<std::uint32_t>(PayloadWords_);
@@ -1444,22 +1462,22 @@ public:
 
             const std::uint32_t slot = apc.GetThisSlotIdx();
             const std::uint32_t generation = apc.GenerationForTest();
-            const std::uint64_t handle = apc.HandleForTest();
+            const EdgeBuilder::ParentIDGeneration identity = apc.IdentityForTest();
             std::byte* const raw_apc =
                 Fabric_.RawAPCBaseForSlotForTest(slot);
 
             if (
                 slot != node ||
                 !HandleOfAPCStatic::IsGenerationValid(generation) ||
-                handle == FABRIC_CELL_SENTINAL ||
-                TwinU32ToU64::ExtractLow32Of64(handle) != slot ||
-                TwinU32ToU64::ExtractHigh32Of64(handle) != generation ||
+                EdgeBuilder::IsParentEmpty(identity) ||
+                identity.Slot != slot ||
+                identity.Generation != generation ||
                 !raw_apc)
             {
                 return false;
             }
 
-            Handles_[node] = handle;
+            Identities_[node] = identity;
 
             // Test 1 uses one PRIVATE_REGION per APC. Cache only its byte offset;
             // the node base is derived directly from slab geometry. No per-node
@@ -1506,9 +1524,9 @@ public:
             return MutationResult::INVALID;
         }
 
-        return Fabric_.AddParenByHandle(
-            Handle_(p),
-            Handle_(c),
+        return Fabric_.AddParentByIdentity(
+            Identity_(p),
+            Identity_(c),
             EdgeTableForAxis(a),
             tries,
             internal_recursion);
@@ -1527,9 +1545,9 @@ public:
             return MutationResult::INVALID;
         }
 
-        return Fabric_.RemoveParentByHandle(
-            Handle_(p),
-            Handle_(c),
+        return Fabric_.RemoveParentByIdentity(
+            Identity_(p),
+            Identity_(c),
             EdgeTableForAxis(a),
             tries,
             internal_recursion);
@@ -1552,10 +1570,10 @@ public:
             return MutationResult::INVALID;
         }
 
-        return Fabric_.ReplaceParentByHandle(
-            Handle_(old_p),
-            Handle_(new_p),
-            Handle_(c),
+        return Fabric_.ReplaceParentByIdentity(
+            Identity_(old_p),
+            Identity_(new_p),
+            Identity_(c),
             EdgeTableForAxis(a),
             tries,
             internal_recursion);
@@ -1593,19 +1611,19 @@ public:
     ReadResult FindParent(
         std::size_t c,
         Axis a,
-        std::uint8_t ordinal,
+        std::uint32_t ordinal,
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(c)
-            ? Fabric_.FindParentByHandleForTest(
-                Handle_(c), EdgeTableForAxis(a), ordinal, tries)
+            ? Fabric_.FindParentByIdentityForTest(
+                Identity_(c), EdgeTableForAxis(a), ordinal, tries)
             : ReadResult{};
     }
 
     ReadResult StableFindParent(
         std::size_t c,
         Axis a,
-        std::uint8_t ordinal,
+        std::uint32_t ordinal,
         std::uint32_t tries = 1u) noexcept
     {
         return FindParent(c, a, ordinal, tries);
@@ -1617,8 +1635,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.FindFirstChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), tries)
+            ? Fabric_.FindFirstChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), tries)
             : ReadResult{};
     }
 
@@ -1628,8 +1646,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.FindLastChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), tries)
+            ? Fabric_.FindLastChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), tries)
             : ReadResult{};
     }
 
@@ -1640,8 +1658,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.FindNextChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            ? Fabric_.FindNextChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), locator, tries)
             : ReadResult{};
     }
 
@@ -1652,20 +1670,20 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.FindPreviousChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            ? Fabric_.FindPreviousChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), locator, tries)
             : ReadResult{};
     }
 
     BenchmarkReadResult BenchmarkFindParent(
         std::size_t c,
         Axis a,
-        std::uint8_t ordinal,
+        std::uint32_t ordinal,
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(c)
-            ? Fabric_.BenchmarkFindParentByHandleForTest(
-                Handle_(c), EdgeTableForAxis(a), ordinal, tries)
+            ? Fabric_.BenchmarkFindParentByIdentityForTest(
+                Identity_(c), EdgeTableForAxis(a), ordinal, tries)
             : BenchmarkReadResult{};
     }
 
@@ -1675,8 +1693,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.BenchmarkFindFirstChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), tries)
+            ? Fabric_.BenchmarkFindFirstChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), tries)
             : BenchmarkReadResult{};
     }
 
@@ -1686,8 +1704,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.BenchmarkFindLastChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), tries)
+            ? Fabric_.BenchmarkFindLastChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), tries)
             : BenchmarkReadResult{};
     }
 
@@ -1698,8 +1716,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.BenchmarkFindNextChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            ? Fabric_.BenchmarkFindNextChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), locator, tries)
             : BenchmarkReadResult{};
     }
 
@@ -1710,8 +1728,8 @@ public:
         std::uint32_t tries = 1u) noexcept
     {
         return ValidNode_(p)
-            ? Fabric_.BenchmarkFindPreviousChildByHandleForTest(
-                Handle_(p), EdgeTableForAxis(a), locator, tries)
+            ? Fabric_.BenchmarkFindPreviousChildByIdentityForTest(
+                Identity_(p), EdgeTableForAxis(a), locator, tries)
             : BenchmarkReadResult{};
     }
 
@@ -1788,7 +1806,7 @@ private:
     bool DirectPayloadOffsetValid_ = false;
     std::size_t DirectPayloadByteOffset_ = 0u;
     ResolverTestFabric Fabric_{};
-    std::unique_ptr<std::uint64_t[]> Handles_{};
+    std::unique_ptr<EdgeBuilder::ParentIDGeneration[]> Identities_{};
 
     static std::uint32_t SlotWords_(
         std::uint32_t payload_words,
@@ -1811,13 +1829,13 @@ private:
     {
         return
             node < NodeCount_ &&
-            Handles_ &&
-            Handles_[node] != FABRIC_CELL_SENTINAL;
+            Identities_ &&
+            !EdgeBuilder::IsParentEmpty(Identities_[node]);
     }
 
-    std::uint64_t Handle_(std::size_t node) const noexcept
+    const EdgeBuilder::ParentIDGeneration& Identity_(std::size_t node) const noexcept
     {
-        return Handles_[node];
+        return Identities_[node];
     }
 
     std::uint64_t* DirectPayload_(std::size_t node) const noexcept
@@ -1840,11 +1858,12 @@ private:
         TestAPC& apc,
         APCUseScope& use) noexcept
     {
+        const EdgeBuilder::ParentIDGeneration& identity = Identity_(node);
         return Fabric_.ResolveExistingForTest(
-            TwinU32ToU64::ExtractLow32Of64(Handle_(node)),
+            identity.Slot,
             apc,
             use,
-            TwinU32ToU64::ExtractHigh32Of64(Handle_(node)));
+            identity.Generation);
     }
 
     bool StorePayloadViaTemporaryView_(
@@ -1943,7 +1962,7 @@ BenchmarkReadResult BenchmarkFindParentCall(
     Backend& backend,
     std::size_t child,
     Axis axis,
-    std::uint8_t ordinal,
+    std::uint32_t ordinal,
     std::uint32_t max_tries = 1u) noexcept
 {
     if constexpr (requires {
@@ -2066,7 +2085,7 @@ struct GraphProof
     }
 };
 
-template <std::size_t NodeCount, std::uint8_t ParentCapacity, typename Backend>
+template <std::size_t NodeCount, std::uint32_t ParentCapacity, typename Backend>
 GraphProof ProveQuiescentCombinedDAG(Backend& backend)
 {
     GraphProof proof{};
@@ -2078,7 +2097,7 @@ GraphProof ProveQuiescentCombinedDAG(Backend& backend)
 
         for (std::size_t child = 0u; child < NodeCount; ++child)
         {
-            for (std::uint8_t ordinal = 0u; ordinal < ParentCapacity; ++ordinal)
+            for (std::uint32_t ordinal = 0u; ordinal < ParentCapacity; ++ordinal)
             {
                 const ReadResult read = backend.FindParent(child, axis, ordinal, DEFAULT_MAX_TRIES);
                 proof.ReadContracts = proof.ReadContracts && read.ContractValid();
@@ -2405,14 +2424,14 @@ MutationResult RetryReplaceDeltaRecursion(
 struct BenchmarkCase
 {
     std::size_t NodeCount = 0u;
-    std::uint8_t ParentCapacity = 0u;
+    std::uint32_t ParentCapacity = 0u;
 };
 
 inline std::array<BenchmarkCase, 4u> MakeBenchmarkCases(
     std::size_t lower_nodes,
     std::size_t higher_nodes,
-    std::uint8_t lower_k,
-    std::uint8_t higher_k) noexcept
+    std::uint32_t lower_k,
+    std::uint32_t higher_k) noexcept
 {
     return {{
         {lower_nodes, lower_k},
@@ -2458,7 +2477,7 @@ inline std::uint32_t RoundsForTarget(
 
 inline std::uint64_t EdgeCountPerAxis(
     std::size_t node_count,
-    std::uint8_t k) noexcept
+    std::uint32_t k) noexcept
 {
     if (node_count <= 1u) return 0u;
     const std::uint64_t n = static_cast<std::uint64_t>(node_count - 1u);
@@ -2547,7 +2566,7 @@ bool BuildFullTest1Graph(Backend& backend, const BenchmarkCase& config)
     for (std::size_t child = 1u; child < config.NodeCount; ++child)
     {
         const std::size_t count = std::min<std::size_t>(config.ParentCapacity, child);
-        for (std::uint8_t ordinal = 0u; ordinal < count; ++ordinal)
+        for (std::uint32_t ordinal = 0u; ordinal < count; ++ordinal)
         {
             const std::size_t h_parent = child - 1u - ordinal;
             const std::size_t v_parent = ordinal;
@@ -2614,10 +2633,10 @@ bool HasParentInFlat(
     const std::vector<std::uint32_t>& flat,
     std::size_t child,
     std::size_t parent,
-    std::uint8_t k) noexcept
+    std::uint32_t k) noexcept
 {
     const std::size_t base = child * static_cast<std::size_t>(k);
-    for (std::uint8_t ordinal = 0u; ordinal < k; ++ordinal)
+    for (std::uint32_t ordinal = 0u; ordinal < k; ++ordinal)
     {
         if (flat[base + ordinal] == parent) return true;
     }
@@ -2641,7 +2660,7 @@ GraphProof ProveRuntimeCombinedDAG(
 
         for (std::size_t child = 0u; child < config.NodeCount; ++child)
         {
-            for (std::uint8_t ordinal = 0u; ordinal < config.ParentCapacity; ++ordinal)
+            for (std::uint32_t ordinal = 0u; ordinal < config.ParentCapacity; ++ordinal)
             {
                 const ReadResult read = backend.FindParent(
                     child, axis, ordinal, DEFAULT_MAX_TRIES);
@@ -2657,7 +2676,7 @@ GraphProof ProveRuntimeCombinedDAG(
                     proof.ParentOrder = false;
 
                 const std::size_t base = child * config.ParentCapacity;
-                for (std::uint8_t prior = 0u; prior < ordinal; ++prior)
+                for (std::uint32_t prior = 0u; prior < ordinal; ++prior)
                 {
                     if (flat[base + prior] == read.Node) proof.NoDuplicates = false;
                 }
@@ -3295,7 +3314,7 @@ bool VerifyMutationScenario(
             if (!ReverseContains(
                 backend, parent, child, axis, scenario.Config.NodeCount)) return false;
 
-            for (std::uint8_t ordinal = 1u; ordinal < scenario.Config.ParentCapacity; ++ordinal)
+            for (std::uint32_t ordinal = 1u; ordinal < scenario.Config.ParentCapacity; ++ordinal)
             {
                 const ReadResult empty = backend.FindParent(
                     child, axis, ordinal, DEFAULT_MAX_TRIES);
@@ -3855,7 +3874,7 @@ inline bool RunScenario(const BenchmarkCase& config, std::size_t case_index)
             std::uint64_t checksum = 0u;
             for (std::uint32_t r = 0u; r < rounds; ++r)
                 for (std::size_t child = 0u; child < config.NodeCount; ++child)
-                    for (std::uint8_t ordinal = 0u; ordinal < config.ParentCapacity; ++ordinal)
+                    for (std::uint32_t ordinal = 0u; ordinal < config.ParentCapacity; ++ordinal)
                     {
                         const BenchmarkReadResult read = BenchmarkFindParentCall(
                             backend, child, axis, ordinal, 1u);
@@ -4628,7 +4647,7 @@ inline bool ParentSetEquals(
 {
     std::array<bool, 8u> found{};
     std::size_t count = 0u;
-    for (std::uint8_t ordinal = 0u; ordinal < 2u; ++ordinal)
+    for (std::uint32_t ordinal = 0u; ordinal < 2u; ++ordinal)
     {
         const ReadResult read = backend.FindParent(child, axis, ordinal, DEFAULT_MAX_TRIES);
         if (!read.ContractValid() || read.IsRetry()) return false;
@@ -4684,14 +4703,14 @@ inline Result Run()
     ok = ParentSetEquals(backend, 5u, Axis::VERTICAL, {1u, 2u}, 2u) && ok;
 
     const bool same_parent_replace_rejected =
-        backend.Fabric().ReplaceParentByHandle(
-            backend.Handle(1u), backend.Handle(1u), backend.Handle(5u),
+        backend.Fabric().ReplaceParentByIdentity(
+            backend.Identity(1u), backend.Identity(1u), backend.Identity(5u),
             FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V,
             DEFAULT_MAX_TRIES, AdaptivePackedCellContainer::INTERNAL_RECURSION
         ) == MutationResult::INVALID;
     const bool invalid_table_rejected =
-        backend.Fabric().AddParenByHandle(
-            backend.Handle(0u), backend.Handle(5u),
+        backend.Fabric().AddParentByIdentity(
+            backend.Identity(0u), backend.Identity(5u),
             FabricSegments::SEGMENT_POOL,
             DEFAULT_MAX_TRIES, AdaptivePackedCellContainer::INTERNAL_RECURSION
         ) == MutationResult::INVALID;
@@ -5029,7 +5048,7 @@ inline bool FabricConfigurationValidation() noexcept
         std::uint32_t slot_count,
         std::uint32_t slot_cells,
         SD::FabricRegionConfig config,
-        std::uint8_t parents
+        std::uint32_t parents
     ) noexcept
     {
         APCFinilizer fabric{};
@@ -5064,21 +5083,14 @@ inline bool FabricConfigurationValidation() noexcept
         !accepts(2u, MINIMUM_APC_CELL_COUNT, invalid_mask, 2u) &&
         !accepts(2u, MINIMUM_APC_CELL_COUNT, zero_batch, 2u) &&
         !accepts(2u, MINIMUM_APC_CELL_COUNT, valid, 0u) &&
-        !accepts(
-            2u,
-            MINIMUM_APC_CELL_COUNT,
-            valid,
-            static_cast<std::uint8_t>(
-                ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS  + 1u
-            )
-        );
+        !accepts(2u, MINIMUM_APC_CELL_COUNT, valid, 3u);
 }
 
 inline bool CreationValidationAndRollback() noexcept
 {
     APCFinilizer fabric{};
     if (!fabric.InitializeFabric(
-        1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
+        1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 1u
     ))
     {
         return false;
@@ -5652,7 +5664,7 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
 {
     InspectableFabric fabric{};
     if (!fabric.InitializeFabric(
-        1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 2u
+        1u, MINIMUM_APC_CELL_COUNT, OneRegionConfig(), 1u
     ))
     {
         std::cout << "    detail: single-slot Fabric initialization was rejected\n";
@@ -6050,7 +6062,7 @@ inline bool ShutdownDrainsOutstandingView()
 
     if (
         !fabric.InitializeFabric(
-            1u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 2u
+            1u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 1u
         ) ||
         !CreateAtomic(fabric, apc)
     )
@@ -6098,7 +6110,7 @@ inline bool DirectResolverAndABA()
 
     if (
         !fabric.InitializeFabric(
-            1u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 2u
+            1u, MINIMUM_APC_CELL_COUNT, AtomicRegionConfig(), 1u
         ) ||
         !CreateAtomic(fabric, original)
     )
@@ -6240,7 +6252,7 @@ using SD = SchemaDefinition;
 
 constexpr std::uint32_t VIEW_WIDTH = 8u;
 constexpr std::uint32_t SLOT_COUNT = 4u;
-constexpr std::uint8_t PARENT_CAPACITY = 2u;
+constexpr std::uint32_t PARENT_CAPACITY = 2u;
 
 class RelocationFabric final : public APCFinilizer
 {
@@ -6273,6 +6285,106 @@ public:
             : UNSIGNED_ZERO;
     }
 };
+
+class AlignedFabricImage final
+{
+public:
+    AlignedFabricImage() noexcept = default;
+
+    explicit AlignedFabricImage(std::size_t cells) noexcept
+    {
+        Reset(cells);
+    }
+
+    AlignedFabricImage(const AlignedFabricImage& other) noexcept
+    {
+        if (Reset(other.Size_) && other.Data_)
+        {
+            std::memcpy(Data_, other.Data_, Size_ * sizeof(std::uint64_t));
+        }
+    }
+
+    AlignedFabricImage& operator=(const AlignedFabricImage& other) noexcept
+    {
+        if (this == &other) return *this;
+        if (!Reset(other.Size_)) return *this;
+        if (other.Data_ && Data_)
+        {
+            std::memcpy(Data_, other.Data_, Size_ * sizeof(std::uint64_t));
+        }
+        return *this;
+    }
+
+    AlignedFabricImage(AlignedFabricImage&& other) noexcept
+        : Data_(std::exchange(other.Data_, nullptr)),
+          Size_(std::exchange(other.Size_, 0u))
+    {}
+
+    AlignedFabricImage& operator=(AlignedFabricImage&& other) noexcept
+    {
+        if (this == &other) return *this;
+        Release_();
+        Data_ = std::exchange(other.Data_, nullptr);
+        Size_ = std::exchange(other.Size_, 0u);
+        return *this;
+    }
+
+    ~AlignedFabricImage() noexcept
+    {
+        Release_();
+    }
+
+    bool Reset(std::size_t cells) noexcept
+    {
+        Release_();
+        if (cells == 0u) return true;
+
+        Data_ = RawPackedCellAllocator::DefaultAllocateAtomicCells(
+            cells,
+            alignof(CoreOfFabricCoordinator::FabricCache),
+            nullptr
+        );
+        Size_ = Data_ ? cells : 0u;
+        return Data_ != nullptr;
+    }
+
+    bool Assign(const std::uint64_t* source, std::size_t cells) noexcept
+    {
+        if (!source || !Reset(cells)) return false;
+        std::memcpy(Data_, source, cells * sizeof(std::uint64_t));
+        return true;
+    }
+
+    std::uint64_t* data() noexcept { return Data_; }
+    const std::uint64_t* data() const noexcept { return Data_; }
+    std::size_t size() const noexcept { return Size_; }
+    bool empty() const noexcept { return Size_ == 0u; }
+
+    std::span<std::uint64_t> Span() noexcept
+    {
+        return {Data_, Size_};
+    }
+
+private:
+    void Release_() noexcept
+    {
+        if (Data_)
+        {
+            RawPackedCellAllocator::DefaultFreeAtomicCells(
+                Data_,
+                Size_,
+                alignof(CoreOfFabricCoordinator::FabricCache),
+                nullptr
+            );
+        }
+        Data_ = nullptr;
+        Size_ = 0u;
+    }
+
+    std::uint64_t* Data_{nullptr};
+    std::size_t Size_{0u};
+};
+
 
 constexpr SD::FabricRegionConfig
 RegionConfig() noexcept
@@ -6535,20 +6647,15 @@ inline Result Run()
     std::uint64_t* const source_address =
         source.SlabAddressForTest();
 
-    std::vector<std::uint64_t> snapshot(
-        static_cast<std::size_t>(
-            cell_count
-        )
+    AlignedFabricImage snapshot(
+        static_cast<std::size_t>(cell_count)
     );
 
     const bool save_ok =
         source_address != nullptr &&
         cell_count != UNSIGNED_ZERO &&
         source.SaveFabric(
-            std::span<std::uint64_t>(
-                snapshot.data(),
-                snapshot.size()
-            )
+snapshot.Span()
         );
 
     RelocationFabric wrong_count_target{};
@@ -6564,8 +6671,7 @@ inline Result Run()
         ) &&
         !wrong_count_target.IsFabricActive();
 
-    std::vector<std::uint64_t>
-        bad_version_image = snapshot;
+    AlignedFabricImage bad_version_image = snapshot;
 
     bool bad_version_rejected = false;
 
@@ -6628,8 +6734,7 @@ inline Result Run()
             parent_slot
         );
 
-    std::vector<std::uint64_t>
-        relocated_one = snapshot;
+    AlignedFabricImage relocated_one = snapshot;
 
     const bool first_address_changed =
         !relocated_one.empty() &&
@@ -6711,15 +6816,13 @@ inline Result Run()
 
     // Detach intentionally leaves a quiescent image. Copy that image to another
     // allocation to prove a second address can interpret the same Fabric.
-    std::vector<std::uint64_t>
-        relocated_two{};
+    AlignedFabricImage relocated_two{};
 
     if (detach_ok)
     {
-        relocated_two.assign(
+        relocated_two.Assign(
             detached.Slab_,
-            detached.Slab_ +
-                detached.CellCount_
+            static_cast<std::size_t>(detached.CellCount_)
         );
     }
 
@@ -6905,9 +7008,9 @@ inline bool ValidateRunArguments(
     if (
         lower_parent_capacity == 0u ||
         higher_parent_capacity < lower_parent_capacity ||
-        higher_parent_capacity > ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS 
+        higher_parent_capacity > lower_node_count
     )
-        return fail("parent bounds must satisfy 0 < lower <= higher <= 64");
+        return fail("parent bounds must satisfy 0 < lowerK <= upperK <= lowerN");
     if (higher_node_count > UINT32_MAX)
         return fail("node count exceeds the Fabric uint32 slot domain");
     if (
@@ -6949,17 +7052,17 @@ inline int Run(
     const std::array<BenchmarkCase, 4u> cases = MakeBenchmarkCases(
         lower_node_count,
         higher_node_count,
-        static_cast<std::uint8_t>(lower_parent_capacity),
-        static_cast<std::uint8_t>(higher_parent_capacity));
+        static_cast<std::uint32_t>(lower_parent_capacity),
+        static_cast<std::uint32_t>(higher_parent_capacity));
 
     // Internal Tests 2-3 deliberately exercise only the four user-supplied
     // corners, in high-to-low order, with one timed sample per point. Test 1
     // keeps its existing case order and repeated measurements.
     const std::array<BenchmarkCase, 4u> internal_scale_cases{{
-        {higher_node_count, static_cast<std::uint8_t>(higher_parent_capacity)},
-        {higher_node_count, static_cast<std::uint8_t>(lower_parent_capacity)},
-        {lower_node_count,  static_cast<std::uint8_t>(higher_parent_capacity)},
-        {lower_node_count,  static_cast<std::uint8_t>(lower_parent_capacity)}
+        {higher_node_count, static_cast<std::uint32_t>(higher_parent_capacity)},
+        {higher_node_count, static_cast<std::uint32_t>(lower_parent_capacity)},
+        {lower_node_count,  static_cast<std::uint32_t>(higher_parent_capacity)},
+        {lower_node_count,  static_cast<std::uint32_t>(lower_parent_capacity)}
     }};
 
     const std::size_t concurrent_threads = usable_thread_count - 2u;
@@ -7203,7 +7306,7 @@ template<class Backend> bool OneTest1(std::ofstream& file, const char* label,
     const auto scan_start = Clock::now();
     std::uint64_t checksum = 0;
     for (std::size_t child = 0; child < c.NodeCount; ++child)
-        for (std::uint8_t ordinal = 0; ordinal < c.ParentCapacity; ++ordinal)
+        for (std::uint32_t ordinal = 0; ordinal < c.ParentCapacity; ++ordinal)
         {
             const auto read = backend.FindParent(child, Axis::HORIZONTAL, ordinal, 1u);
             if (!read.ContractValid() || read.IsRetry()) out.InvalidReads++;
@@ -7298,8 +7401,8 @@ int RunAll(std::size_t lower_node_count = 100u,
     using RowLock = RowLockedVectorDAG<std::shared_mutex, true>;
     using RowLockWrite = RowLockedVectorDAG<std::mutex, false>;
     const std::array<BenchmarkCase, 4> cases = MakeBenchmarkCases(lower_node_count,
-        higher_node_count, static_cast<std::uint8_t>(lower_parent_capacity),
-        static_cast<std::uint8_t>(higher_parent_capacity));
+        higher_node_count, static_cast<std::uint32_t>(lower_parent_capacity),
+        static_cast<std::uint32_t>(higher_parent_capacity));
     const std::size_t sweep = usable_thread_count - 2u;
     bool all_ok = true;
     // The expensive 1 KiB full-DAG Test 1 uses the small N. Structural scale
@@ -7357,7 +7460,7 @@ int RunAll(std::size_t lower_node_count = 100u,
         for (std::size_t n : {65'536u, 262'144u, 524'288u, 1'048'576u})
         {
             if (n <= lower_node_count || n >= higher_node_count) continue;
-            const BenchmarkCase c{n, static_cast<std::uint8_t>(higher_parent_capacity)};
+            const BenchmarkCase c{n, static_cast<std::uint32_t>(higher_parent_capacity)};
             for (std::size_t count = 1; count <= sweep; ++count)
                 for (bool skew : {false, true})
                 {
