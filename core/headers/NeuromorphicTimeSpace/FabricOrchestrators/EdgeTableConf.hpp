@@ -174,14 +174,10 @@ namespace BidirectionalInMemGraph
             return parent_slot < child_slot;
         }
 
-        static constexpr bool IsConfigurableNumberOfParent(uint32_t k, uint32_t slot_count) noexcept
-        {
-            return k != UNSIGNED_ZERO && slot_count != UNSIGNED_ZERO && k <= slot_count;
-        }
 
         static constexpr bool IsBoundedRelationLocatorSize(uint32_t k, uint32_t slot_count) noexcept
         {
-            if (IsValidConfigurableParentCapacity(k, slot_count))
+            if (!IsValidConfigurableParentCapacity(k, slot_count))
             {
                 return false;
             }
@@ -204,7 +200,7 @@ namespace BidirectionalInMemGraph
             return locator < RELATION_NULL ? static_cast<uint32_t>(locator) : RELATION_NULL;
         }
 
-        static constexpr uint32_t RelationSLot(uint32_t locator, uint32_t k) noexcept
+        static constexpr uint32_t RelationSlot(uint32_t locator, uint32_t k) noexcept
         {
             return locator != RELATION_NULL && k != UNSIGNED_ZERO ? locator / k : RELATION_NULL;
         }
@@ -229,7 +225,7 @@ namespace BidirectionalInMemGraph
             }
             
             return 
-                RelationSLot(locator, k) < slot_count && RelationOrdinal(locator, k) < k;
+                RelationSlot(locator, k) < slot_count && RelationOrdinal(locator, k) < k;
         }
 
 

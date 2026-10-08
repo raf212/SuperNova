@@ -56,8 +56,6 @@ namespace BidirectionalInMemGraph
             uint64_t RESERVED = UNSIGNED_ZERO;
         };
 
-        static constexpr uint32_t STRUCTURAL_HOT_FIXED_CELLS = sizeof(StructuralHotRow) / sizeof(uint64_t);
-
         static constexpr uint8_t HANDLE_TABLE_WIDTH = sizeof(StructuralHotRow) / sizeof(uint64_t);
 
         static constexpr uint8_t ACTIVE_OPERATION_LEN = 32u;

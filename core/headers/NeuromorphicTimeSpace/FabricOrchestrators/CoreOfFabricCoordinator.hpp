@@ -7,7 +7,6 @@ namespace BidirectionalInMemGraph
     struct CoreOfFabricCoordinator
     {
         /// UNCHECKED
-        static constexpr size_t RELATION_WIDTH_OF_FABRIC = 0u;
         static constexpr size_t DEVICE_PLANNER_RECORD_LEN = 0u;
         static constexpr size_t WORK_RECORD_WIDTH_OF_FABRIC = 0u;
         static constexpr size_t DEFAULT_FABRIC_CONTROLIO_LENGTH = 512u;
@@ -15,9 +14,8 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint32_t FABRIC_MAGIC = 0x41504643u;
         static constexpr uint32_t FABRIC_META_EOF = 0x41474946u;
-        static constexpr uint8_t EACH_TABLE_RECORD_SENTINAL = UINT8_MAX;
 
-        static constexpr uint8_t FORMAT_VERSION = 1u;
+        static constexpr uint8_t FORMAT_VERSION = 2u;
 
         enum class FabricBackigOwnership : uint8_t
         {

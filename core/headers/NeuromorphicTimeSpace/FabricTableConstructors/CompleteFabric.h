@@ -145,7 +145,7 @@ namespace BidirectionalInMemGraph
         void CompiledDAGRelation_(
             FabricSegments edge_table,
             uint32_t child_slot,
-            uint8_t relation_ordinal,
+            uint32_t relation_ordinal,
             const EdgeBuilder::ParentRelation& relation
         ) noexcept;
 

@@ -658,7 +658,7 @@ The child-owned parent array gives bounded O(K) child→parent access. Each occu
 | `ControlOffset(domain)` | PARENT_RELATIONS/CHILD_LIST | u16 | Returns row control-cell offset. |
 | `RawEdgeTableRecordWidth(K)` | K | u16 cells | Unpadded 2 + K×2-cell relation width. |
 | `IsParentEmpty` | relation | bool | Only parent-handle sentinel check. |
-| `AreSiblingsEmpty` | relation | bool | Only sibling-locator sentinel check. |
+| `IsSiblingEmpty` | relation | bool | Only sibling-locator sentinel check. |
 
 ---
 

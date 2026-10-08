@@ -174,7 +174,7 @@ namespace BidirectionalInMemGraph
         uint32_t slot_count,
         uint32_t slot_cell_count,
         const SchemaDefinition::FabricRegionConfig& region_conf,
-        uint8_t max_direct_parent_per_axis
+        uint32_t max_direct_parent_per_axis
     ) noexcept
     {
         bool expected = false;

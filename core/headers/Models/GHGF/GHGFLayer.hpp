@@ -58,7 +58,7 @@ namespace BidirectionalInMemGraph
         {
             GHGFConcurrentOperation Result = GHGFConcurrentOperation::REJECTED;
             uint32_t PublishedRowSequence = UINT32_MAX;
-            uint8_t PublishedOrdinal = UINT8_MAX;
+            uint32_t PublishedOrdinal = EB::RELATION_NULL;
         };
 
         struct GHGFParentExecutionSnapshot final

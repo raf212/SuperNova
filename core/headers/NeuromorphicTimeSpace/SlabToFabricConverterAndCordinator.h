@@ -57,7 +57,7 @@ namespace BidirectionalInMemGraph
             uint32_t slot_count,
             uint32_t slot_cell_count,
             const SchemaDefinition::FabricRegionConfig& region_conf,
-            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
+            uint32_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
         ) noexcept;
 
         bool SaveFabric(std::span<uint64_t> destination) noexcept;
@@ -78,7 +78,6 @@ namespace BidirectionalInMemGraph
     protected:
         static constexpr uint8_t DAG_MAX_ROW_PARTICIPANTS = 3u;
         static constexpr uint8_t DAG_MAX_RELATION_DELTAS = 5u;
-        static constexpr uint8_t INVALID_RELATION_ORDINAL = UINT8_MAX;
 
         struct ConditionalParentPublication final
         {
