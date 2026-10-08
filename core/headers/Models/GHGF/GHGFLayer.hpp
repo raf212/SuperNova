@@ -65,7 +65,7 @@ namespace BidirectionalInMemGraph
         {
             uint64_t ParentMask = UNSIGNED_ZERO;
             uint32_t RowSequence = UINT32_MAX;
-            std::array<uint64_t, ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS > ParentHandles{};
+            std::array<EB::ParentIDGeneration, ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS > ParentHandles{};
             std::array<float, ADS::GHGF_MAX_DIRECTED_PARENT_PER_AXIS > Couplings{};
         };
     };

@@ -7,7 +7,7 @@ namespace BidirectionalInMemGraph
 
     void GHGFStructralLearningModel::PublishCoupling_(
         void* raw_context,
-        uint8_t ordinal
+        uint32_t ordinal
     ) noexcept
     {
         auto* const context =
@@ -114,8 +114,7 @@ namespace BidirectionalInMemGraph
             {
                 const uint8_t ordinal =
                     static_cast<uint8_t>(std::countr_zero(mask));
-                if (TwinU32ToU64::ExtractLow32Of64(
-                        current.ParentHandles[ordinal]) == wanted)
+                if (current.ParentHandles[ordinal].Slot == wanted)
                 {
                     return ordinal;
                 }

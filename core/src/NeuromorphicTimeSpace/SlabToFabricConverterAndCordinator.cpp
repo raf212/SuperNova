@@ -58,7 +58,6 @@ namespace BidirectionalInMemGraph
             matrix_end > FabCache_->SlabCellCount_ ||
             volatile_edge_end > FabCache_->SlabCellCount_ ||
             handle_end > FabCache_->SlabCellCount_ ||
-            dag_end > FabCache_->SlabCellCount_ ||
             segment_end > FabCache_->SlabCellCount_
         )
         {

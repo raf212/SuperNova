@@ -1130,15 +1130,27 @@ private:
             op.RelationLocator_, op.MutationOP_, present};
     }
 
-    static BenchmarkReadResult BenchmarkChildConvert_(
-        const TestAPC::RelationOperationForTest& op) noexcept
+    BenchmarkReadResult BenchmarkChildConvert_(
+        const TestAPC::RelationOperationForTest& op
+    ) noexcept
     {
+        const uint32_t k =
+            FabCache_
+                ? FabCache_->MaxDirectParentsPerAxis_
+                : 0u;
+
         const std::size_t node_hint =
             op.MutationOP_ == ReadOperation::FOUND &&
-            op.RelationLocator_ != UINT32_MAX
+            op.RelationLocator_ != UINT32_MAX &&
+            k != 0u
                 ? static_cast<std::size_t>(
-                    EdgeBuilder::RelationSlot(op.RelationLocator_))
+                    EdgeBuilder::RelationSlot(
+                        op.RelationLocator_,
+                        k
+                    )
+                )
                 : BenchmarkReadResult::NO_NODE;
+
         return BenchmarkConvert_(op, node_hint);
     }
 };
