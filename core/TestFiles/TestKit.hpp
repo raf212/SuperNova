@@ -777,9 +777,9 @@ public:
         return Storage_.ReplaceUnlocked(old_p, new_p, c, a);
     }
 
-    ReadResult FindParent(std::size_t c, Axis a, std::uint8_t o, std::uint32_t = 1u) noexcept
+    ReadResult FindParent(std::size_t c, Axis a, std::uint32_t o, std::uint32_t = 1u) noexcept
     { return Storage_.FindParent(c, a, o); }
-    ReadResult StableFindParent(std::size_t c, Axis a, std::uint8_t o, std::uint32_t = 1u) noexcept
+    ReadResult StableFindParent(std::size_t c, Axis a, std::uint32_t o, std::uint32_t = 1u) noexcept
     { std::lock_guard<std::mutex> lock(MutationMutex_); return Storage_.FindParent(c, a, o); }
     ReadResult FindFirstChild(std::size_t p, Axis a, std::uint32_t = 1u) noexcept
     { return Storage_.FindFirstChild(p, a); }
@@ -846,10 +846,10 @@ public:
         return Storage_.ReplaceUnlocked(old_p, new_p, c, a);
     }
 
-    ReadResult FindParent(std::size_t c, Axis a, std::uint8_t o, std::uint32_t = 1u) noexcept
+    ReadResult FindParent(std::size_t c, Axis a, std::uint32_t o, std::uint32_t = 1u) noexcept
     { return Storage_.FindParent(c, a, o); }
 
-    ReadResult StableFindParent(std::size_t c, Axis a, std::uint8_t o, std::uint32_t = 1u) noexcept
+    ReadResult StableFindParent(std::size_t c, Axis a, std::uint32_t o, std::uint32_t = 1u) noexcept
     {
         if (c >= Storage_.NodeCount()) return {};
         if constexpr (SharedReaders)
@@ -4218,7 +4218,7 @@ template<class Backend> Numbers Execute(Backend& backend, const Geometry& g,
     struct FinalState { std::size_t Child = 0, Parent = 0; Axis Relation = Axis::HORIZONTAL; bool Seen = false; };
     std::vector<FinalState> final(writers);
     Clock::time_point start{};
-    std::barrier gate(static_cast<std::ptrdiff_t>(participants + 1u), [&] { start = Clock::now(); });
+    std::barrier gate(static_cast<std::ptrdiff_t>(participants + 1u), [&start]() noexcept { start = Clock::now(); });
     const auto deadline = [&] { return start + interval; };
     std::vector<std::thread> threads;
     threads.reserve(participants);

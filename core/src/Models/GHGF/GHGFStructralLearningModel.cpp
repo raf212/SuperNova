@@ -108,12 +108,12 @@ namespace BidirectionalInMemGraph
             return result;
         }
 
-        const auto FindOrdinal___ = [&](uint32_t wanted) noexcept -> uint8_t
+        const auto FindOrdinal___ = [&](uint32_t wanted) noexcept -> uint32_t
         {
             for (uint64_t mask = current.ParentMask; mask; mask &= mask - 1u)
             {
-                const uint8_t ordinal =
-                    static_cast<uint8_t>(std::countr_zero(mask));
+                const uint32_t ordinal =
+                    static_cast<uint32_t>(std::countr_zero(mask));
                 if (current.ParentHandles[ordinal].Slot == wanted)
                 {
                     return ordinal;
@@ -122,15 +122,13 @@ namespace BidirectionalInMemGraph
             return UINT8_MAX;
         };
 
-        const uint8_t old_ordinal =
-            removes || replaces ? FindOrdinal___(mutation.OldParent) : UINT8_MAX;
-        const uint8_t new_ordinal =
-            adds || replaces ? FindOrdinal___(mutation.NewParent) : UINT8_MAX;
+        const uint32_t old_ordinal = removes || replaces ? FindOrdinal___(mutation.OldParent) : UINT8_MAX;
+        const uint32_t new_ordinal = adds || replaces ? FindOrdinal___(mutation.NewParent) : UINT8_MAX;
 
         if (
             ((removes || replaces) && old_ordinal == UINT8_MAX) ||
             ((adds || replaces) && new_ordinal != UINT8_MAX) ||
-            (adds && std::popcount(current.ParentMask) >=
+            (adds && static_cast<uint32_t>(std::popcount(current.ParentMask)) >=
                 FabCache_->MaxDirectParentsPerAxis_)
         )
         {
