@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph
     void DAGMutationConf::PrepareConditionalParentPublication_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         ConditionalParentPublication* publication
     ) noexcept
     {
@@ -57,64 +57,10 @@ namespace BidirectionalInMemGraph
             publication->Publish(publication->Context, relation_ordinal);
     }
 
-    CompiledDAGTableConstructor::CompiledDAGRecord* CompiledDAGTableConstructor::CompiledDAGRow_(uint32_t row_slot) noexcept
-    {
-        if (!SlabBasePtr_ || row_slot >= FabCache_->CountOfAPC_)
-        {
-            return nullptr;
-        }
-        
-        const size_t row_begin = static_cast<size_t>(FabCache_->CompiledDAGTableBeginIdx_) +
-            (static_cast<size_t>(row_slot) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
-        
-        if (
-            row_begin >= FabCache_->SlabCellCount_ ||
-            CoreOfFabricCoordinator::COMPILED_DAG_LEN > FabCache_->SlabCellCount_ - row_begin
-        )
-        {
-            return nullptr;
-        }
-
-        return std::launder(reinterpret_cast<CompiledDAGRecord*>(SlabBasePtr_ + row_begin));
-    }
-
-
-    bool CompiledDAGTableConstructor::InitializeCompiledDAGTAble_() noexcept
-    {
-        RecordBookConf::FabricSegmentBounds bounds{};
-        if (!GetRecordMapCarrierRanges_(FabricSegments::EDGE_TOPOLOGY_BITMAP, bounds))
-        {
-            return false;
-        }
-
-        const size_t required_cells = static_cast<size_t>(FabCache_->CountOfAPC_) * CoreOfFabricCoordinator::COMPILED_DAG_LEN;
-
-        if (
-            bounds.EndIndex - bounds.BeginIndex != required_cells ||
-            bounds.EndIndex > FabCache_->SlabCellCount_
-        )
-        {
-            return false;
-        }
-
-        FabCache_->CompiledDAGTableBeginIdx_ = bounds.BeginIndex;
-
-        for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
-        {
-            const size_t row_begin = static_cast<size_t>(FabCache_->CompiledDAGTableBeginIdx_) +
-                (static_cast<size_t>(i) * CoreOfFabricCoordinator::COMPILED_DAG_LEN);
-
-            std::construct_at(reinterpret_cast<CompiledDAGRecord*>(SlabBasePtr_ + row_begin), CompiledDAGRecord{});
-        }
-        
-        return true;
-    }
-
-
     void CompiledDAGTableConstructor::CompiledDAGRelation_(
         FabricSegments edge_table,
         uint32_t child_slot,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         const EdgeBuilder::ParentRelation& relation
     ) noexcept
     {
@@ -128,97 +74,84 @@ namespace BidirectionalInMemGraph
             return;
         }
 
-        CompiledDAGRecord* record = CompiledDAGRow_(child_slot);
-
-        if (!record)
+        EB::PMSpan mask = ParentMask_(edge_table, child_slot);
+        const uint32_t word_index = relation_ordinal / EB::PARENT_MASK_BITS_PER_BLOCK;
+        const uint32_t bit_index = relation_ordinal % EB::PARENT_MASK_BITS_PER_BLOCK;
+        if (word_index >= mask.size())
         {
             return;
         }
+        
+        EB::ParentMaskBlock block = std::atomic_ref<const EB::ParentMaskBlock>(mask[word_index]).load(std::memory_order_relaxed);
+        std::bitset<EB::PARENT_MASK_BITS_PER_BLOCK> bits(block.Block);
 
-        uint64_t& stored_mask = edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H ? 
-            record->ValueParentMask : record->VolatileParentMask;
-
-        std::atomic_ref<uint64_t> mask(stored_mask);
-
-        const uint64_t relation_bit = EdgeBuilder::DirtyBit(relation_ordinal);
-
-        if (EdgeBuilder::IsEmpty(relation))
-        {
-            mask.fetch_and(~relation_bit, std::memory_order_release);
-        }
-        else
-        {
-            mask.fetch_or(relation_bit, std::memory_order_release);
-        }
+        bits.set(bit_index, !EB::IsParentEmpty(relation));
+        block.Block = bits.to_ullong();
+        std::atomic_ref<EB::ParentMaskBlock>(mask[word_index]).store(
+            block,
+            std::memory_order_relaxed
+        );
     }
 
-
-    CompiledDAGTableConstructor::SeqLockedOperation
-    CompiledDAGTableConstructor::ReadCompiledDAGParentMask_(
+    CompiledDAGTableConstructor::SeqLockedOperation CompiledDAGTableConstructor::ReadCompiledDAGParentMask_(
         FabricSegments edge_table,
-        uint32_t child_slot,
+        uint32_t slot,
         uint64_t& return_mask,
         uint32_t max_tries
     ) noexcept
     {
         return_mask = 0u;
+
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
-            child_slot >= FabCache_->CountOfAPC_
+            slot >= FabCache_->CountOfAPC_ ||
+            FabCache_->MaxDirectParentsPerAxis_ > 64u ||
+            max_tries == 0u
         )
         {
             return SeqLockedOperation::NONE;
         }
 
-        CompiledDAGRecord* const record = CompiledDAGRow_(child_slot);
-        const size_t control_index = EdgeControlCellIndex_(
-            edge_table,
-            child_slot,
-            EdgeBuilder::EdgeDomain::PARENT_RELATIONS
-        );
-        if (!record || control_index == SIZE_MAX)
+        HAS::ParentRowControl* const control = ParentRowControl_(edge_table, slot);
+        EB::PMSpan mask = ParentMask_(edge_table, slot);
+
+        if (!control || mask.empty())
         {
             return SeqLockedOperation::NONE;
         }
 
-        uint64_t& stored_mask =
-            edge_table == FabricSegments::VALUE_PARENT_EDGE_TABLE_H
-                ? record->ValueParentMask
-                : record->VolatileParentMask;
-        std::atomic_ref<const uint64_t> seq_lock_ref(
-            SlabBasePtr_[control_index]
-        );
-
-        for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
+        for (size_t i = 0; i < max_tries; i++)
         {
-            const uint64_t before_raw =
-                seq_lock_ref.load(std::memory_order_acquire);
-            const EdgeBuilder::EdgeData before =
-                EdgeBuilder::UnpackEdgeHeader(before_raw);
-            if (!before.IsValid)
-            {
-                return SeqLockedOperation::NONE;
-            }
-            if (before.Status == EdgeBuilder::EdgeStatus::RESERVED)
-            {
-                continue;
-            }
-            if (before.Status != EdgeBuilder::EdgeStatus::LIVE)
+            const HAS::ParentRowControl before = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (!HAS::ValidParentControl(before))
             {
                 return SeqLockedOperation::NONE;
             }
 
-            const uint64_t observed_mask = std::atomic_ref<const uint64_t>(
-                stored_mask
-            ).load(std::memory_order_relaxed);
-            if (before_raw != seq_lock_ref.load(std::memory_order_acquire))
+            if (before.Status == EB::EdgeStatus::RESERVED)
             {
                 continue;
             }
 
-            return_mask = observed_mask;
+            if (before.Status != EB::EdgeStatus::LIVE)
+            {
+                return SeqLockedOperation::NONE;
+            }
+
+            const EB::ParentMaskBlock observed = std::atomic_ref<const EB::ParentMaskBlock>(mask.front()).load(std::memory_order_acquire);
+
+            const HAS::ParentRowControl after = std::atomic_ref<const HAS::ParentRowControl>(*control).load(std::memory_order_acquire);
+
+            if (before != after)
+            {
+                continue;
+            }
+            
+            return_mask = observed.Block;
             return SeqLockedOperation::FOUND;
         }
+        
         return SeqLockedOperation::RETRY;
     }
 
@@ -320,11 +253,10 @@ namespace BidirectionalInMemGraph
         return SeqLockedOperation::FOUND;
     }
 
-    DAGMutationConf::DAGRelationDelta*
-    DAGMutationConf::FindOrInsertRelationDelta_(
+    DAGMutationConf::DAGRelationDelta* DAGMutationConf::FindOrInsertRelationDelta_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint8_t ordinal
+        uint32_t ordinal
     ) noexcept
     {
         if (
@@ -352,7 +284,7 @@ namespace BidirectionalInMemGraph
         }
 
         const std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(transaction.EdgeTable, child_slot);
+            EdgeRelationsPerSlot_(transaction.EdgeTable, child_slot);
         if (relations.size() != FabCache_->MaxDirectParentsPerAxis_)
         {
             return nullptr;
@@ -362,12 +294,8 @@ namespace BidirectionalInMemGraph
             transaction.Relations[transaction.RelationCount++];
         inserted.ChildSlot = child_slot;
         inserted.Ordinal = ordinal;
-        inserted.Before.ParentHandle = std::atomic_ref<const uint64_t>(
-            relations[ordinal].ParentHandle
-        ).load(std::memory_order_relaxed);
-        inserted.Before.SiblingLocators = std::atomic_ref<const uint64_t>(
-            relations[ordinal].SiblingLocators
-        ).load(std::memory_order_relaxed);
+        inserted.Before.Parent = std::atomic_ref<const EB::ParentIDGeneration>(relations[ordinal].Parent).load(std::memory_order_relaxed);
+        inserted.Before.Siblings = std::atomic_ref<const EB::SiblingLinks>(relations[ordinal].Siblings).load(std::memory_order_relaxed);
         inserted.Work = inserted.Before;
         return &inserted;
     }
@@ -376,7 +304,7 @@ namespace BidirectionalInMemGraph
     DAGMutationConf::EditReservedParentHandle_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint8_t ordinal
+        uint32_t ordinal
     ) noexcept
     {
         DAGRowParticipant* const owner = FindRowParticipant_(
@@ -427,8 +355,8 @@ namespace BidirectionalInMemGraph
 
         DAGRelationDelta* const delta = FindOrInsertRelationDelta_(
             transaction,
-            EdgeBuilder::RelationSlot(relation_locator),
-            EdgeBuilder::RelationOrdinal(relation_locator)
+            EdgeBuilder::RelationSlot(relation_locator, FabCache_->MaxDirectParentsPerAxis_),
+            EdgeBuilder::RelationOrdinal(relation_locator, FabCache_->MaxDirectParentsPerAxis_)
         );
         if (delta)
         {
@@ -451,7 +379,7 @@ namespace BidirectionalInMemGraph
                     transaction.EdgeTable,
                     delta.ChildSlot,
                     delta.Ordinal,
-                    delta.Work.ParentHandle
+                    delta.Work.Parent
                 );
                 if (
                     EdgeBuilder::IsParentEmpty(delta.Before) !=
@@ -472,7 +400,7 @@ namespace BidirectionalInMemGraph
                     transaction.EdgeTable,
                     delta.ChildSlot,
                     delta.Ordinal,
-                    delta.Work.SiblingLocators
+                    delta.Work.Siblings
                 );
             }
         }
@@ -537,11 +465,12 @@ namespace BidirectionalInMemGraph
     }
 
 
+
     bool ConstructDAGOnEachAxis::ScanReservedParentRow_(
         DAGMutationTransaction& transaction,
         uint32_t child_slot,
-        uint64_t wanted_parent_handle,
-        uint64_t other_parent_handle,
+        EB::ParentIDGeneration wanted_parent_handle,
+        EB::ParentIDGeneration other_parent_handle,
         ParentRowScan& scan
     ) noexcept
     {
@@ -552,7 +481,7 @@ namespace BidirectionalInMemGraph
             EdgeBuilder::EdgeDomain::PARENT_RELATIONS
         );
         const std::span<EdgeBuilder::ParentRelation> relations =
-            ParentRelations_(transaction.EdgeTable, child_slot);
+            EdgeRelationsPerSlot_(transaction.EdgeTable, child_slot);
         if (
             !owner ||
             !owner->Reserved ||
@@ -562,16 +491,14 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        for (uint8_t ordinal = 0u;
+        for (uint32_t ordinal = 0u;
             ordinal < FabCache_->MaxDirectParentsPerAxis_;
             ++ordinal)
         {
-            const uint64_t handle = std::atomic_ref<const uint64_t>(
-                relations[ordinal].ParentHandle
-            ).load(std::memory_order_relaxed);
-            if (handle == FABRIC_CELL_SENTINAL)
+            const EB::ParentIDGeneration handle = std::atomic_ref<const EB::ParentIDGeneration>(relations[ordinal].Parent).load(std::memory_order_relaxed);
+            if (!HAS::IsGenerationValid(handle.Generation) || !APCDataStructure::IsValid32BitAPCUnit(handle.Slot))
             {
-                if (scan.EmptyOrdinal == UINT8_MAX)
+                if (scan.EmptyOrdinal == EB::RELATION_NULL)
                 {
                     scan.EmptyOrdinal = ordinal;
                 }
@@ -579,19 +506,19 @@ namespace BidirectionalInMemGraph
             }
             if (handle == wanted_parent_handle)
             {
-                if (scan.MatchOrdinal != UINT8_MAX)
+                if (scan.MatchOrdinal != EB::RELATION_NULL)
                 {
                     return false;
                 }
                 scan.MatchOrdinal = ordinal;
-                scan.MatchParentHandle = handle;
+                scan.MatchParent = handle;
             }
             if (
-                other_parent_handle != FABRIC_CELL_SENTINAL &&
+                APCDataStructure::IsValid32BitAPCUnit(handle.Slot) &&
                 handle == other_parent_handle
             )
             {
-                if (scan.OtherOrdinal != UINT8_MAX)
+                if (scan.OtherOrdinal != EB::RELATION_NULL)
                 {
                     return false;
                 }
@@ -624,10 +551,8 @@ namespace BidirectionalInMemGraph
             return MutationResult::INVALID;
         }
 
-        const uint64_t parent_handle = EdgeBuilder::MakeParentHandle(
-            parent_slot,
-            parent_generation
-        );
+        const EB::ParentIDGeneration parent_handle{parent_generation, parent_slot};
+        const EB::ParentIDGeneration other{EB::RELATION_NULL, EB::RELATION_NULL};
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -690,11 +615,11 @@ namespace BidirectionalInMemGraph
                     transaction,
                     child_slot,
                     parent_handle,
-                    FABRIC_CELL_SENTINAL,
+                    other,
                     scan
                 ) ||
-                scan.MatchOrdinal != UINT8_MAX ||
-                scan.EmptyOrdinal == UINT8_MAX
+                scan.MatchOrdinal != EB::RELATION_NULL ||
+                scan.EmptyOrdinal == EB::RELATION_NULL
             )
             {
                 AbortRowTransaction_(transaction);
@@ -703,7 +628,8 @@ namespace BidirectionalInMemGraph
 
             const uint32_t self = EdgeBuilder::PackRelationLocator(
                 child_slot,
-                scan.EmptyOrdinal
+                scan.EmptyOrdinal,
+                FabCache_->MaxDirectParentsPerAxis_
             );
             DAGRelationDelta* const moving_parent = EditReservedParentHandle_(
                 transaction,
@@ -716,7 +642,7 @@ namespace BidirectionalInMemGraph
                 !moving_parent ||
                 moving_parent != moving_siblings ||
                 !EdgeBuilder::IsParentEmpty(moving_parent->Before) ||
-                !EdgeBuilder::AreSiblingsEmpty(moving_parent->Before)
+                !EdgeBuilder::IsSiblingEmpty(moving_parent->Before)
             )
             {
                 AbortRowTransaction_(transaction);
@@ -724,15 +650,12 @@ namespace BidirectionalInMemGraph
             }
 
             const uint32_t old_tail = parent_list->Before.TailLocator;
-            moving_parent->Work.ParentHandle = parent_handle;
+            moving_parent->Work.Parent = parent_handle;
 
             if (old_tail == EdgeBuilder::RELATION_NULL)
             {
-                EdgeBuilder::SetSiblingLocators(
-                    moving_parent->Work,
-                    self,
-                    self
-                );
+                moving_parent->Work.Siblings = EB::SiblingLinks{self, self};
+
                 parent_list->WorkTail = self;
 
                 PrepareConditionalParentPublication_(
@@ -763,15 +686,16 @@ namespace BidirectionalInMemGraph
             );
             if (
                 !tail ||
-                tail->Before.ParentHandle != parent_handle ||
-                EdgeBuilder::AreSiblingsEmpty(tail->Before)
+                tail->Before.Parent != parent_handle ||
+                EdgeBuilder::IsSiblingEmpty(tail->Before)
             )
             {
                 AbortRowTransaction_(transaction);
                 return MutationResult::INVALID;
             }
 
-            const uint32_t first = EdgeBuilder::NextLocator(tail->Before);
+            const uint32_t first = tail->Before.Siblings.Next;
+
             if (!EdgeBuilder::IsValidRelationLocator(
                 first,
                 static_cast<uint32_t>(FabCache_->CountOfAPC_),
@@ -788,29 +712,18 @@ namespace BidirectionalInMemGraph
             );
             if (
                 !first_delta ||
-                first_delta->Before.ParentHandle != parent_handle ||
-                EdgeBuilder::PreviousLocator(first_delta->Before) != old_tail
+                first_delta->Before.Parent != parent_handle ||
+                first_delta->Before.Siblings.Previous != old_tail
             )
             {
                 AbortRowTransaction_(transaction);
                 return MutationResult::INVALID;
             }
 
-            EdgeBuilder::SetSiblingLocators(
-                moving_parent->Work,
-                old_tail,
-                first
-            );
-            EdgeBuilder::SetSiblingLocators(
-                tail->Work,
-                EdgeBuilder::PreviousLocator(tail->Work),
-                self
-            );
-            EdgeBuilder::SetSiblingLocators(
-                first_delta->Work,
-                self,
-                EdgeBuilder::NextLocator(first_delta->Work)
-            );
+            moving_parent->Work.Siblings = EB::SiblingLinks{old_tail, first};
+            tail->Work.Siblings = EB::SiblingLinks{tail->Work.Siblings.Previous, self};
+            first_delta->Work.Siblings = EB::SiblingLinks{self, first_delta->Work.Siblings.Next};
+
             parent_list->WorkTail = self;
             PrepareConditionalParentPublication_(
                 transaction,
@@ -847,10 +760,9 @@ namespace BidirectionalInMemGraph
             return MutationResult::INVALID;
         }
 
-        const uint64_t parent_handle = EdgeBuilder::MakeParentHandle(
-            parent_slot,
-            parent_generation
-        );
+        const EB::ParentIDGeneration parent_handle{parent_generation, parent_slot};
+        const EB::ParentIDGeneration other{EB::RELATION_NULL, EB::RELATION_NULL};
+
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
             DAGMutationTransaction transaction{};
@@ -912,10 +824,10 @@ namespace BidirectionalInMemGraph
                     transaction,
                     child_slot,
                     parent_handle,
-                    FABRIC_CELL_SENTINAL,
+                    other,
                     scan
                 ) ||
-                scan.MatchOrdinal == UINT8_MAX
+                scan.MatchOrdinal == EB::RELATION_NULL
             )
             {
                 AbortRowTransaction_(transaction);
@@ -924,8 +836,10 @@ namespace BidirectionalInMemGraph
 
             const uint32_t self = EdgeBuilder::PackRelationLocator(
                 child_slot,
-                scan.MatchOrdinal
+                scan.MatchOrdinal,
+                FabCache_->MaxDirectParentsPerAxis_
             );
+
             DAGRelationDelta* const moving_parent = EditReservedParentHandle_(
                 transaction,
                 child_slot,
@@ -936,8 +850,8 @@ namespace BidirectionalInMemGraph
             if (
                 !moving_parent ||
                 moving_parent != moving_siblings ||
-                moving_parent->Before.ParentHandle != parent_handle ||
-                EdgeBuilder::AreSiblingsEmpty(moving_parent->Before) ||
+                moving_parent->Before.Parent != parent_handle ||
+                EdgeBuilder::IsSiblingEmpty(moving_parent->Before) ||
                 parent_list->Before.TailLocator == EdgeBuilder::RELATION_NULL
             )
             {
@@ -945,10 +859,9 @@ namespace BidirectionalInMemGraph
                 return MutationResult::INVALID;
             }
 
-            const uint32_t previous =
-                EdgeBuilder::PreviousLocator(moving_parent->Before);
-            const uint32_t next =
-                EdgeBuilder::NextLocator(moving_parent->Before);
+            const uint32_t previous = moving_parent->Before.Siblings.Previous;
+            const uint32_t next = moving_parent->Before.Siblings.Next;
+
             if (
                 !EdgeBuilder::IsValidRelationLocator(
                     previous,
@@ -993,25 +906,17 @@ namespace BidirectionalInMemGraph
                 if (
                     !previous_delta ||
                     !next_delta ||
-                    previous_delta->Before.ParentHandle != parent_handle ||
-                    next_delta->Before.ParentHandle != parent_handle ||
-                    EdgeBuilder::NextLocator(previous_delta->Before) != self ||
-                    EdgeBuilder::PreviousLocator(next_delta->Before) != self
+                    previous_delta->Before.Parent != parent_handle ||
+                    next_delta->Before.Parent != parent_handle ||
+                    previous_delta->Before.Siblings.Next != self ||
+                    previous_delta->Before.Siblings.Previous != self
                 )
                 {
                     AbortRowTransaction_(transaction);
                     return MutationResult::INVALID;
                 }
-                EdgeBuilder::SetSiblingLocators(
-                    previous_delta->Work,
-                    EdgeBuilder::PreviousLocator(previous_delta->Work),
-                    next
-                );
-                EdgeBuilder::SetSiblingLocators(
-                    next_delta->Work,
-                    previous,
-                    EdgeBuilder::NextLocator(next_delta->Work)
-                );
+                previous_delta->Work.Siblings = EB::SiblingLinks{previous_delta->Work.Siblings.Previous, next};
+                next_delta->Work.Siblings = EB::SiblingLinks{previous, next_delta->Work.Siblings.Next};
                 if (parent_list->Before.TailLocator == self)
                 {
                     parent_list->WorkTail = previous;
@@ -1022,8 +927,8 @@ namespace BidirectionalInMemGraph
                 parent_list->WorkTail = EdgeBuilder::RELATION_NULL;
             }
 
-            moving_parent->Work.ParentHandle = FABRIC_CELL_SENTINAL;
-            moving_parent->Work.SiblingLocators = FABRIC_CELL_SENTINAL;
+            moving_parent->Work.Parent = EB::ParentIDGeneration{EB::RELATION_NULL, EB::RELATION_NULL};
+            moving_parent->Work.Siblings = EB::SiblingLinks{EB::RELATION_NULL, EB::RELATION_NULL};
             PrepareConditionalParentPublication_(
                 transaction,
                 child_slot,
@@ -1067,14 +972,8 @@ namespace BidirectionalInMemGraph
             return MutationResult::INVALID;
         }
 
-        const uint64_t old_parent_handle = EdgeBuilder::MakeParentHandle(
-            old_parent_slot,
-            old_parent_generation
-        );
-        const uint64_t new_parent_handle = EdgeBuilder::MakeParentHandle(
-            new_parent_slot,
-            new_parent_generation
-        );
+        const EB::ParentIDGeneration old_parent_handle {old_parent_generation, old_parent_slot};
+        const EB::ParentIDGeneration new_parent_handle {new_parent_generation, new_parent_slot};
 
         for (uint32_t attempt = 0u; attempt < max_tries; ++attempt)
         {
@@ -1152,8 +1051,8 @@ namespace BidirectionalInMemGraph
                     new_parent_handle,
                     scan
                 ) ||
-                scan.MatchOrdinal == UINT8_MAX ||
-                scan.OtherOrdinal != UINT8_MAX
+                scan.MatchOrdinal == EB::RELATION_NULL ||
+                scan.OtherOrdinal != EB::RELATION_NULL
             )
             {
                 AbortRowTransaction_(transaction);
@@ -1162,8 +1061,10 @@ namespace BidirectionalInMemGraph
 
             const uint32_t self = EdgeBuilder::PackRelationLocator(
                 child_slot,
-                scan.MatchOrdinal
+                scan.MatchOrdinal,
+                FabCache_->MaxDirectParentsPerAxis_
             );
+
             DAGRelationDelta* const moving_parent = EditReservedParentHandle_(
                 transaction,
                 child_slot,
@@ -1185,8 +1086,8 @@ namespace BidirectionalInMemGraph
                 !moving_parent ||
                 moving_parent != moving_old ||
                 moving_parent != moving_new ||
-                moving_parent->Before.ParentHandle != old_parent_handle ||
-                EdgeBuilder::AreSiblingsEmpty(moving_parent->Before) ||
+                moving_parent->Before.Parent != old_parent_handle ||
+                EdgeBuilder::IsSiblingEmpty(moving_parent->Before) ||
                 old_list->Before.TailLocator == EdgeBuilder::RELATION_NULL
             )
             {
@@ -1194,10 +1095,8 @@ namespace BidirectionalInMemGraph
                 return MutationResult::INVALID;
             }
 
-            const uint32_t old_previous =
-                EdgeBuilder::PreviousLocator(moving_parent->Before);
-            const uint32_t old_next =
-                EdgeBuilder::NextLocator(moving_parent->Before);
+            const uint32_t old_previous = moving_parent->Before.Siblings.Previous;
+            const uint32_t old_next = moving_parent->Before.Siblings.Next;
             if (
                 !EdgeBuilder::IsValidRelationLocator(
                     old_previous,
@@ -1248,25 +1147,18 @@ namespace BidirectionalInMemGraph
                 if (
                     !previous_delta ||
                     !next_delta ||
-                    previous_delta->Before.ParentHandle != old_parent_handle ||
-                    next_delta->Before.ParentHandle != old_parent_handle ||
-                    EdgeBuilder::NextLocator(previous_delta->Before) != self ||
-                    EdgeBuilder::PreviousLocator(next_delta->Before) != self
+                    previous_delta->Before.Parent != old_parent_handle ||
+                    next_delta->Before.Parent != old_parent_handle ||
+                    previous_delta->Before.Siblings.Next != self ||
+                    next_delta->Before.Siblings.Previous != self
                 )
                 {
                     AbortRowTransaction_(transaction);
                     return MutationResult::INVALID;
                 }
-                EdgeBuilder::SetSiblingLocators(
-                    previous_delta->Work,
-                    EdgeBuilder::PreviousLocator(previous_delta->Work),
-                    old_next
-                );
-                EdgeBuilder::SetSiblingLocators(
-                    next_delta->Work,
-                    old_previous,
-                    EdgeBuilder::NextLocator(next_delta->Work)
-                );
+
+                previous_delta->Work.Siblings = EB::SiblingLinks{previous_delta->Work.Siblings.Previous, old_next};
+                next_delta->Work.Siblings = EB::SiblingLinks{old_previous, next_delta->Work.Siblings.Next};
                 if (old_list->Before.TailLocator == self)
                 {
                     old_list->WorkTail = old_previous;
@@ -1276,11 +1168,7 @@ namespace BidirectionalInMemGraph
             const uint32_t new_tail = new_list->Before.TailLocator;
             if (new_tail == EdgeBuilder::RELATION_NULL)
             {
-                EdgeBuilder::SetSiblingLocators(
-                    moving_parent->Work,
-                    self,
-                    self
-                );
+                moving_parent->Work.Siblings = EB::SiblingLinks{self, self};
             }
             else
             {
@@ -1301,15 +1189,15 @@ namespace BidirectionalInMemGraph
                     );
                 if (
                     !tail_delta ||
-                    tail_delta->Before.ParentHandle != new_parent_handle ||
-                    EdgeBuilder::AreSiblingsEmpty(tail_delta->Before)
+                    tail_delta->Before.Parent != new_parent_handle ||
+                    EdgeBuilder::IsSiblingEmpty(tail_delta->Before)
                 )
                 {
                     AbortRowTransaction_(transaction);
                     return MutationResult::INVALID;
                 }
-                const uint32_t new_first =
-                    EdgeBuilder::NextLocator(tail_delta->Before);
+                const uint32_t new_first = tail_delta->Before.Siblings.Next;
+
                 if (!EdgeBuilder::IsValidRelationLocator(
                     new_first,
                     static_cast<uint32_t>(FabCache_->CountOfAPC_),
@@ -1327,31 +1215,19 @@ namespace BidirectionalInMemGraph
                     );
                 if (
                     !first_delta ||
-                    first_delta->Before.ParentHandle != new_parent_handle ||
-                    EdgeBuilder::PreviousLocator(first_delta->Before) != new_tail
+                    first_delta->Before.Parent != new_parent_handle ||
+                    first_delta->Before.Siblings.Previous != new_tail
                 )
                 {
                     AbortRowTransaction_(transaction);
                     return MutationResult::INVALID;
                 }
-                EdgeBuilder::SetSiblingLocators(
-                    tail_delta->Work,
-                    EdgeBuilder::PreviousLocator(tail_delta->Work),
-                    self
-                );
-                EdgeBuilder::SetSiblingLocators(
-                    first_delta->Work,
-                    self,
-                    EdgeBuilder::NextLocator(first_delta->Work)
-                );
-                EdgeBuilder::SetSiblingLocators(
-                    moving_parent->Work,
-                    new_tail,
-                    new_first
-                );
+                tail_delta->Work.Siblings = EB::SiblingLinks{tail_delta->Work.Siblings.Previous, self};
+                first_delta->Work.Siblings = EB::SiblingLinks{self, first_delta->Work.Siblings.Next};
+                moving_parent->Work.Siblings = EB::SiblingLinks{new_tail, new_first};
             }
 
-            moving_parent->Work.ParentHandle = new_parent_handle;
+            moving_parent->Work.Parent = new_parent_handle;
             new_list->WorkTail = self;
             PrepareConditionalParentPublication_(
                 transaction,

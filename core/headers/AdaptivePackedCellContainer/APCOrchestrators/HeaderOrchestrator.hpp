@@ -18,61 +18,7 @@ namespace BidirectionalInMemGraph
 
         static_assert(sizeof(SeqLockAndStateStruct) <= sizeof(uint64_t));
 
-        static constexpr uint64_t ComposeSeqLockAndState(SeqLockAndStateStruct& files) noexcept
-        {
-            if (
-                !ADS::IsValid32BitAPCUnit(files.SeqLock) ||
-                !ValidateStateAgainstSeqLock(files)
-            )
-            {
-                return FABRIC_CELL_SENTINAL;
-            }
-            return TwinU32ToU64::PackDoubleUnsigned32In64(files.SeqLock, static_cast<uint32_t>(files.StateOfTheAPC));
-        }
 
-        static constexpr bool GetSeqLockAndLifeCycle(
-            uint64_t desc_id_state,
-            SeqLockAndStateStruct& values
-        ) noexcept
-        {
-            values = SeqLockAndStateStruct{};
-            values.SeqLock = TwinU32ToU64::ExtractLow32Of64(desc_id_state);
-            values.StateOfTheAPC = static_cast<StateOfAPC>(TwinU32ToU64::ExtractHigh32Of64(desc_id_state));
-
-            if (!ADS::IsValidFabricUnit(values.SeqLock))
-            {
-                return false;
-            }
-            return ValidateStateAgainstSeqLock(values);
-        }
-
-        static constexpr bool ValidateStateAgainstSeqLock(SeqLockAndStateStruct& files) noexcept
-        {
-            if (!ADS::IsValidFabricUnit(files.SeqLock))
-            {
-                files.IsValid = false;
-                return false;
-            }
-            if (
-                files.StateOfTheAPC == StateOfAPC::RESERVED &&
-                ADS::IsValidEven64(files.SeqLock)
-            )
-            {
-                files.IsValid = false;
-                return false;
-            }
-            if (
-                files.StateOfTheAPC != StateOfAPC::RESERVED &&
-                !ADS::IsValidEven64(files.SeqLock)
-            )
-            {
-                files.IsValid = false;
-                return false;
-            }
-
-            files.IsValid = true;
-            return true;
-        }
 
         static constexpr bool IsTransitionStateLeagal(StateOfAPC current_state, StateOfAPC desired_state) noexcept
         {

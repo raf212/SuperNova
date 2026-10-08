@@ -49,7 +49,7 @@ protected:
         uint32_t child_slot,
         uint32_t child_generation,
         FabricSegments edge_table,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         FabricToAPCLinker::RelationOparation* result_ptr = nullptr,
         uint32_t max_tries = DEFAULT_MAX_TRIES
     ) noexcept;

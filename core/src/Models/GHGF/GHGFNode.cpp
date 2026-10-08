@@ -294,7 +294,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-                const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+                const uint32_t parent = parents.ParentHandles[ordinal].Slot;
                 const float coupling = parents.Couplings[ordinal];
                 const float* parent_mean =
                     GHGFFabric_->FBRowGHGF_(
@@ -385,7 +385,7 @@ namespace BidirectionalInMemGraph
         )
         {
             const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-            const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+            const uint32_t parent = parents.ParentHandles[ordinal].Slot;
             const float coupling = parents.Couplings[ordinal];
 
             const float* parent_mean =
@@ -422,7 +422,7 @@ namespace BidirectionalInMemGraph
             mask &= mask - 1u)
         {
             const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-            const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+            const uint32_t parent = parents.ParentHandles[ordinal].Slot;
             const float coupling = parents.Couplings[ordinal];
 
             const float* parent_mean =
@@ -561,7 +561,7 @@ namespace BidirectionalInMemGraph
             )
             {
                 const uint8_t ordinal = static_cast<uint8_t>(std::countr_zero(mask));
-                const uint32_t parent = TwinU32ToU64::ExtractLow32Of64(parents.ParentHandles[ordinal]);
+                const uint32_t parent = parents.ParentHandles[ordinal].Slot;
                 const float coupling = parents.Couplings[ordinal];
 
                 const float coupling_squared = coupling * coupling;

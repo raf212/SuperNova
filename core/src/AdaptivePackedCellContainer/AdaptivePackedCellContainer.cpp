@@ -125,7 +125,7 @@ namespace BidirectionalInMemGraph
     
     AdaptivePackedCellContainer AdaptivePackedCellContainer::FindParent(
         FabricSegments edge_table,
-        uint8_t relation_ordinal,
+        uint32_t relation_ordinal,
         RelationOparation* parent_relation,
         uint32_t max_tries
     ) noexcept

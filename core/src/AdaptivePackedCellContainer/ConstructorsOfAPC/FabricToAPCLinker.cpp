@@ -3,6 +3,8 @@
 
 namespace BidirectionalInMemGraph
 {
+    using HAS = HandleOfAPCStatic;
+
     bool FabricToAPCLinker::BindExternalRawFabricBacking_(
         uint64_t* raw_cells_ptr,
         APCFinilizer* fabric_owner,
@@ -64,12 +66,14 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        DSA::SeqLockAndStateStruct current_state =
-            APCCache_.FabricOwnerPtr_->ReadAPCStateAtomically_(APCCache_.APCSlotIdx_);
+        HAS::LifeCycleControl current_state{};
 
         if (
-            !current_state.IsValid ||
-            current_state.StateOfTheAPC != StateOfAPC::RESERVED ||
+            APCCache_.FabricOwnerPtr_->ReadAPCStateAtomically_(
+                APCCache_.APCSlotIdx_,
+                current_state
+            ) != SeqLockedOperation::FOUND ||
+            current_state.State != StateOfAPC::RESERVED ||
             !HeaderOrchestrator::InitializeDefaultHeaderBuffer(
                 header_meta_buffer,
                 APCCache_.APCSlotIdx_,
@@ -80,16 +84,10 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const uint64_t raw_new_state_seq = DSA::ComposeSeqLockAndState(current_state);
-
-        header_meta_buffer[static_cast<uint8_t>(ADS::HeaderIdentifierOfAPC::APC_LIFE_CYCLE)] = raw_new_state_seq;
-
         const ADS::RangeOfAPC range_of_this_apc = APCCache_.FabricOwnerPtr_->GetSegmentPoolRange(APCCache_.APCSlotIdx_);
-
 
         return
             range_of_this_apc.IsValid &&
-            ADS::IsValidFabricUnit(raw_new_state_seq) &&
             APCCache_.FabricOwnerPtr_->ForceNxLenMemCopy(
                 range_of_this_apc.BeginIndex,
                 ADS::META_CELL_COUNT,

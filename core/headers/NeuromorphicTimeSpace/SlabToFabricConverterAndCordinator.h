@@ -57,7 +57,7 @@ namespace BidirectionalInMemGraph
             uint32_t slot_count,
             uint32_t slot_cell_count,
             const SchemaDefinition::FabricRegionConfig& region_conf,
-            uint8_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
+            uint32_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
         ) noexcept;
 
         bool SaveFabric(std::span<uint64_t> destination) noexcept;
@@ -78,14 +78,13 @@ namespace BidirectionalInMemGraph
     protected:
         static constexpr uint8_t DAG_MAX_ROW_PARTICIPANTS = 3u;
         static constexpr uint8_t DAG_MAX_RELATION_DELTAS = 5u;
-        static constexpr uint8_t INVALID_RELATION_ORDINAL = UINT8_MAX;
 
         struct ConditionalParentPublication final
         {
-            using PublishFunction = void(*) (void*, uint8_t) noexcept;
+            using PublishFunction = void(*) (void*, uint32_t) noexcept;
             uint32_t ExpectedRowSequence = UINT32_MAX;
             uint32_t PublishedRowSequence = UINT32_MAX;
-            uint8_t PublishedOrdinal = UINT8_MAX;
+            uint32_t PublishedOrdinal = EB::RELATION_NULL;
             bool SequenceMismatch = false;
             void* Context = nullptr;
             PublishFunction Publish = nullptr;
@@ -103,8 +102,8 @@ namespace BidirectionalInMemGraph
 
         struct DAGRelationDelta
         {
-            uint32_t ChildSlot = ADS::APC_INDEX_BOUND_SENTINAL;
-            uint8_t Ordinal = INVALID_RELATION_ORDINAL;
+            uint32_t ChildSlot = EB::RELATION_NULL;
+            uint32_t Ordinal = EB::RELATION_NULL;
             EdgeBuilder::ParentRelation Before{};
             EdgeBuilder::ParentRelation Work{};
             bool ParentHandleDirty = false;
@@ -135,13 +134,13 @@ namespace BidirectionalInMemGraph
         DAGRelationDelta* FindOrInsertRelationDelta_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint8_t ordinal
+            uint32_t ordinal
         ) noexcept;
 
         DAGRelationDelta* EditReservedParentHandle_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint8_t ordinal
+            uint32_t ordinal
         ) noexcept;
 
         DAGRelationDelta* EditReservedSiblingLocators_(
@@ -172,7 +171,7 @@ namespace BidirectionalInMemGraph
         void PrepareConditionalParentPublication_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint8_t relation_ordinal,
+            uint32_t relation_ordinal,
             ConditionalParentPublication* publication
         ) noexcept;
     };
@@ -187,22 +186,22 @@ namespace BidirectionalInMemGraph
     public:
         using MutationResult = AdaptivePackedCellContainer::MutationResult;
 
-        MutationResult ReplaceParentByHandle(
-            uint64_t old_parent_handle,
-            uint64_t new_parent_handle,
-            uint64_t child_handle,
+        MutationResult ReplaceParentByIdentity(
+            const EB::ParentIDGeneration& old_parent,
+            const EB::ParentIDGeneration& new_parent,
+            const EB::ParentIDGeneration& child,
             FabricSegments edge_table,
             uint32_t max_tries,
             uint32_t internal_max_tries
         ) noexcept
         {
             return ReplaceParentRelation_(
-                TwinU32ToU64::ExtractLow32Of64(old_parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(old_parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(new_parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(new_parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(child_handle),
-                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                old_parent.Slot,
+                old_parent.Generation,
+                new_parent.Slot,
+                new_parent.Generation,
+                child.Slot,
+                child.Generation,
                 edge_table,
                 nullptr,
                 max_tries,
@@ -210,19 +209,19 @@ namespace BidirectionalInMemGraph
             );
         }
 
-        MutationResult AddParenByHandle(
-            uint64_t parent_handle,
-            uint64_t child_handle,
+        MutationResult AddParentByIdentity(
+            const EB::ParentIDGeneration& parent,
+            const EB::ParentIDGeneration& child,
             FabricSegments edge_table,
             uint32_t max_tries,
             uint32_t internal_max_tries
         ) noexcept
         {
             return AddParentRelation_(
-                TwinU32ToU64::ExtractLow32Of64(parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(child_handle),
-                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                parent.Slot,
+                parent.Generation,
+                child.Slot,
+                child.Generation,
                 edge_table,
                 nullptr,
                 max_tries,
@@ -230,19 +229,19 @@ namespace BidirectionalInMemGraph
             );
         }
 
-        MutationResult RemoveParentByHandle(
-            uint64_t parent_handle,
-            uint64_t child_handle,
+        MutationResult RemoveParentByIdentity(
+            const EB::ParentIDGeneration& parent,
+            const EB::ParentIDGeneration& child,
             FabricSegments edge_table,
             uint32_t max_tries,
             uint32_t internal_max_tries
         ) noexcept
         {
             return RemoveParentRelation_(
-                TwinU32ToU64::ExtractLow32Of64(parent_handle),
-                TwinU32ToU64::ExtractHigh32Of64(parent_handle),
-                TwinU32ToU64::ExtractLow32Of64(child_handle),
-                TwinU32ToU64::ExtractHigh32Of64(child_handle),
+                parent.Slot,
+                parent.Generation,
+                child.Slot,
+                child.Generation,
                 edge_table,
                 nullptr,
                 max_tries,
@@ -250,44 +249,35 @@ namespace BidirectionalInMemGraph
             );
         }
 
+
     protected:
-        static constexpr bool SameHeader_(
-            const EdgeBuilder::EdgeData& left,
-            const EdgeBuilder::EdgeData& right
-        ) noexcept
-        {
-            return
-                left.IsValid &&
-                right.IsValid &&
-                left.TailLocator == right.TailLocator &&
-                left.SeqLock == right.SeqLock &&
-                left.Status == right.Status;
-        }
-        static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
 
         struct ParentRowScan
         {
-            uint8_t MatchOrdinal = UINT8_MAX;
-            uint8_t OtherOrdinal = UINT8_MAX;
-            uint8_t EmptyOrdinal = UINT8_MAX;
-            uint64_t MatchParentHandle = FABRIC_CELL_SENTINAL;
-        };
+            uint32_t MatchOrdinal = EB::RELATION_NULL;
+            uint32_t OtherOrdinal = EB::RELATION_NULL;
+            uint32_t EmptyOrdinal = EB::RELATION_NULL;
 
-        static constexpr bool SameRelation_(
-            const EdgeBuilder::ParentRelation& left,
-            const EdgeBuilder::ParentRelation& right
-        ) noexcept
+            uint32_t Reserved = 0u;
+
+            EB::ParentIDGeneration MatchParent{};
+        };
+        
+        static constexpr bool SameHeader_(const EdgeBuilder::EdgeData& left, const EdgeBuilder::EdgeData& right) noexcept
         {
-            return
-                left.ParentHandle == right.ParentHandle &&
-                left.SiblingLocators == right.SiblingLocators;
+            return left == right;
+        }
+
+        static constexpr bool SameRelation_(const EB::ParentRelation& left, const EB::ParentRelation& right) noexcept
+        {
+            return left == right;
         }
 
         bool ScanReservedParentRow_(
             DAGMutationTransaction& transaction,
             uint32_t child_slot,
-            uint64_t wanted_parent_handle,
-            uint64_t other_parent_handle,
+            EB::ParentIDGeneration wanted_parent_handle,
+            EB::ParentIDGeneration other_parent_handle,
             ParentRowScan& scan
         ) noexcept;
 
