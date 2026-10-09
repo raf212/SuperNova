@@ -93,6 +93,26 @@ option(
     OFF
 )
 
+option(
+    SUPERNOVA_ENABLE_ADAPTIVECPP
+    "Enable AdaptiveCpp/SYCL compilation for SuperNova numerical execution"
+    OFF
+)
+
+# AdaptiveCpp requires ACPP_TARGETS for its CMake integration. Keep the normal
+# SuperNova build independent from AdaptiveCpp, and use the portable generic
+# SSCP flow as the default only when AdaptiveCpp is explicitly enabled.
+if(SUPERNOVA_ENABLE_ADAPTIVECPP)
+    if(NOT DEFINED ACPP_TARGETS OR "${ACPP_TARGETS}" STREQUAL "")
+        set(
+            ACPP_TARGETS
+            "generic"
+            CACHE STRING
+            "AdaptiveCpp compilation targets"
+        )
+    endif()
+endif()
+
 # Optional local pybind11 checkout. This path is consulted only when
 # SUPERNOVA_BUILD_PYTHON=ON.
 set(
@@ -109,6 +129,24 @@ set(
 set(HEADERS_DIR  "${CMAKE_SOURCE_DIR}/headers")
 set(SRC_DIR      "${CMAKE_SOURCE_DIR}/src")
 set(BINDINGS_DIR "${CMAKE_SOURCE_DIR}/bindings")
+
+# =============================================================================
+# Optional AdaptiveCpp / SYCL integration
+# =============================================================================
+
+if(SUPERNOVA_ENABLE_ADAPTIVECPP)
+    find_package(AdaptiveCpp CONFIG REQUIRED)
+
+    if(NOT COMMAND add_sycl_to_target)
+        message(FATAL_ERROR
+            "AdaptiveCpp was found, but its CMake integration did not provide "
+            "add_sycl_to_target(). Check AdaptiveCpp_DIR and the installation."
+        )
+    endif()
+
+    message(STATUS "SuperNova: AdaptiveCpp enabled")
+    message(STATUS "SuperNova: ACPP_TARGETS = ${ACPP_TARGETS}")
+endif()
 
 # =============================================================================
 # Required standard-library / threading capabilities
@@ -413,6 +451,42 @@ function(supernova_optimize_link TARGET_NAME)
 
 endfunction()
 
+# Apply AdaptiveCpp only to targets that opt into the vectorized execution
+# backend. ARGN is the source list that AdaptiveCpp must process.
+function(supernova_enable_adaptivecpp TARGET_NAME VISIBILITY)
+
+    if(NOT SUPERNOVA_ENABLE_ADAPTIVECPP)
+        return()
+    endif()
+
+    if(NOT TARGET ${TARGET_NAME})
+        message(FATAL_ERROR
+            "SuperNova: AdaptiveCpp requested for missing target '${TARGET_NAME}'."
+        )
+    endif()
+
+    if(NOT ARGN)
+        message(FATAL_ERROR
+            "SuperNova: no source files were provided for AdaptiveCpp target "
+            "'${TARGET_NAME}'."
+        )
+    endif()
+
+    add_sycl_to_target(
+        TARGET ${TARGET_NAME}
+        SOURCES ${ARGN}
+    )
+
+    # VectorizedSuperNova.hpp uses this switch to compile its SYCL backend while
+    # ordinary SuperNova builds retain only the scalar implementation.
+    target_compile_definitions(
+        ${TARGET_NAME}
+        ${VISIBILITY}
+            SUPERNOVA_ENABLE_ADAPTIVECPP=1
+    )
+
+endfunction()
+
 # =============================================================================
 # Core library configuration
 # =============================================================================
@@ -489,6 +563,11 @@ add_library(
 )
 
 supernova_configure_core_target(atomiccim_core)
+supernova_enable_adaptivecpp(
+    atomiccim_core
+    PUBLIC
+    ${CORE_SOURCES}
+)
 
 # Better IDE organization; harmless for generators that ignore source groups.
 source_group(
@@ -527,6 +606,11 @@ if(SUPERNOVA_BUILD_PYTHON)
     )
 
     supernova_configure_core_target(atomiccim_core_pic)
+    supernova_enable_adaptivecpp(
+        atomiccim_core_pic
+        PUBLIC
+        ${CORE_SOURCES}
+    )
 endif()
 
 # =============================================================================
@@ -552,6 +636,12 @@ if(SUPERNOVA_BUILD_CLI)
             SuperNova
             PRIVATE
                 "${HEADERS_DIR}"
+        )
+
+        supernova_enable_adaptivecpp(
+            SuperNova
+            PRIVATE
+            "${MAIN_SRC}"
         )
 
         supernova_optimize_compile(SuperNova)
@@ -648,6 +738,12 @@ if(SUPERNOVA_BUILD_PYTHON)
             "${BINDINGS_DIR}"
     )
 
+    supernova_enable_adaptivecpp(
+        SuperNovaBind
+        PRIVATE
+        "${MODULE_SRC}"
+    )
+
     supernova_optimize_compile(SuperNovaBind)
     supernova_optimize_link(SuperNovaBind)
 
@@ -712,4 +808,8 @@ message(STATUS "  Native CPU tuning      : ${SUPERNOVA_NATIVE_CPU}")
 message(STATUS "  MSVC AVX2              : ${SUPERNOVA_MSVC_AVX2}")
 message(STATUS "  Fast FP                : ${SUPERNOVA_FAST_FP}")
 message(STATUS "  Warnings as errors     : ${SUPERNOVA_WARNINGS_AS_ERRORS}")
+message(STATUS "  AdaptiveCpp            : ${SUPERNOVA_ENABLE_ADAPTIVECPP}")
+if(SUPERNOVA_ENABLE_ADAPTIVECPP)
+    message(STATUS "  AdaptiveCpp targets    : ${ACPP_TARGETS}")
+endif()
 message(STATUS "")

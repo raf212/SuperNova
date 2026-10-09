@@ -52,6 +52,54 @@ cmake --build .\build-release `
 .\build-release\SuperNova.exe
 ```
 
+With Adaptive Cpp
+```powershell
+$Root = (git rev-parse --show-toplevel).Trim().Replace('\', '/')
+$AcppRoot = "$Root/external/AdaptiveCpp/install-windows"
+
+$SdkBinRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+
+$Mt = Get-ChildItem `
+    -Path "$SdkBinRoot\*\x64\mt.exe" `
+    -ErrorAction Stop |
+    Sort-Object {
+        [version]$_.Directory.Parent.Name
+    } -Descending |
+    Select-Object -First 1 -ExpandProperty FullName
+
+$Mt = $Mt.Replace('\', '/')
+
+$env:Path = "$AcppRoot/bin;$AcppRoot/bin/hipSYCL;$env:Path"
+
+Write-Host "AdaptiveCpp: $AcppRoot"
+Write-Host "MT:          $Mt"
+
+cmake `
+  -S "$Root/core" `
+  -B "$Root/build-acpp-windows" `
+  -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_CXX_COMPILER="$AcppRoot/bin/clang-cl.exe" `
+  -DCMAKE_MT="$Mt" `
+  -DAdaptiveCpp_DIR="$AcppRoot/lib/cmake/AdaptiveCpp" `
+  -DACPP_TARGETS=generic `
+  -DSUPERNOVA_ENABLE_ADAPTIVECPP=ON `
+  -DSUPERNOVA_BUILD_CLI=ON `
+  -DSUPERNOVA_BUILD_PYTHON=OFF `
+  -DSUPERNOVA_ENABLE_IPO=OFF `
+  -DSUPERNOVA_NATIVE_CPU=OFF `
+  -DSUPERNOVA_MSVC_AVX2=OFF `
+  -DSUPERNOVA_FAST_FP=OFF
+
+cmake --build .\build-release `
+    --target SuperNova SuperNovaBind `
+    --parallel `
+    --verbose
+
+.\build-release\SuperNova.exe
+
+```
+
 ### Optional MSVC AVX2 Build
 
 For a machine-local build that may use AVX2 instructions, change:
@@ -141,6 +189,40 @@ cmake --build ./build-release \
     --verbose
 
 ./build-release/SuperNova
+```
+
+with AdaptiveCpp
+```bash
+ROOT="$(git rev-parse --show-toplevel)"
+ACPP_ROOT="$ROOT/external/AdaptiveCpp/install"
+
+export PATH="$ACPP_ROOT/bin:$PATH"
+export LD_LIBRARY_PATH="$ACPP_ROOT/lib:$ACPP_ROOT/lib/hipSYCL:${LD_LIBRARY_PATH:-}"
+
+rm -rf "$ROOT/build-acpp-linux"
+
+cmake \
+  -S "$ROOT/core" \
+  -B "$ROOT/build-acpp-linux" \
+  -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_COMPILER=/usr/bin/clang++-18 \
+  -DAdaptiveCpp_DIR="$ACPP_ROOT/lib/cmake/AdaptiveCpp" \
+  -DACPP_TARGETS=generic \
+  -DSUPERNOVA_ENABLE_ADAPTIVECPP=ON \
+  -DSUPERNOVA_BUILD_CLI=ON \
+  -DSUPERNOVA_BUILD_PYTHON=OFF \
+  -DSUPERNOVA_ENABLE_IPO=OFF \
+  -DSUPERNOVA_NATIVE_CPU=ON \
+  -DSUPERNOVA_FAST_FP=OFF
+
+cmake --build ./build-acpp-linux \
+    --target SuperNova SuperNovaBind \
+    --parallel \
+    --verbose
+
+./build-release/SuperNova
+
 ```
 ---
 

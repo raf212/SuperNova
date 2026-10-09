@@ -20,3 +20,5 @@ Dump
 *.so
 *.pyd
 /external/llvm-bootstrap
+/build-acpp-linux
+/build-acpp-windows
