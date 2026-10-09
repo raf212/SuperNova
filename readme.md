@@ -1,299 +1,145 @@
-# SuperNova Build Requirements
+# SuperNova
 
-SuperNova requires a **C++20-or-newer toolchain** and CMake.
+SuperNova is a C++20 architecture with optional AdaptiveCpp/SYCL execution for CPU and GPU workloads.
 
-The commands below build:
+Repository: https://github.com/raf212/SuperNova
 
-- `SuperNova` — native CLI executable
-- `SuperNovaBind` — Python extension module
-- Release configuration with IPO/LTO enabled when supported
-- Python bindings through pybind11
+## Before you start
 
-> **Important:** These example commands explicitly use `-G Ninja`, so **Ninja must be installed for these exact commands**. SuperNova itself is not tied to Ninja; another CMake generator may be used by removing `-G Ninja` and using the appropriate generator/build configuration.
+Install these **before running the automatic build scripts**.
 
----
+### Windows
 
-## 1. Windows Requirements
+Required:
 
-Install:
-
-- **CMake**
-- **Ninja**
-- **Visual Studio 2022 / Build Tools for Visual Studio** with the **Desktop development with C++** workload
-- **Python 3**
-- **Git** — required when CMake fetches pybind11 from GitHub
-
-The compiler must support **C++20** and the standard-library features used by SuperNova, including `std::atomic_ref` and C++20 atomic wait/notify.
-
-### Release Build — Windows PowerShell
-
-> The commands below are written for **PowerShell**. The backtick `` ` `` is PowerShell's line-continuation character and must be the final character on the line.
-
-```powershell
-Remove-Item -Recurse -Force .\build-release -ErrorAction SilentlyContinue
-
-cmake -S .\core -B .\build-release `
-    -G Ninja `
-    -DCMAKE_BUILD_TYPE=Release `
-    -DSUPERNOVA_BUILD_CLI=ON `
-    -DSUPERNOVA_BUILD_PYTHON=ON `
-    -DSUPERNOVA_FETCH_PYBIND11=ON `
-    -DSUPERNOVA_ENABLE_IPO=ON `
-    -DSUPERNOVA_NATIVE_CPU=OFF `
-    -DSUPERNOVA_MSVC_AVX2=OFF `
-    -DSUPERNOVA_FAST_FP=OFF `
-    -DPython_EXECUTABLE="$((Get-Command python).Source)"
-
-cmake --build .\build-release `
-    --target SuperNova SuperNovaBind `
-    --parallel `
-    --verbose
-
-.\build-release\SuperNova.exe
-```
-
-With Adaptive Cpp
-```powershell
-$Root = (git rev-parse --show-toplevel).Trim().Replace('\', '/')
-$AcppRoot = "$Root/external/AdaptiveCpp/install-windows"
-
-$SdkBinRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-
-$Mt = Get-ChildItem `
-    -Path "$SdkBinRoot\*\x64\mt.exe" `
-    -ErrorAction Stop |
-    Sort-Object {
-        [version]$_.Directory.Parent.Name
-    } -Descending |
-    Select-Object -First 1 -ExpandProperty FullName
-
-$Mt = $Mt.Replace('\', '/')
-
-$env:Path = "$AcppRoot/bin;$AcppRoot/bin/hipSYCL;$env:Path"
-
-Write-Host "AdaptiveCpp: $AcppRoot"
-Write-Host "MT:          $Mt"
-
-cmake `
-  -S "$Root/core" `
-  -B "$Root/build-acpp-windows" `
-  -G Ninja `
-  -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_CXX_COMPILER="$AcppRoot/bin/clang-cl.exe" `
-  -DCMAKE_MT="$Mt" `
-  -DAdaptiveCpp_DIR="$AcppRoot/lib/cmake/AdaptiveCpp" `
-  -DACPP_TARGETS=generic `
-  -DSUPERNOVA_ENABLE_ADAPTIVECPP=ON `
-  -DSUPERNOVA_BUILD_CLI=ON `
-  -DSUPERNOVA_BUILD_PYTHON=OFF `
-  -DSUPERNOVA_ENABLE_IPO=OFF `
-  -DSUPERNOVA_NATIVE_CPU=OFF `
-  -DSUPERNOVA_MSVC_AVX2=OFF `
-  -DSUPERNOVA_FAST_FP=OFF
-
-cmake --build .\build-release `
-    --target SuperNova SuperNovaBind `
-    --parallel `
-    --verbose
-
-.\build-release\SuperNova.exe
-
-```
-
-### Optional MSVC AVX2 Build
-
-For a machine-local build that may use AVX2 instructions, change:
-
-```text
--DSUPERNOVA_MSVC_AVX2=OFF
-```
-
-to:
-
-```text
--DSUPERNOVA_MSVC_AVX2=ON
-```
-
-Keep it `OFF` for the more portable Windows binary.
-
----
-
-## 2. Linux Requirements
-
-Install:
-
-- **CMake**
-- **Ninja**
-- **GCC or Clang** with C++20 support
-- **Python 3**
-- **Git** — required when CMake fetches pybind11
-- POSIX threading support — normally provided by the system toolchain
+- Git
+- CMake
+- Ninja
+- Visual Studio 2022 or Visual Studio Build Tools
+  - **Desktop development with C++**
+  - MSVC x64 compiler/toolchain
+  - Windows 10/11 SDK
+- PowerShell
 
 Optional:
 
-- `libnuma` development package — SuperNova builds without it when unavailable
+- Python 3 — only if building `SuperNovaBind`
+- NVIDIA driver + CUDA Toolkit — for NVIDIA GPU support
+- AMD ROCm/HIP — for AMD GPU support
+- Intel GPU driver + OpenCL runtime — for Intel GPU support
 
-Typical Debian/Ubuntu packages:
+### Linux / WSL
 
-```bash
-sudo apt update
-sudo apt install build-essential cmake ninja-build python3 python3-dev git libnuma-dev
-```
+Required:
 
-`libnuma-dev` is optional.
+- Git
+- CMake
+- Ninja
+- GCC/build tools
+- Clang 18
+- LLVM 18 development packages
+- OpenMP development package
 
----
-
-## 3. macOS Requirements
-
-Install:
-
-- **Xcode Command Line Tools / Apple Clang** with C++20 support
-- **CMake**
-- **Ninja**
-- **Python 3**
-- **Git**
-
-Example with Homebrew:
+Ubuntu/Debian:
 
 ```bash
-xcode-select --install
-brew install cmake ninja python git
+sudo apt update && sudo apt install -y \
+  build-essential git cmake ninja-build \
+  clang-18 llvm-18 llvm-18-dev libclang-18-dev lld-18 libomp-18-dev \
+  libboost-test-dev libnuma-dev
 ```
 
-`libnuma` is not required on macOS.
+Optional:
 
----
+- Python 3 + development headers — only for `SuperNovaBind`
+- NVIDIA driver + CUDA Toolkit
+- AMD ROCm/HIP
+- Intel Level Zero/OpenCL runtime
 
-## 4. Release Build — Linux and macOS
+> GPU drivers and vendor SDKs are not installed automatically. Install them before building if GPU execution is required.
 
-Linux and macOS use the same CMake command below when running from **Bash or Zsh**.
+## Quick Start
+
+Clone:
 
 ```bash
-rm -rf ./build-release
-
-cmake -S ./core -B ./build-release \
-    -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DSUPERNOVA_BUILD_CLI=ON \
-    -DSUPERNOVA_BUILD_PYTHON=ON \
-    -DSUPERNOVA_FETCH_PYBIND11=ON \
-    -DSUPERNOVA_ENABLE_IPO=ON \
-    -DSUPERNOVA_NATIVE_CPU=ON \
-    -DSUPERNOVA_FAST_FP=OFF \
-    -DPython_EXECUTABLE="$(command -v python3)"
-
-cmake --build ./build-release \
-    --target SuperNova SuperNovaBind \
-    --parallel \
-    --verbose
-
-./build-release/SuperNova
+git clone https://github.com/raf212/SuperNova.git
+cd SuperNova
 ```
 
-with AdaptiveCpp
-```bash
-ROOT="$(git rev-parse --show-toplevel)"
-ACPP_ROOT="$ROOT/external/AdaptiveCpp/install"
+The scripts initialize the AdaptiveCpp submodule automatically.
 
-export PATH="$ACPP_ROOT/bin:$PATH"
-export LD_LIBRARY_PATH="$ACPP_ROOT/lib:$ACPP_ROOT/lib/hipSYCL:${LD_LIBRARY_PATH:-}"
+### Windows
 
-rm -rf "$ROOT/build-acpp-linux"
-
-cmake \
-  -S "$ROOT/core" \
-  -B "$ROOT/build-acpp-linux" \
-  -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_COMPILER=/usr/bin/clang++-18 \
-  -DAdaptiveCpp_DIR="$ACPP_ROOT/lib/cmake/AdaptiveCpp" \
-  -DACPP_TARGETS=generic \
-  -DSUPERNOVA_ENABLE_ADAPTIVECPP=ON \
-  -DSUPERNOVA_BUILD_CLI=ON \
-  -DSUPERNOVA_BUILD_PYTHON=OFF \
-  -DSUPERNOVA_ENABLE_IPO=OFF \
-  -DSUPERNOVA_NATIVE_CPU=ON \
-  -DSUPERNOVA_FAST_FP=OFF
-
-cmake --build ./build-acpp-linux \
-    --target SuperNova SuperNovaBind \
-    --parallel \
-    --verbose
-
-./build-release/SuperNova
-
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
 ```
----
 
-## 5. Notes
+Run:
 
-### C++ Standard
+```powershell
+.\build-acpp-windows\SuperNova.exe
+```
 
-SuperNova requires **C++20 or newer**. A newer standard may be selected, for example:
+### Linux / WSL
 
 ```bash
--DCMAKE_CXX_STANDARD=23
+chmod +x build-linux.sh && ./build-linux.sh
 ```
 
-### Ninja
-
-The commands in this document use:
-
-```text
--G Ninja
-```
-
-Therefore Ninja is required **for these commands**.
-
-If you want CMake to choose another available generator, remove:
-
-```text
--G Ninja
-```
-
-### Python / pybind11
-
-These examples enable the Python extension:
-
-```text
--DSUPERNOVA_BUILD_PYTHON=ON
--DSUPERNOVA_FETCH_PYBIND11=ON
-```
-
-Because fetching is enabled, an internet connection and Git are normally required during first configuration.
-
-For a C++-only build, use:
-
-```text
--DSUPERNOVA_BUILD_PYTHON=OFF
-```
-
-and build only:
+Run:
 
 ```bash
-cmake --build ./build-release --target SuperNova --parallel
+./build-acpp-linux/SuperNova
 ```
 
-### Native CPU Optimization
+## CPU and GPU support
 
-Linux/macOS examples use:
+SuperNova uses AdaptiveCpp with the `generic` compilation flow.
+
+The scripts automatically run:
 
 ```text
--DSUPERNOVA_NATIVE_CPU=ON
+acpp-info -l
 ```
 
-which allows supported GCC/Clang-style compilers to use native CPU tuning such as `-march=native` and `-mtune=native`.
+to show the devices available on the machine.
 
-This produces a machine-specific binary. Set it to `OFF` when building a binary intended for other machines.
+| Hardware | Backend |
+|---|---|
+| CPU | OpenMP |
+| NVIDIA GPU | CUDA |
+| AMD GPU | HIP / ROCm |
+| Intel GPU | Level Zero / OpenCL |
 
-### Fast Floating Point
+CPU execution does not require a GPU SDK.
 
-The documented release build keeps:
+## Useful options
 
-```text
--DSUPERNOVA_FAST_FP=OFF
+Windows:
+
+```powershell
+.\build-windows.ps1 -CpuOnly
+.\build-windows.ps1 -BuildPython
+.\build-windows.ps1 -RebuildAdaptiveCpp
 ```
 
-so the compiler does not intentionally relax normal floating-point semantics.
+Linux:
 
+```bash
+./build-linux.sh --python
+./build-linux.sh --native-cpu
+./build-linux.sh --rebuild-acpp
+```
+
+## Manual installation
+
+For full manual build instructions and troubleshooting, see:
+
+[`MenualBuild.md`](docs-source/MenualBuild.md)
+
+## Build scripts
+
+- `build-windows.ps1` — automatic Windows build
+- `build-linux.sh` — automatic Linux / WSL build
+- `MenualBuild.md` — complete manual installation documentation
