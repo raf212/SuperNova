@@ -1,0 +1,9 @@
+#pragma once
+
+// Extensionless convenience entry point:
+//
+//     #include <SuperNova>
+//
+// The actual public umbrella is kept in SuperNova.hpp so IDEs, installers and
+// tooling recognize it as a C++ header.
+#include "SuperNova.hpp"

@@ -22,3 +22,5 @@ Dump
 /external/llvm-bootstrap
 /build-acpp-linux
 /build-acpp-windows
+/build-testsa-windows
+/TestSAStandalone

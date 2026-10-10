@@ -129,9 +129,9 @@ namespace BidirectionalInMemGraph
         APCUseScope Use_;
     
     public:
-        constexpr RegionView() noexcept = default;
+        RegionView() noexcept = default;
 
-        constexpr RegionView(
+        RegionView(
             std::span<DType> elements,
             SD::SchemaProtocols protocol,
             APCUseScope use

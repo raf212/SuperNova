@@ -277,6 +277,16 @@ file(GLOB_RECURSE CORE_HEADERS CONFIGURE_DEPENDS
     "${HEADERS_DIR}/*.hxx"
 )
 
+# Public umbrella entry points. SuperNova.hpp is already picked up by the glob;
+# the extensionless `SuperNova` shim is appended explicitly so IDE generators
+# and installation/export tooling can also see it as part of the public surface.
+set(SUPERNOVA_UMBRELLA_HEADER "${HEADERS_DIR}/SuperNova")
+set(SUPERNOVA_UMBRELLA_HPP    "${HEADERS_DIR}/SuperNova.hpp")
+
+if(EXISTS "${SUPERNOVA_UMBRELLA_HEADER}")
+    list(APPEND CORE_HEADERS "${SUPERNOVA_UMBRELLA_HEADER}")
+endif()
+
 if(NOT CORE_SOURCES)
     message(FATAL_ERROR
         "No source files found in ${SRC_DIR} or its subdirectories. "
@@ -285,22 +295,72 @@ if(NOT CORE_SOURCES)
 endif()
 
 # =============================================================================
-# Compiler-family detection
+# Compiler frontend detection
 # =============================================================================
+#
+# IMPORTANT:
+#   CMAKE_CXX_SIMULATE_ID describes ABI/platform compatibility, not command-line
+#   syntax. On Windows, clang++.exe targets the MSVC ABI and therefore reports
+#   CMAKE_CXX_SIMULATE_ID=MSVC, while still accepting GNU-style command-line
+#   options. clang-cl.exe, by contrast, accepts MSVC-style options.
+#
+#   AdaptiveCpp's Windows CMake launcher uses the GNU-style clang++ frontend for
+#   the generic compilation flow. Classifying clang++.exe as MSVC-style would
+#   inject /W4, /O2, /Ob3, ... and cause AdaptiveCpp/clang++ to reject them.
+#
+# CMAKE_CXX_COMPILER_FRONTEND_VARIANT is the correct CMake variable for deciding
+# which command-line syntax the selected compiler frontend accepts.
 
-# Covers cl.exe and compiler frontends that intentionally emulate the MSVC
-# command-line/ABI (for example clang-cl / some IntelLLVM configurations).
 set(SUPERNOVA_MSVC_STYLE_FRONTEND OFF)
-if(MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+set(SUPERNOVA_GNU_STYLE_FRONTEND OFF)
+
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     set(SUPERNOVA_MSVC_STYLE_FRONTEND ON)
+
+elseif(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+    set(SUPERNOVA_GNU_STYLE_FRONTEND ON)
+
+# Fallbacks for older/simpler toolchains where the frontend variant may be
+# empty. Do not use CMAKE_CXX_SIMULATE_ID here: it is not a syntax indicator.
+elseif(MSVC)
+    set(SUPERNOVA_MSVC_STYLE_FRONTEND ON)
+
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang|IntelLLVM)$")
+    set(SUPERNOVA_GNU_STYLE_FRONTEND ON)
 endif()
 
-set(SUPERNOVA_GNU_STYLE_FRONTEND OFF)
-if(
-    NOT SUPERNOVA_MSVC_STYLE_FRONTEND AND
-    CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang|IntelLLVM)$"
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT)
+    set(
+        SUPERNOVA_COMPILER_FRONTEND
+        "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}"
+    )
+elseif(SUPERNOVA_MSVC_STYLE_FRONTEND)
+    set(SUPERNOVA_COMPILER_FRONTEND "MSVC")
+elseif(SUPERNOVA_GNU_STYLE_FRONTEND)
+    set(SUPERNOVA_COMPILER_FRONTEND "GNU")
+else()
+    set(SUPERNOVA_COMPILER_FRONTEND "Unknown")
+endif()
+
+message(
+    STATUS
+    "SuperNova: compiler frontend = ${SUPERNOVA_COMPILER_FRONTEND}"
 )
-    set(SUPERNOVA_GNU_STYLE_FRONTEND ON)
+
+# The native-Windows AdaptiveCpp generic flow installed by this project is
+# driven through clang++.exe. Fail early with a useful diagnostic instead of
+# allowing clang-cl/MSVC-style options to reach AdaptiveCpp's clang++ stage.
+if(
+    WIN32 AND
+    SUPERNOVA_ENABLE_ADAPTIVECPP AND
+    SUPERNOVA_MSVC_STYLE_FRONTEND
+)
+    message(FATAL_ERROR
+        "SuperNova + AdaptiveCpp on native Windows requires the GNU-style "
+        "clang++.exe frontend from the AdaptiveCpp installation. "
+        "Configure with "
+        "-DCMAKE_CXX_COMPILER=<AdaptiveCpp>/bin/clang++.exe, not clang-cl.exe."
+    )
 endif()
 
 # =============================================================================
@@ -562,6 +622,11 @@ add_library(
     ${CORE_HEADERS}
 )
 
+# Public CMake name for consumers built in the same CMake graph.
+# Existing code can continue using `atomiccim_core`; new consumers can use the
+# architecture-oriented target name.
+add_library(SuperNova::Core ALIAS atomiccim_core)
+
 supernova_configure_core_target(atomiccim_core)
 supernova_enable_adaptivecpp(
     atomiccim_core
@@ -798,6 +863,7 @@ endif()
 message(STATUS "")
 message(STATUS "SuperNova configuration summary")
 message(STATUS "  C++ standard          : C++${CMAKE_CXX_STANDARD}")
+message(STATUS "  Compiler frontend      : ${SUPERNOVA_COMPILER_FRONTEND}")
 message(STATUS "  Build CLI             : ${SUPERNOVA_BUILD_CLI}")
 message(STATUS "  Build Python bindings : ${SUPERNOVA_BUILD_PYTHON}")
 message(STATUS "  Native core uses PIC   : NO (Python uses atomiccim_core_pic)")
