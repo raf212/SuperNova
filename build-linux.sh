@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 #
-# Verify/build the SuperNova AdaptiveCpp toolchain and build SuperNova on Linux/WSL.
+# Verify/build SuperNova + AdaptiveCpp on Linux / WSL.
+#
+# IMPORTANT LINUX POLICY:
+#   - This script NEVER clones, builds, or installs LLVM from source.
+#   - LLVM/Clang must come from the Linux system/package manager.
+#   - Supported AdaptiveCpp full/generic LLVM releases: 15..21.
 #
 # NORMAL MODE:
-#   - NEVER rebuilds LLVM or AdaptiveCpp.
-#   - Verifies an existing LLVM + AdaptiveCpp installation.
-#   - Builds only SuperNova.
+#   ./build-linux.sh
+#     1. Verify system LLVM/Clang and required development components.
+#     2. Verify the existing AdaptiveCpp installation.
+#     3. Build only SuperNova.
 #
-# EXPLICIT TOOLCHAIN REBUILD MODE:
+# ADAPTIVECPP REBUILD MODE:
 #   ./build-linux.sh -accp_rebuild
+#     1. Verify system LLVM/Clang and required development components.
+#     2. Initialize/update the AdaptiveCpp git submodule.
+#     3. Rebuild/reinstall AdaptiveCpp ONLY against the system LLVM.
+#     4. Build SuperNova.
 #
-#   - Rebuilds a private LLVM toolchain from source.
-#   - Rebuilds/reinstalls AdaptiveCpp against that LLVM.
-#   - Rebuilds SuperNova afterward.
-#
-# Compatibility aliases are also accepted:
-#   --rebuild-acpp
-#   --accp-rebuild
+# The Windows script is the only automation that bootstraps/builds LLVM.
 #
 # GPU vendor drivers/SDKs are intentionally NOT installed automatically.
 
@@ -24,46 +28,51 @@ set -Eeuo pipefail
 
 JOBS="$(nproc 2>/dev/null || echo 4)"
 CLEAN_SUPERNOVA=0
-REBUILD_TOOLCHAIN=0
+REBUILD_ACPP=0
 BUILD_PYTHON=0
 NATIVE_CPU=0
-CPU_ONLY=0
 
+# AdaptiveCpp currently supports official LLVM releases 15 through 21 for the
+# full/generic compiler flow. 18 is a conservative default on Ubuntu 24.04/WSL.
+LLVM_MIN_MAJOR=15
+LLVM_MAX_MAJOR=21
 CLANG_VERSION="${CLANG_VERSION:-18}"
-LLVM_TAG="${LLVM_TAG:-llvmorg-18.1.8}"
 
 usage() {
   cat <<'EOF'
 Usage: build-linux.sh [options]
 
+Linux policy:
+  LLVM is NEVER cloned or built by this script.
+  A system/package-manager LLVM/Clang release is required.
+
 Default behavior:
-  Verify the existing LLVM + AdaptiveCpp installation and build ONLY SuperNova.
-  Missing/invalid LLVM or AdaptiveCpp is an error.
+  Verify system LLVM/Clang + existing AdaptiveCpp, then build ONLY SuperNova.
 
 Options:
-  -accp_rebuild         Force rebuild of LLVM + AdaptiveCpp, then build SuperNova
+  -accp_rebuild         Rebuild AdaptiveCpp ONLY against system LLVM, then build SuperNova
   --rebuild-acpp        Alias for -accp_rebuild
   --accp-rebuild        Alias for -accp_rebuild
   --jobs N              Parallel build jobs (default: detected CPU count)
   --clean-supernova     Delete only the SuperNova AdaptiveCpp build directory
   --python              Also build SuperNovaBind
   --native-cpu          Enable -march=native / -mtune=native for SuperNova
-  --cpu-only            When rebuilding LLVM, build only the X86 LLVM backend
-  --clang-version N     System bootstrap LLVM/Clang major (default: 18)
+  --clang-version N     System LLVM/Clang major to use (supported: 15..21; default: 18)
   -h, --help            Show this help
 
 Examples:
   ./build-linux.sh
+  ./build-linux.sh -accp_rebuild
   ./build-linux.sh -accp_rebuild --jobs 8
+  ./build-linux.sh --clang-version 20
   ./build-linux.sh --clean-supernova
-  ./build-linux.sh --python
 EOF
 }
 
 while (($#)); do
   case "$1" in
     -accp_rebuild|--rebuild-acpp|--accp-rebuild)
-      REBUILD_TOOLCHAIN=1
+      REBUILD_ACPP=1
       shift
       ;;
     --jobs)
@@ -83,14 +92,14 @@ while (($#)); do
       NATIVE_CPU=1
       shift
       ;;
-    --cpu-only)
-      CPU_ONLY=1
-      shift
-      ;;
     --clang-version)
       [[ $# -ge 2 ]] || { echo "--clang-version requires a value" >&2; exit 2; }
       CLANG_VERSION="$2"
       shift 2
+      ;;
+    --cpu-only)
+      printf 'NOTE: --cpu-only is no longer needed on Linux; system LLVM is reused unchanged.\n'
+      shift
       ;;
     -h|--help)
       usage
@@ -112,20 +121,95 @@ ok() {
   printf '\033[1;32m[OK]\033[0m %s\n' "$*"
 }
 
+warn() {
+  printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2
+}
+
 die() {
   printf '\nERROR: %s\n' "$*" >&2
   exit 1
 }
 
-need() {
-  command -v "$1" >/dev/null 2>&1 ||
-    die "Required command '$1' was not found on PATH."
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
 }
 
-need git
-need cmake
-need ninja
-need python3
+print_base_install_help() {
+  cat >&2 <<'EOF'
+
+Install the Linux build prerequisites on Ubuntu/Debian with:
+
+  sudo apt update
+  sudo apt install -y \
+    git cmake ninja-build python3 \
+    build-essential \
+    libboost-dev libboost-test-dev
+
+Then rerun this script.
+EOF
+}
+
+print_llvm_install_help() {
+  local version="${1:-18}"
+
+  cat >&2 <<EOF
+
+Install/repair the required LLVM ${version} components on Ubuntu/Debian with:
+
+  sudo apt update
+  sudo apt install -y \\
+    clang-${version} \\
+    llvm-${version} \\
+    llvm-${version}-dev \\
+    libclang-${version}-dev \\
+    libomp-${version}-dev \\
+    lld-${version}
+
+For SuperNova's Linux link/runtime dependencies, also ensure:
+
+  sudo apt install -y libatomic1
+
+AdaptiveCpp full/generic supports official LLVM releases ${LLVM_MIN_MAJOR}..${LLVM_MAX_MAJOR}.
+If LLVM ${version} packages are unavailable in your distribution repositories,
+install an official supported LLVM release from your distro or apt.llvm.org,
+then rerun with:
+
+  ./build-linux.sh --clang-version <major>
+
+This script will NOT clone or build LLVM from source.
+EOF
+}
+
+require_base_tools() {
+  local missing=()
+
+  local tool
+  for tool in git cmake ninja python3; do
+    if ! command_exists "$tool"; then
+      missing+=("$tool")
+    fi
+  done
+
+  if ((${#missing[@]})); then
+    printf 'Missing required commands:' >&2
+    printf ' %s' "${missing[@]}" >&2
+    printf '\n' >&2
+    print_base_install_help
+    exit 1
+  fi
+}
+
+require_supported_requested_version() {
+  [[ "$CLANG_VERSION" =~ ^[0-9]+$ ]] ||
+    die "--clang-version must be an integer major version."
+
+  if ((CLANG_VERSION < LLVM_MIN_MAJOR || CLANG_VERSION > LLVM_MAX_MAJOR)); then
+    die "LLVM/Clang ${CLANG_VERSION} is outside AdaptiveCpp's supported full/generic range ${LLVM_MIN_MAJOR}..${LLVM_MAX_MAJOR}."
+  fi
+}
+
+require_base_tools
+require_supported_requested_version
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" ||
@@ -134,89 +218,156 @@ ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" ||
 ACPP_SRC="$ROOT/external/AdaptiveCpp"
 ACPP_BUILD="$ACPP_SRC/build"
 ACPP_ROOT="$ACPP_SRC/install"
-
-# Keep the source/build/install separate from the native-Windows LLVM checkout
-# that may exist in the same repository when using WSL.
-LLVM_SRC="$ROOT/external/llvm-project-linux"
-LLVM_BUILD="$ROOT/external/llvm-build-linux"
-LLVM_LOCAL_ROOT="$ROOT/external/llvm-linux"
-
 SUPERNOVA_BUILD="$ROOT/build-acpp-linux"
 
-SYSTEM_CLANG_C="clang-${CLANG_VERSION}"
-SYSTEM_CLANG_CXX="clang++-${CLANG_VERSION}"
-SYSTEM_LLVM_CONFIG="llvm-config-${CLANG_VERSION}"
-
+CLANG_C_PATH=""
+CLANG_CXX_PATH=""
+LLVM_CONFIG_PATH=""
 LLVM_PREFIX=""
 LLVM_DIR=""
 CLANG_DIR=""
-LLVM_CONFIG_PATH=""
-CLANG_C_PATH=""
-CLANG_CXX_PATH=""
 
-resolve_existing_llvm() {
-  # Prefer the private LLVM installation created by -accp_rebuild.
-  if [[ -x "$LLVM_LOCAL_ROOT/bin/llvm-config" &&
-        -x "$LLVM_LOCAL_ROOT/bin/clang" &&
-        -x "$LLVM_LOCAL_ROOT/bin/clang++" ]]; then
-    LLVM_CONFIG_PATH="$LLVM_LOCAL_ROOT/bin/llvm-config"
-    CLANG_C_PATH="$LLVM_LOCAL_ROOT/bin/clang"
-    CLANG_CXX_PATH="$LLVM_LOCAL_ROOT/bin/clang++"
-  elif command -v "$SYSTEM_LLVM_CONFIG" >/dev/null 2>&1 &&
-       command -v "$SYSTEM_CLANG_C" >/dev/null 2>&1 &&
-       command -v "$SYSTEM_CLANG_CXX" >/dev/null 2>&1; then
-    LLVM_CONFIG_PATH="$(command -v "$SYSTEM_LLVM_CONFIG")"
-    CLANG_C_PATH="$(command -v "$SYSTEM_CLANG_C")"
-    CLANG_CXX_PATH="$(command -v "$SYSTEM_CLANG_CXX")"
-  elif command -v llvm-config >/dev/null 2>&1 &&
-       command -v clang >/dev/null 2>&1 &&
-       command -v clang++ >/dev/null 2>&1; then
-    LLVM_CONFIG_PATH="$(command -v llvm-config)"
-    CLANG_C_PATH="$(command -v clang)"
-    CLANG_CXX_PATH="$(command -v clang++)"
-  else
-    die "No verified LLVM/Clang installation was found. Install LLVM/Clang ${CLANG_VERSION}, or run './build-linux.sh -accp_rebuild'."
+resolve_system_llvm() {
+  local version="$CLANG_VERSION"
+
+  local clang_c="clang-${version}"
+  local clang_cxx="clang++-${version}"
+  local llvm_config="llvm-config-${version}"
+
+  local missing=()
+
+  command_exists "$clang_c" || missing+=("$clang_c")
+  command_exists "$clang_cxx" || missing+=("$clang_cxx")
+  command_exists "$llvm_config" || missing+=("$llvm_config")
+
+  if ((${#missing[@]})); then
+    printf '\nERROR: Required LLVM/Clang %s commands are missing:' "$version" >&2
+    printf ' %s' "${missing[@]}" >&2
+    printf '\n' >&2
+    print_llvm_install_help "$version"
+    exit 1
   fi
 
-  LLVM_PREFIX="$("$LLVM_CONFIG_PATH" --prefix)"
-  LLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm"
-  CLANG_DIR="$LLVM_PREFIX/lib/cmake/clang"
+  CLANG_C_PATH="$(command -v "$clang_c")"
+  CLANG_CXX_PATH="$(command -v "$clang_cxx")"
+  LLVM_CONFIG_PATH="$(command -v "$llvm_config")"
 
-  [[ -x "$CLANG_C_PATH" ]] ||
-    die "Clang C compiler is missing: $CLANG_C_PATH"
-  [[ -x "$CLANG_CXX_PATH" ]] ||
-    die "Clang C++ compiler is missing: $CLANG_CXX_PATH"
-  [[ -x "$LLVM_CONFIG_PATH" ]] ||
-    die "llvm-config is missing: $LLVM_CONFIG_PATH"
-  [[ -d "$LLVM_DIR" ]] ||
-    die "LLVM CMake package directory not found: $LLVM_DIR"
-  [[ -d "$CLANG_DIR" ]] ||
-    die "Clang CMake package directory not found: $CLANG_DIR"
+  LLVM_PREFIX="$("$LLVM_CONFIG_PATH" --prefix)"
+  LLVM_DIR="$("$LLVM_CONFIG_PATH" --cmakedir 2>/dev/null || true)"
+
+  if [[ -z "$LLVM_DIR" || ! -d "$LLVM_DIR" ]]; then
+    LLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm"
+  fi
+
+  CLANG_DIR="$LLVM_PREFIX/lib/cmake/clang"
 }
 
-verify_llvm() {
-  step "Verifying LLVM/Clang installation"
+verify_llvm_release() {
+  step "Verifying system LLVM/Clang installation"
 
-  "$CLANG_CXX_PATH" --version | head -n 1
-  "$LLVM_CONFIG_PATH" --version
-
+  local llvm_version
   local llvm_major
-  llvm_major="$("$LLVM_CONFIG_PATH" --version | cut -d. -f1)"
+  local llvm_minor
+  local clang_major
+
+  llvm_version="$("$LLVM_CONFIG_PATH" --version)"
+  llvm_major="${llvm_version%%.*}"
+
+  local remainder="${llvm_version#*.}"
+  llvm_minor="${remainder%%.*}"
+
+  clang_major="$(
+    "$CLANG_CXX_PATH" --version |
+      sed -nE 's/.*clang version ([0-9]+)(\.[0-9]+)?.*/\1/p' |
+      head -n 1
+  )"
+
+  printf 'Clang              : '
+  "$CLANG_CXX_PATH" --version | head -n 1
+  printf 'LLVM               : %s\n' "$llvm_version"
+  printf 'LLVM prefix        : %s\n' "$LLVM_PREFIX"
+  printf 'LLVM CMake package : %s\n' "$LLVM_DIR"
+  printf 'Clang CMake package: %s\n' "$CLANG_DIR"
 
   [[ "$llvm_major" =~ ^[0-9]+$ ]] ||
-    die "Could not determine LLVM major version from $LLVM_CONFIG_PATH."
+    die "Could not determine LLVM major version from '$llvm_version'."
 
-  ok "LLVM/Clang verified at $LLVM_PREFIX"
+  if ((llvm_major < LLVM_MIN_MAJOR || llvm_major > LLVM_MAX_MAJOR)); then
+    print_llvm_install_help "$CLANG_VERSION"
+    die "LLVM ${llvm_version} is outside AdaptiveCpp's supported full/generic range ${LLVM_MIN_MAJOR}..${LLVM_MAX_MAJOR}."
+  fi
+
+  if [[ -z "$clang_major" || ! "$clang_major" =~ ^[0-9]+$ ]]; then
+    die "Could not determine Clang major version from $CLANG_CXX_PATH."
+  fi
+
+  if ((clang_major != llvm_major)); then
+    die "LLVM/Clang version mismatch: llvm-config reports ${llvm_major}, clang++ reports ${clang_major}. Install matching packages."
+  fi
+
+  # AdaptiveCpp rejects LLVM >=18 development snapshots where the release minor
+  # is 0. Official LLVM >=18 releases use a nonzero minor component.
+  if ((llvm_major > 17)) && [[ "$llvm_minor" =~ ^[0-9]+$ ]] && ((llvm_minor == 0)); then
+    die "LLVM ${llvm_version} looks like a development snapshot. AdaptiveCpp requires an official LLVM release."
+  fi
+
+  ok "Supported LLVM ${llvm_version} / Clang ${clang_major} detected"
+}
+
+verify_llvm_development_components() {
+  step "Verifying LLVM/Clang development components"
+
+  local missing=()
+
+  [[ -d "$LLVM_DIR" ]] ||
+    missing+=("LLVM CMake package: $LLVM_DIR")
+
+  [[ -d "$CLANG_DIR" ]] ||
+    missing+=("Clang CMake package: $CLANG_DIR")
+
+  [[ -f "$LLVM_PREFIX/include/llvm/IR/Module.h" ]] ||
+    missing+=("LLVM development headers (llvm-${CLANG_VERSION}-dev)")
+
+  [[ -f "$LLVM_PREFIX/include/clang/AST/ASTContext.h" ]] ||
+    missing+=("Clang development headers (libclang-${CLANG_VERSION}-dev)")
+
+  # Verify the compiler can actually compile/link an OpenMP program. This is
+  # more reliable than assuming the package from a file-system location.
+  local omp_test
+  omp_test="$(mktemp --suffix=.cpp)"
+  local omp_exe="${omp_test%.cpp}"
+
+  cat >"$omp_test" <<'CPP'
+#include <omp.h>
+int main() {
+    int n = 0;
+#pragma omp parallel reduction(+:n)
+    n += 1;
+    return n > 0 ? 0 : 1;
+}
+CPP
+
+  if ! "$CLANG_CXX_PATH" -std=c++20 -fopenmp "$omp_test" -o "$omp_exe" \
+      >/dev/null 2>&1; then
+    missing+=("LLVM OpenMP development runtime (libomp-${CLANG_VERSION}-dev)")
+  fi
+
+  rm -f "$omp_test" "$omp_exe"
+
+  if ((${#missing[@]})); then
+    printf '\nERROR: LLVM/Clang is installed, but required development components are missing:\n' >&2
+    printf '  - %s\n' "${missing[@]}" >&2
+    print_llvm_install_help "$CLANG_VERSION"
+    exit 1
+  fi
+
+  ok "LLVM/Clang development components verified"
 }
 
 normalize_adaptivecpp_launchers() {
-  # AdaptiveCpp's CMake integration invokes Python launcher scripts directly.
-  # When the repository/install lives on a Windows-mounted filesystem under WSL,
-  # Git/Windows tooling may leave those scripts with CRLF line endings. Linux then
-  # reads "#!/usr/bin/env python3\r" and fails with:
-  #   /usr/bin/env: 'python3\r': No such file or directory
-  #
-  # Repair only installed text launchers; this does NOT rebuild LLVM/AdaptiveCpp.
+  # WSL repositories commonly live on /mnt/c. If Windows tooling introduced
+  # CRLF into installed Python launchers, Linux sees "#!/usr/bin/env python3\r".
+  # Normalize only those installed text launchers; no toolchain rebuild occurs.
   local candidates=(
     "$ACPP_ROOT/lib/cmake/AdaptiveCpp/syclcc-launcher"
     "$ACPP_ROOT/bin/acpp"
@@ -232,8 +383,7 @@ normalize_adaptivecpp_launchers() {
 import pathlib
 import sys
 
-path = pathlib.Path(sys.argv[1])
-data = path.read_bytes()
+data = pathlib.Path(sys.argv[1]).read_bytes()
 sys.exit(0 if b"\r\n" in data else 1)
 PY
     then
@@ -245,8 +395,7 @@ import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
-data = path.read_bytes()
-path.write_bytes(data.replace(b"\r\n", b"\n"))
+path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
 PY
 
       chmod +x "$file" 2>/dev/null || true
@@ -265,21 +414,32 @@ verify_adaptivecpp() {
   local acpp_cmake_dir="$ACPP_ROOT/lib/cmake/AdaptiveCpp"
   local acpp_cmake=""
 
-  # CMake accepts either <Package>Config.cmake or the lowercase
-  # <package>-config.cmake spelling. Current AdaptiveCpp installs:
-  #   lib/cmake/AdaptiveCpp/adaptivecpp-config.cmake
   if [[ -f "$acpp_cmake_dir/adaptivecpp-config.cmake" ]]; then
     acpp_cmake="$acpp_cmake_dir/adaptivecpp-config.cmake"
   elif [[ -f "$acpp_cmake_dir/AdaptiveCppConfig.cmake" ]]; then
     acpp_cmake="$acpp_cmake_dir/AdaptiveCppConfig.cmake"
   fi
 
-  [[ -f "$acpp" ]] ||
-    die "AdaptiveCpp compiler driver not found at '$acpp'. Run './build-linux.sh -accp_rebuild'."
-  [[ -x "$acpp_info" ]] ||
-    die "AdaptiveCpp device tool not found at '$acpp_info'. Run './build-linux.sh -accp_rebuild'."
-  [[ -n "$acpp_cmake" ]] ||
-    die "AdaptiveCpp CMake package not found under '$acpp_cmake_dir'. Checked adaptivecpp-config.cmake and AdaptiveCppConfig.cmake. Run './build-linux.sh -accp_rebuild'."
+  if [[ ! -f "$acpp" || ! -x "$acpp_info" || -z "$acpp_cmake" ]]; then
+    cat >&2 <<EOF
+
+ERROR: Existing AdaptiveCpp installation is missing or incomplete:
+  expected install prefix: $ACPP_ROOT
+
+LLVM/Clang is NOT the problem and will NOT be rebuilt.
+
+Initialize/rebuild AdaptiveCpp against the verified system LLVM with:
+
+  ./build-linux.sh -accp_rebuild
+
+This rebuilds only:
+  $ACPP_BUILD
+  $ACPP_ROOT
+
+It never clones or builds LLVM.
+EOF
+    exit 1
+  fi
 
   export PATH="$ACPP_ROOT/bin:$PATH"
   export LD_LIBRARY_PATH="$ACPP_ROOT/lib:$ACPP_ROOT/lib/hipSYCL:${LD_LIBRARY_PATH:-}"
@@ -289,102 +449,39 @@ verify_adaptivecpp() {
   step "Verifying AdaptiveCpp installation"
   "$acpp" --acpp-version
   "$acpp_info" -l
+
   ok "AdaptiveCpp verified at $ACPP_ROOT"
 }
 
-ensure_linux_llvm_source() {
-  if [[ ! -d "$LLVM_SRC/.git" ]]; then
-    step "Cloning LLVM source $LLVM_TAG"
-    git clone \
-      --depth 1 \
-      --branch "$LLVM_TAG" \
-      https://github.com/llvm/llvm-project.git \
-      "$LLVM_SRC"
-    return
-  fi
-
-  step "Verifying Linux LLVM source checkout"
-
-  if [[ -n "$(git -C "$LLVM_SRC" status --porcelain)" ]]; then
-    die "LLVM source checkout '$LLVM_SRC' has local changes. Clean/stash them before -accp_rebuild."
-  fi
-
-  git -C "$LLVM_SRC" fetch --depth 1 origin "refs/tags/$LLVM_TAG:refs/tags/$LLVM_TAG"
-
-  local desired current
-  desired="$(git -C "$LLVM_SRC" rev-list -n 1 "$LLVM_TAG")"
-  current="$(git -C "$LLVM_SRC" rev-parse HEAD)"
-
-  if [[ "$current" != "$desired" ]]; then
-    git -C "$LLVM_SRC" checkout --detach "$LLVM_TAG"
-  fi
-}
-
-rebuild_llvm_and_adaptivecpp() {
-  step "Explicit toolchain rebuild requested (-accp_rebuild)"
-  printf 'LLVM tag           : %s\n' "$LLVM_TAG"
-  printf 'LLVM install       : %s\n' "$LLVM_LOCAL_ROOT"
-  printf 'AdaptiveCpp install: %s\n' "$ACPP_ROOT"
-
-  # Source is only required/updated in the explicit rebuild path.
+initialize_adaptivecpp_submodule() {
   step "Initializing AdaptiveCpp submodule"
-  git -C "$ROOT" submodule sync --recursive
-  git -C "$ROOT" submodule update --init --recursive
+
+  git -C "$ROOT" submodule sync -- external/AdaptiveCpp
+  git -C "$ROOT" submodule update --init --recursive external/AdaptiveCpp
 
   [[ -f "$ACPP_SRC/CMakeLists.txt" ]] ||
     die "AdaptiveCpp submodule is missing after initialization."
 
   printf 'AdaptiveCpp commit : %s\n' "$(git -C "$ACPP_SRC" rev-parse HEAD)"
+}
 
-  ensure_linux_llvm_source
+rebuild_adaptivecpp_only() {
+  step "Explicit AdaptiveCpp rebuild requested (-accp_rebuild)"
+  printf 'System LLVM        : %s\n' "$("$LLVM_CONFIG_PATH" --version)"
+  printf 'System LLVM prefix : %s\n' "$LLVM_PREFIX"
+  printf 'AdaptiveCpp install: %s\n' "$ACPP_ROOT"
+  printf 'LLVM source build  : DISABLED on Linux\n'
 
-  # A host/bootstrap compiler is still required to compile LLVM itself.
-  need "$SYSTEM_CLANG_C"
-  need "$SYSTEM_CLANG_CXX"
+  initialize_adaptivecpp_submodule
 
-  step "Cleaning previous Linux LLVM + AdaptiveCpp build/install state"
-  rm -rf \
-    "$LLVM_BUILD" \
-    "$LLVM_LOCAL_ROOT" \
-    "$ACPP_BUILD" \
-    "$ACPP_ROOT" \
-    "$SUPERNOVA_BUILD"
+  step "Cleaning previous AdaptiveCpp build/install"
+  rm -rf "$ACPP_BUILD" "$ACPP_ROOT"
 
-  local llvm_targets="X86;NVPTX;AMDGPU"
-  if ((CPU_ONLY)); then
-    llvm_targets="X86"
-  fi
+  # The SuperNova CMake cache may contain paths into the previous AdaptiveCpp
+  # install, so force its regeneration after an explicit AdaptiveCpp rebuild.
+  rm -rf "$SUPERNOVA_BUILD"
 
-  step "Configuring LLVM"
-  cmake \
-    -S "$LLVM_SRC/llvm" \
-    -B "$LLVM_BUILD" \
-    -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER="$(command -v "$SYSTEM_CLANG_C")" \
-    -DCMAKE_CXX_COMPILER="$(command -v "$SYSTEM_CLANG_CXX")" \
-    -DCMAKE_INSTALL_PREFIX="$LLVM_LOCAL_ROOT" \
-    -DLLVM_TARGETS_TO_BUILD="$llvm_targets" \
-    -DLLVM_ENABLE_PROJECTS="clang;lld;openmp" \
-    -DLLVM_PARALLEL_LINK_JOBS=2 \
-    -DLLVM_BUILD_LLVM_DYLIB=OFF \
-    -DLLVM_LINK_LLVM_DYLIB=OFF
-
-  step "Building and installing LLVM"
-  cmake --build "$LLVM_BUILD" \
-    --target install \
-    --parallel "$JOBS"
-
-  LLVM_CONFIG_PATH="$LLVM_LOCAL_ROOT/bin/llvm-config"
-  CLANG_C_PATH="$LLVM_LOCAL_ROOT/bin/clang"
-  CLANG_CXX_PATH="$LLVM_LOCAL_ROOT/bin/clang++"
-  LLVM_PREFIX="$LLVM_LOCAL_ROOT"
-  LLVM_DIR="$LLVM_LOCAL_ROOT/lib/cmake/llvm"
-  CLANG_DIR="$LLVM_LOCAL_ROOT/lib/cmake/clang"
-
-  verify_llvm
-
-  step "Configuring AdaptiveCpp against rebuilt LLVM"
+  step "Configuring AdaptiveCpp against system LLVM"
   cmake \
     -S "$ACPP_SRC" \
     -B "$ACPP_BUILD" \
@@ -406,22 +503,53 @@ rebuild_llvm_and_adaptivecpp() {
   verify_adaptivecpp
 }
 
+warn_about_legacy_linux_llvm_clone() {
+  local found=0
+  local legacy
+
+  for legacy in \
+    "$ROOT/external/llvm-project-linux" \
+    "$ROOT/external/llvm-build-linux" \
+    "$ROOT/external/llvm-linux"; do
+    if [[ -e "$legacy" ]]; then
+      if ((found == 0)); then
+        printf '\n'
+        warn "Legacy LLVM directories from the old Linux script were found."
+        printf 'They are ignored by this script; Linux now uses system LLVM only.\n'
+        printf 'If you created them only through the old script, you may remove them manually:\n\n'
+        printf '  rm -rf \\\n'
+      fi
+      printf '    "%s" \\\n' "$legacy"
+      found=1
+    fi
+  done
+
+  if ((found)); then
+    printf '\n'
+  fi
+}
+
 step "SuperNova repository"
 printf 'Repository         : %s\n' "$ROOT"
 printf 'AdaptiveCpp install: %s\n' "$ACPP_ROOT"
 printf 'Jobs               : %s\n' "$JOBS"
-printf 'Toolchain rebuild  : %s\n' "$REBUILD_TOOLCHAIN"
+printf 'AdaptiveCpp rebuild: %s\n' "$REBUILD_ACPP"
+printf 'LLVM source build  : DISABLED on Linux\n'
 
-if ((REBUILD_TOOLCHAIN)); then
-  rebuild_llvm_and_adaptivecpp
+warn_about_legacy_linux_llvm_clone
+
+resolve_system_llvm
+verify_llvm_release
+verify_llvm_development_components
+
+if ((REBUILD_ACPP)); then
+  rebuild_adaptivecpp_only
 else
-  # Normal runs must never build/install LLVM or AdaptiveCpp.
-  resolve_existing_llvm
-  verify_llvm
   verify_adaptivecpp
+
   step "Toolchain reuse policy"
-  printf 'Existing LLVM and AdaptiveCpp are valid.\n'
-  printf 'Skipping ALL LLVM/AdaptiveCpp configure/build/install steps.\n'
+  printf 'System LLVM/Clang and existing AdaptiveCpp are valid.\n'
+  printf 'Skipping all LLVM and AdaptiveCpp build/install steps.\n'
 fi
 
 ACPP_INFO="$ACPP_ROOT/bin/acpp-info"
@@ -439,12 +567,11 @@ fi
 PYTHON_FLAG=OFF
 FETCH_PYBIND=OFF
 if ((BUILD_PYTHON)); then
-  need python3
   PYTHON_FLAG=ON
   FETCH_PYBIND=ON
 fi
 
-step "Configuring SuperNova with existing verified AdaptiveCpp"
+step "Configuring SuperNova with verified system LLVM + AdaptiveCpp"
 
 CMAKE_ARGS=(
   -S "$ROOT/core"
@@ -492,9 +619,12 @@ printf '\033[1;32mSuperNova executable: %s\033[0m\n' "$SUPERNOVA_EXE"
 
 cat <<EOF
 
-Normal mode never rebuilds LLVM/AdaptiveCpp.
+Linux never clones/builds LLVM.
 
-Force toolchain rebuild:
+Normal build:
+  ./build-linux.sh
+
+Rebuild AdaptiveCpp only:
   ./build-linux.sh -accp_rebuild
 
 Run:
