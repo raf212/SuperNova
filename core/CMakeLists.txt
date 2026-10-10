@@ -162,56 +162,96 @@ include(CheckCXXSourceCompiles)
 set(_SUPERNOVA_ATOMIC_TEST_SOURCE [[
     #include <atomic>
     #include <cstdint>
+    #include <type_traits>
 
     #ifndef __cpp_lib_atomic_wait
     #error "C++20 atomic wait/notify is unavailable"
     #endif
 
-    int main()
+    struct WideAtomicProbe
+    {
+        std::uint64_t low;
+        std::uint64_t high;
+    };
+
+    static_assert(
+        std::is_trivially_copyable_v<WideAtomicProbe>,
+        "Atomic probe type must be trivially copyable."
+    );
+
+    std::atomic<WideAtomicProbe> wide{
+        WideAtomicProbe{0u, 0u}
+    };
+
+    int main(int argc, char**)
     {
         alignas(std::atomic_ref<std::uint64_t>::required_alignment)
-        std::uint64_t word = 0;
+        std::uint64_t word = static_cast<std::uint64_t>(argc);
 
         std::atomic_ref<std::uint64_t> ref(word);
         ref.store(1u, std::memory_order_release);
         const auto value = ref.load(std::memory_order_acquire);
 
         std::atomic<std::uint32_t> signal{0u};
+        signal.store(static_cast<std::uint32_t>(argc), std::memory_order_relaxed);
         signal.notify_all();
+
+        // SuperNova also performs atomic operations on wider trivially-copyable
+        // control records. On Linux/Clang/GCC these can lower to the compiler
+        // runtime helpers __atomic_load/__atomic_store/__atomic_compare_exchange,
+        // which are supplied by libatomic on targets where they are not lock-free.
+        WideAtomicProbe expected = wide.load(std::memory_order_acquire);
+        const WideAtomicProbe desired{
+            expected.low + 1u,
+            expected.high + static_cast<std::uint64_t>(argc)
+        };
+
+        wide.store(desired, std::memory_order_release);
+        (void)wide.compare_exchange_strong(
+            expected,
+            desired,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire
+        );
 
         return value == 1u ? 0 : 1;
     }
 ]])
 
 set(SUPERNOVA_ATOMIC_LIBRARY "")
+
 check_cxx_source_compiles(
     "${_SUPERNOVA_ATOMIC_TEST_SOURCE}"
-    SUPERNOVA_CXX20_ATOMICS_WORK_WITHOUT_LIBATOMIC
+    SUPERNOVA_REQUIRED_ATOMICS_WORK_WITHOUT_LIBATOMIC
 )
 
-if(NOT SUPERNOVA_CXX20_ATOMICS_WORK_WITHOUT_LIBATOMIC)
-    find_library(SUPERNOVA_ATOMIC_LIBRARY NAMES atomic)
+if(NOT SUPERNOVA_REQUIRED_ATOMICS_WORK_WITHOUT_LIBATOMIC)
+    # Do not rely on find_library() here: GCC/Clang often locate libatomic via
+    # compiler-specific search directories that are not in CMake's generic
+    # find_library() search path. Ask the selected compiler/linker directly.
+    set(_SUPERNOVA_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
+    set(CMAKE_REQUIRED_LIBRARIES atomic)
 
-    if(SUPERNOVA_ATOMIC_LIBRARY)
-        set(_SUPERNOVA_SAVED_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES}")
-        set(CMAKE_REQUIRED_LIBRARIES "${SUPERNOVA_ATOMIC_LIBRARY}")
+    check_cxx_source_compiles(
+        "${_SUPERNOVA_ATOMIC_TEST_SOURCE}"
+        SUPERNOVA_REQUIRED_ATOMICS_WORK_WITH_LIBATOMIC
+    )
 
-        check_cxx_source_compiles(
-            "${_SUPERNOVA_ATOMIC_TEST_SOURCE}"
-            SUPERNOVA_CXX20_ATOMICS_WORK_WITH_LIBATOMIC
-        )
+    set(CMAKE_REQUIRED_LIBRARIES "${_SUPERNOVA_SAVED_REQUIRED_LIBRARIES}")
+    unset(_SUPERNOVA_SAVED_REQUIRED_LIBRARIES)
 
-        set(CMAKE_REQUIRED_LIBRARIES "${_SUPERNOVA_SAVED_REQUIRED_LIBRARIES}")
-        unset(_SUPERNOVA_SAVED_REQUIRED_LIBRARIES)
-    endif()
-
-    if(NOT SUPERNOVA_CXX20_ATOMICS_WORK_WITH_LIBATOMIC)
+    if(SUPERNOVA_REQUIRED_ATOMICS_WORK_WITH_LIBATOMIC)
+        set(SUPERNOVA_ATOMIC_LIBRARY atomic)
+        message(STATUS "SuperNova: libatomic enabled")
+    else()
         message(FATAL_ERROR
-            "SuperNova requires a C++20 standard library with std::atomic_ref "
-            "and atomic wait/notify support. The selected compiler/standard "
-            "library could not compile and link those features."
+            "SuperNova requires C++20 atomic_ref/wait support and wider atomic "
+            "operations. The selected compiler could not link the required "
+            "atomic operations either directly or with -latomic."
         )
     endif()
+else()
+    message(STATUS "SuperNova: required atomic operations link without libatomic")
 endif()
 
 unset(_SUPERNOVA_ATOMIC_TEST_SOURCE)

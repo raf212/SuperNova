@@ -1,27 +1,31 @@
 <#
 .SYNOPSIS
-  Bootstrap and build SuperNova + AdaptiveCpp on native Windows.
+  Verify the existing SuperNova LLVM + AdaptiveCpp toolchain and build SuperNova.
 
 .DESCRIPTION
-  Run this from a fresh SuperNova clone (or from anywhere inside the repository).
-  The script:
-    1. initializes git submodules;
-    2. imports a Visual Studio x64 developer environment if needed;
-    3. locates the Windows SDK manifest tool (mt.exe);
-    4. clones/builds a pinned LLVM bootstrap compiler;
-    5. builds AdaptiveCpp as an LLVM external project;
-    6. verifies AdaptiveCpp devices with acpp-info;
-    7. configures and builds SuperNova with ACPP_TARGETS=generic.
+  NORMAL MODE:
+    - NEVER rebuilds LLVM or AdaptiveCpp.
+    - Verifies the existing integrated LLVM + AdaptiveCpp installation.
+    - Builds only SuperNova.
+
+  EXPLICIT TOOLCHAIN REBUILD MODE:
+    .\build-windows.ps1 -accp_rebuild
+
+    - Rebuilds the LLVM bootstrap compiler.
+    - Rebuilds/reinstalls integrated LLVM + AdaptiveCpp.
+    - Builds SuperNova afterward.
+
+  Compatibility aliases:
+    -RebuildAdaptiveCpp
+    -RebuildAcpp
 
   GPU vendor drivers/SDKs are intentionally NOT installed automatically.
-  Install CUDA / ROCm-HIP / Intel OpenCL as appropriate before running this
-  script if GPU execution is required.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -RebuildAdaptiveCpp -Jobs 4
+  powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -accp_rebuild -Jobs 4
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -BuildPython
@@ -33,7 +37,10 @@ param(
     [int]$Jobs = [Math]::Max(1, [Environment]::ProcessorCount),
 
     [switch]$CleanSuperNova,
-    [switch]$RebuildAdaptiveCpp,
+
+    [Alias("RebuildAdaptiveCpp", "RebuildAcpp")]
+    [switch]$accp_rebuild,
+
     [switch]$BuildPython,
     [switch]$CpuOnly,
 
@@ -47,6 +54,10 @@ $ErrorActionPreference = "Stop"
 function Write-Step([string]$Message) {
     Write-Host ""
     Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Write-Ok([string]$Message) {
+    Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
 function Require-Command([string]$Name) {
@@ -175,7 +186,158 @@ endif()
     Set-Content -Path $cmakeFile -Value $updated -Encoding utf8 -NoNewline
 }
 
+function Ensure-LlvmCheckout(
+    [string]$LlvmSourceRoot,
+    [string]$LlvmTag
+) {
+    if (-not (Test-Path "$LlvmSourceRoot/.git")) {
+        Write-Step "Cloning LLVM $LlvmTag"
+        & git clone `
+            --depth 1 `
+            --branch $LlvmTag `
+            https://github.com/llvm/llvm-project.git `
+            $LlvmSourceRoot
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "LLVM clone failed."
+        }
+        return
+    }
+
+    Write-Step "Verifying LLVM source checkout"
+
+    $dirty = (& git -C $LlvmSourceRoot status --porcelain)
+    if ($dirty) {
+        throw "LLVM source checkout '$LlvmSourceRoot' has local changes. Clean/stash them before -accp_rebuild."
+    }
+
+    & git -C $LlvmSourceRoot fetch `
+        --depth 1 `
+        origin `
+        "refs/tags/${LlvmTag}:refs/tags/${LlvmTag}"
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not fetch LLVM tag '$LlvmTag'."
+    }
+
+    $desired = (& git -C $LlvmSourceRoot rev-list -n 1 $LlvmTag).Trim()
+    $current = (& git -C $LlvmSourceRoot rev-parse HEAD).Trim()
+
+    if ($current -ne $desired) {
+        & git -C $LlvmSourceRoot checkout --detach $LlvmTag
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not checkout LLVM tag '$LlvmTag'."
+        }
+    }
+}
+
+function Verify-InstalledToolchain(
+    [string]$AdaptiveCppInstall
+) {
+    $clang = "$AdaptiveCppInstall/bin/clang++.exe"
+    $llvmConfig = "$AdaptiveCppInstall/bin/llvm-config.exe"
+    $acppInfo = "$AdaptiveCppInstall/bin/acpp-info.exe"
+
+    # CMake accepts either <Package>Config.cmake or the lowercase
+    # <package>-config.cmake spelling. Current AdaptiveCpp installs the latter:
+    #   lib/cmake/AdaptiveCpp/adaptivecpp-config.cmake
+    $acppCmakeDir = "$AdaptiveCppInstall/lib/cmake/AdaptiveCpp"
+    $acppCmakeCandidates = @(
+        "$acppCmakeDir/adaptivecpp-config.cmake",
+        "$acppCmakeDir/AdaptiveCppConfig.cmake"
+    )
+
+    $acppCmake = $acppCmakeCandidates |
+        Where-Object { Test-Path $_ } |
+        Select-Object -First 1
+
+    $required = @(
+        $clang,
+        $llvmConfig,
+        $acppInfo
+    )
+
+    foreach ($path in $required) {
+        if (-not (Test-Path $path)) {
+            throw @"
+Existing LLVM + AdaptiveCpp installation is incomplete.
+Missing:
+  $path
+
+Normal mode never rebuilds the toolchain.
+Run:
+  .\build-windows.ps1 -accp_rebuild
+"@
+        }
+    }
+
+    if (-not $acppCmake) {
+        $expected = $acppCmakeCandidates -join "`n  "
+        throw @"
+Existing LLVM + AdaptiveCpp installation is incomplete.
+No AdaptiveCpp CMake package was found. Checked:
+  $expected
+
+Normal mode never rebuilds the toolchain.
+Run:
+  .\build-windows.ps1 -accp_rebuild
+"@
+    }
+
+    Write-Step "Verifying installed LLVM"
+
+    # IMPORTANT:
+    # Native-command stdout written directly inside a PowerShell function becomes
+    # part of that function's return stream. Capture it first, then print it via
+    # Write-Host so this function returns exactly one structured object.
+    $clangOutput = & $clang --version 2>&1
+    $clangExit = $LASTEXITCODE
+    foreach ($line in $clangOutput) {
+        Write-Host $line
+    }
+    if ($clangExit -ne 0) {
+        throw "Installed clang++.exe failed verification."
+    }
+
+    $llvmConfigOutput = & $llvmConfig --version 2>&1
+    $llvmConfigExit = $LASTEXITCODE
+    foreach ($line in $llvmConfigOutput) {
+        Write-Host $line
+    }
+    if ($llvmConfigExit -ne 0) {
+        throw "Installed llvm-config.exe failed verification."
+    }
+
+    Write-Step "Verifying installed AdaptiveCpp"
+
+    $acppInfoOutput = & $acppInfo -l 2>&1
+    $acppInfoExit = $LASTEXITCODE
+    foreach ($line in $acppInfoOutput) {
+        Write-Host $line
+    }
+    if ($acppInfoExit -ne 0) {
+        throw "Installed acpp-info.exe failed verification."
+    }
+
+    Write-Ok "Existing LLVM + AdaptiveCpp installation is valid."
+
+    return [pscustomobject]@{
+        Clang      = $clang
+        LlvmConfig = $llvmConfig
+        AcppInfo   = $acppInfo
+        AcppCmake  = $acppCmake
+    }
+}
+
+function Remove-DirectoryIfPresent([string]$Path) {
+    if (Test-Path $Path) {
+        Remove-Item -Recurse -Force $Path
+    }
+}
+
 Write-Step "Locating SuperNova repository"
+
+Require-Command git | Out-Null
 
 $startDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $Root = (& git -C $startDir rev-parse --show-toplevel).Trim().Replace('\', '/')
@@ -186,22 +348,26 @@ if (-not $Root) {
 
 $AdaptiveCppSource = "$Root/external/AdaptiveCpp"
 $AdaptiveCppInstall = "$AdaptiveCppSource/install-windows"
+
 $LlvmSourceRoot = "$Root/external/llvm-project"
 $LlvmBootstrapBuild = "$LlvmSourceRoot/build-bootstrap"
 $LlvmAdaptiveCppBuild = "$LlvmSourceRoot/build-acpp"
 $LlvmBootstrapInstall = "$Root/external/llvm-bootstrap"
+
 $SuperNovaBuild = "$Root/build-acpp-windows"
 
 Write-Host "Repository         : $Root"
-Write-Host "AdaptiveCpp source : $AdaptiveCppSource"
 Write-Host "AdaptiveCpp install: $AdaptiveCppInstall"
 Write-Host "Jobs               : $Jobs"
+Write-Host "Toolchain rebuild  : $accp_rebuild"
 
-Write-Step "Checking base tools"
-Require-Command git | Out-Null
+Write-Step "Checking build tools"
 Require-Command cmake | Out-Null
 Require-Command ninja | Out-Null
 
+# SuperNova still targets the Windows/MSVC ABI, so keep the MSVC/SDK development
+# environment available even though downstream AdaptiveCpp compilation uses
+# clang++.exe's GNU-style frontend.
 Import-VsDevEnvironment
 Require-Command cl.exe | Out-Null
 Require-Command link.exe | Out-Null
@@ -209,44 +375,39 @@ Require-Command link.exe | Out-Null
 $Mt = Find-WindowsMt
 Write-Host "Windows mt.exe     : $Mt"
 
-Write-Step "Initializing git submodules"
-& git -C $Root submodule sync --recursive
-if ($LASTEXITCODE -ne 0) { throw "git submodule sync failed." }
+if ($accp_rebuild) {
+    Write-Step "Explicit toolchain rebuild requested (-accp_rebuild)"
 
-& git -C $Root submodule update --init --recursive
-if ($LASTEXITCODE -ne 0) { throw "git submodule update failed." }
-
-if (-not (Test-Path "$AdaptiveCppSource/CMakeLists.txt")) {
-    throw "AdaptiveCpp submodule is missing after initialization."
-}
-
-$AcppCommit = (& git -C $AdaptiveCppSource rev-parse HEAD).Trim()
-Write-Host "AdaptiveCpp commit : $AcppCommit"
-
-# Windows currently requires the integrated-LLVM AdaptiveCpp route for generic
-# and accelerated CPU compilation.
-if (-not (Test-Path "$LlvmSourceRoot/.git")) {
-    Write-Step "Cloning LLVM $LlvmTag"
-    & git clone `
-        --depth 1 `
-        --branch $LlvmTag `
-        https://github.com/llvm/llvm-project.git `
-        $LlvmSourceRoot
-
-    if ($LASTEXITCODE -ne 0) { throw "LLVM clone failed." }
-}
-else {
-    Write-Step "Reusing existing LLVM checkout"
-}
-
-$BootstrapClang = "$LlvmBootstrapInstall/bin/clang-cl.exe"
-
-if ($RebuildAdaptiveCpp -or -not (Test-Path $BootstrapClang)) {
-    Write-Step "Building LLVM bootstrap compiler"
-
-    if ($RebuildAdaptiveCpp -and (Test-Path $LlvmBootstrapBuild)) {
-        Remove-Item -Recurse -Force $LlvmBootstrapBuild
+    Write-Step "Initializing AdaptiveCpp submodule"
+    & git -C $Root submodule sync --recursive
+    if ($LASTEXITCODE -ne 0) {
+        throw "git submodule sync failed."
     }
+
+    & git -C $Root submodule update --init --recursive
+    if ($LASTEXITCODE -ne 0) {
+        throw "git submodule update failed."
+    }
+
+    if (-not (Test-Path "$AdaptiveCppSource/CMakeLists.txt")) {
+        throw "AdaptiveCpp submodule is missing after initialization."
+    }
+
+    $AcppCommit = (& git -C $AdaptiveCppSource rev-parse HEAD).Trim()
+    Write-Host "AdaptiveCpp commit : $AcppCommit"
+
+    Ensure-LlvmCheckout `
+        -LlvmSourceRoot $LlvmSourceRoot `
+        -LlvmTag $LlvmTag
+
+    Write-Step "Cleaning previous LLVM + AdaptiveCpp build/install state"
+    Remove-DirectoryIfPresent $LlvmBootstrapBuild
+    Remove-DirectoryIfPresent $LlvmAdaptiveCppBuild
+    Remove-DirectoryIfPresent $LlvmBootstrapInstall
+    Remove-DirectoryIfPresent $AdaptiveCppInstall
+    Remove-DirectoryIfPresent $SuperNovaBuild
+
+    Write-Step "Building LLVM bootstrap compiler"
 
     & cmake `
         -S "$LlvmSourceRoot/llvm" `
@@ -263,31 +424,35 @@ if ($RebuildAdaptiveCpp -or -not (Test-Path $BootstrapClang)) {
         -DLLVM_BUILD_LLVM_DYLIB=OFF `
         -DLLVM_LINK_LLVM_DYLIB=OFF
 
-    if ($LASTEXITCODE -ne 0) { throw "LLVM bootstrap configure failed." }
-
-    & cmake --build $LlvmBootstrapBuild --target install --parallel $Jobs
-    if ($LASTEXITCODE -ne 0) { throw "LLVM bootstrap build/install failed." }
-}
-
-if (-not (Test-Path $BootstrapClang)) {
-    throw "Bootstrap clang-cl.exe was not produced."
-}
-
-Write-Step "Bootstrap compiler"
-& $BootstrapClang --version
-
-Ensure-AdaptiveCppWindowsLinkFix $AdaptiveCppSource
-
-$AcppInfo = "$AdaptiveCppInstall/bin/acpp-info.exe"
-
-if ($RebuildAdaptiveCpp -or -not (Test-Path $AcppInfo)) {
-    Write-Step "Building integrated LLVM + AdaptiveCpp"
-
-    if ($RebuildAdaptiveCpp -and (Test-Path $LlvmAdaptiveCppBuild)) {
-        Remove-Item -Recurse -Force $LlvmAdaptiveCppBuild
+    if ($LASTEXITCODE -ne 0) {
+        throw "LLVM bootstrap configure failed."
     }
 
-    $llvmTargets = if ($CpuOnly) { "X86" } else { "X86;NVPTX;AMDGPU" }
+    & cmake --build $LlvmBootstrapBuild --target install --parallel $Jobs
+    if ($LASTEXITCODE -ne 0) {
+        throw "LLVM bootstrap build/install failed."
+    }
+
+    $BootstrapClang = "$LlvmBootstrapInstall/bin/clang-cl.exe"
+    if (-not (Test-Path $BootstrapClang)) {
+        throw "Bootstrap clang-cl.exe was not produced."
+    }
+
+    & $BootstrapClang --version
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bootstrap clang-cl.exe failed verification."
+    }
+
+    Ensure-AdaptiveCppWindowsLinkFix $AdaptiveCppSource
+
+    Write-Step "Building integrated LLVM + AdaptiveCpp"
+
+    $llvmTargets = if ($CpuOnly) {
+        "X86"
+    }
+    else {
+        "X86;NVPTX;AMDGPU"
+    }
 
     & cmake `
         -S "$LlvmSourceRoot/llvm" `
@@ -309,23 +474,27 @@ if ($RebuildAdaptiveCpp -or -not (Test-Path $AcppInfo)) {
         -DACPP_COMPILER_FEATURE_PROFILE=full `
         -DACPP_HOST_FORCE_MCPU_TARGET="$HostCpu"
 
-    if ($LASTEXITCODE -ne 0) { throw "Integrated LLVM + AdaptiveCpp configure failed." }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Integrated LLVM + AdaptiveCpp configure failed."
+    }
 
     & cmake --build $LlvmAdaptiveCppBuild --target install --parallel $Jobs
-    if ($LASTEXITCODE -ne 0) { throw "Integrated LLVM + AdaptiveCpp build/install failed." }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Integrated LLVM + AdaptiveCpp build/install failed."
+    }
+}
+else {
+    Write-Step "Toolchain reuse policy"
+    Write-Host "Normal mode: LLVM/AdaptiveCpp rebuild is disabled."
+    Write-Host "Only SuperNova will be configured/built after verification."
 }
 
-if (-not (Test-Path $AcppInfo)) {
-    throw "AdaptiveCpp installation did not produce acpp-info.exe."
-}
+$Toolchain = Verify-InstalledToolchain $AdaptiveCppInstall
+
+$SuperNovaClang = $Toolchain.Clang
+$AcppInfo = $Toolchain.AcppInfo
 
 $env:Path = "$AdaptiveCppInstall/bin;$AdaptiveCppInstall/bin/hipSYCL;$env:Path"
-
-Write-Step "AdaptiveCpp devices/backends"
-& $AcppInfo -l
-if ($LASTEXITCODE -ne 0) {
-    throw "acpp-info failed."
-}
 
 Write-Host ""
 Write-Host "GPU note:" -ForegroundColor Yellow
@@ -337,7 +506,30 @@ if ($CleanSuperNova -and (Test-Path $SuperNovaBuild)) {
     Remove-Item -Recurse -Force $SuperNovaBuild
 }
 
-Write-Step "Configuring SuperNova with AdaptiveCpp"
+# If an old cache used clang-cl.exe, CMake must not reuse it now that the
+# AdaptiveCpp downstream frontend is clang++.exe.
+$cacheFile = "$SuperNovaBuild/CMakeCache.txt"
+if (Test-Path $cacheFile) {
+    $compilerLine = Select-String `
+        -Path $cacheFile `
+        -Pattern '^CMAKE_CXX_COMPILER:FILEPATH=' `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if ($compilerLine) {
+        $cachedCompiler = ($compilerLine.Line -split '=', 2)[1].Replace('\', '/')
+        $desiredCompiler = $SuperNovaClang.Replace('\', '/')
+
+        if ($cachedCompiler.ToLowerInvariant() -ne $desiredCompiler.ToLowerInvariant()) {
+            Write-Step "Compiler changed; refreshing SuperNova build directory"
+            Write-Host "Cached : $cachedCompiler"
+            Write-Host "Wanted : $desiredCompiler"
+            Remove-Item -Recurse -Force $SuperNovaBuild
+        }
+    }
+}
+
+Write-Step "Configuring SuperNova with verified AdaptiveCpp"
 
 $pythonFlag = if ($BuildPython) { "ON" } else { "OFF" }
 $fetchPybind = if ($BuildPython) { "ON" } else { "OFF" }
@@ -347,7 +539,7 @@ $configureArgs = @(
     "-B", $SuperNovaBuild,
     "-G", "Ninja",
     "-DCMAKE_BUILD_TYPE=Release",
-    "-DCMAKE_CXX_COMPILER=$AdaptiveCppInstall/bin/clang-cl.exe",
+    "-DCMAKE_CXX_COMPILER=$SuperNovaClang",
     "-DCMAKE_MT=$Mt",
     "-DAdaptiveCpp_DIR=$AdaptiveCppInstall/lib/cmake/AdaptiveCpp",
     "-DACPP_TARGETS=generic",
@@ -370,18 +562,28 @@ if ($BuildPython) {
 }
 
 & cmake @configureArgs
-if ($LASTEXITCODE -ne 0) { throw "SuperNova configure failed." }
+if ($LASTEXITCODE -ne 0) {
+    throw "SuperNova configure failed."
+}
 
 Write-Step "Building SuperNova"
 
 if ($BuildPython) {
-    & cmake --build $SuperNovaBuild --target SuperNova SuperNovaBind --parallel $Jobs --verbose
+    & cmake --build $SuperNovaBuild `
+        --target SuperNova SuperNovaBind `
+        --parallel $Jobs `
+        --verbose
 }
 else {
-    & cmake --build $SuperNovaBuild --target SuperNova --parallel $Jobs --verbose
+    & cmake --build $SuperNovaBuild `
+        --target SuperNova `
+        --parallel $Jobs `
+        --verbose
 }
 
-if ($LASTEXITCODE -ne 0) { throw "SuperNova build failed." }
+if ($LASTEXITCODE -ne 0) {
+    throw "SuperNova build failed."
+}
 
 $SuperNovaExe = "$SuperNovaBuild/SuperNova.exe"
 if (-not (Test-Path $SuperNovaExe)) {
@@ -390,6 +592,11 @@ if (-not (Test-Path $SuperNovaExe)) {
 
 Write-Step "Build complete"
 Write-Host "SuperNova executable: $SuperNovaExe" -ForegroundColor Green
+Write-Host ""
+Write-Host "Normal mode never rebuilds LLVM/AdaptiveCpp."
+Write-Host ""
+Write-Host "Force toolchain rebuild:"
+Write-Host "  .\build-windows.ps1 -accp_rebuild"
 Write-Host ""
 Write-Host "Run:"
 Write-Host "  & `"$SuperNovaExe`""
