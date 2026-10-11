@@ -253,7 +253,81 @@ namespace BidirectionalInMemGraph
             return std::span<DT>(SNCBCache_.Data_, Size());
         }
 
-        
+        std::optional<std::span<const DT>> RawSpan() const noexcept
+        {
+            using SP = SD::SchemaProtocols;
+            if (
+                !static_cast<bool>(*this) ||
+                (
+                    SNCBCache_.Protocol_ != SP::PRIVATE_REGION &&
+                    SNCBCache_.Protocol_ != SP::IMMUTABLE_SNAPSHOT
+                )
+            ) 
+            {
+                return std::nullopt;
+            }
+
+            return std::span<const DT>(SNCBCache_.Data_, Size());
+        }
+
+        std::optional<DT> AtomicLoad(uint64_t idx, std::memory_order order = std::memory_order_acquire) const noexcept
+        {
+            if (
+                !static_cast<bool>(*this) ||
+                SNCBCache_.Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
+                idx >= Size()
+            ) 
+            {
+                return std::nullopt;
+            }
+
+            return std::atomic_ref<DT>(SNCBCache_.Data_[idx]).load(order);
+        }
+
+        bool AtomicStore(
+            uint64_t idx,
+            DT value,
+            std::memory_order order = std::memory_order_release
+        )
+        {
+            if (
+                !static_cast<bool>(*this) ||
+                SNCBCache_.Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
+                idx >= Size()
+            ) 
+            {
+                return false;
+            }
+
+            std::atomic_ref<DT>(SNCBCache_.Data_[idx]).store(value, order);
+            return true;
+        }
+
+        bool AtomicCompareExchangeStrong(
+            uint64_t idx,
+            DT& expected,
+            DT desired,
+            std::memory_order success = std::memory_order_acq_rel,
+            std::memory_order failure = std::memory_order_acquire
+        )
+        {
+            if (
+                !static_cast<bool>(*this) ||
+                SNCBCache_.Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
+                idx >= Size()
+            ) 
+            {
+                return false;
+            }
+
+            return std::atomic_ref<DT>(SNCBCache_.Data_[idx]).compare_exchange_strong(
+                expected, 
+                desired,
+                success,
+                failure
+            );
+        }
+
     };
 
 
