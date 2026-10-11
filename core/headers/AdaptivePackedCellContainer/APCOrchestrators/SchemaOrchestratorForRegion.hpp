@@ -29,10 +29,11 @@ namespace BidirectionalInMemGraph
             INT16_T = 5,
             INT32_T = 6,
             INT64_T = 7,
-            FLOAT16_T = 8,
-            FLOAT32_T = 9,
-            FLOAT64_T = 10,
-            CHAR = 11
+            // FLOAT8_T = 8, // UNSUPPORTED BY CPU // RIGHT NOW UNSUPPORTED BY Acpp too
+            FLOAT16_T = 9, //UNSUPPORTED BY CPU 
+            FLOAT32_T = 10,
+            FLOAT64_T = 11,
+            CHAR = 12
         };
 
         enum class SchemaFlags : uint8_t
