@@ -43,6 +43,7 @@ param(
 
     [switch]$BuildPython,
     [switch]$CpuOnly,
+    [switch]$Run,
 
     [string]$LlvmTag = "llvmorg-20.1.8",
     [string]$HostCpu = "x86-64"
@@ -58,6 +59,55 @@ function Write-Step([string]$Message) {
 
 function Write-Ok([string]$Message) {
     Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+
+function Deploy-AdaptiveCppRuntime(
+    [string]$AdaptiveCppInstall,
+    [string]$Destination
+) {
+    Write-Step "Deploying AdaptiveCpp runtime DLLs beside SuperNova.exe"
+
+    if (-not (Test-Path $Destination)) {
+        New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    }
+
+    $runtimeDirs = @(
+        "$AdaptiveCppInstall/bin",
+        "$AdaptiveCppInstall/bin/hipSYCL"
+    )
+
+    $copied = 0
+
+    foreach ($runtimeDir in $runtimeDirs) {
+        if (-not (Test-Path $runtimeDir)) {
+            continue
+        }
+
+        $dlls = Get-ChildItem `
+            -Path $runtimeDir `
+            -Filter "*.dll" `
+            -File `
+            -ErrorAction SilentlyContinue
+
+        foreach ($dll in $dlls) {
+            $destinationFile = Join-Path $Destination $dll.Name
+
+            Copy-Item `
+                -Path $dll.FullName `
+                -Destination $destinationFile `
+                -Force
+
+            ++$copied
+        }
+    }
+
+    if ($copied -eq 0) {
+        Write-Host "[WARN] No AdaptiveCpp runtime DLLs were found to deploy." -ForegroundColor Yellow
+    }
+    else {
+        Write-Ok "Deployed $copied AdaptiveCpp runtime DLL(s) to $Destination"
+    }
 }
 
 function Require-Command([string]$Name) {
@@ -590,6 +640,14 @@ if (-not (Test-Path $SuperNovaExe)) {
     throw "SuperNova.exe was not found after a successful build."
 }
 
+# Make the executable self-runnable from a fresh PowerShell/VS Code process.
+# Windows searches the executable directory for dependent DLLs, so deploy the
+# AdaptiveCpp runtime beside SuperNova.exe instead of relying on a terminal-
+# specific PATH mutation.
+Deploy-AdaptiveCppRuntime `
+    -AdaptiveCppInstall $AdaptiveCppInstall `
+    -Destination $SuperNovaBuild
+
 Write-Step "Build complete"
 Write-Host "SuperNova executable: $SuperNovaExe" -ForegroundColor Green
 Write-Host ""
@@ -607,3 +665,15 @@ Write-Host ""
 Write-Host "CPU-only runtime example:"
 Write-Host '  $env:ACPP_VISIBILITY_MASK = "omp"'
 Write-Host "  & `"$SuperNovaExe`""
+
+if ($Run) {
+    Write-Step "Running SuperNova"
+    Write-Host "Executable          : $SuperNovaExe"
+
+    & $SuperNovaExe
+    $programExitCode = $LASTEXITCODE
+
+    if ($programExitCode -ne 0) {
+        throw "SuperNova exited with code $programExitCode."
+    }
+}
