@@ -26,7 +26,12 @@
 
 set -Eeuo pipefail
 
-JOBS="$(nproc 2>/dev/null || echo 4)"
+HARDWARE_THREADS="$(nproc 2>/dev/null || echo 4)"
+if ((HARDWARE_THREADS >= 4)); then
+  JOBS=$((HARDWARE_THREADS - 2))
+else
+  JOBS="$HARDWARE_THREADS"
+fi
 CLEAN_SUPERNOVA=0
 REBUILD_ACPP=0
 BUILD_PYTHON=0
@@ -53,7 +58,7 @@ Options:
   -accp_rebuild         Rebuild AdaptiveCpp ONLY against system LLVM, then build SuperNova
   --rebuild-acpp        Alias for -accp_rebuild
   --accp-rebuild        Alias for -accp_rebuild
-  --jobs N              Parallel build jobs (default: detected CPU count)
+  --jobs N              Parallel build jobs (default: hardware threads - 2 when >= 4)
   --clean-supernova     Delete only the SuperNova AdaptiveCpp build directory
   --python              Also build SuperNovaBind
   --native-cpu          Enable -march=native / -mtune=native for SuperNova

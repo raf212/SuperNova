@@ -1,6 +1,7 @@
 core/build/
 .vs
 .vscode
+.cache
 build
 Dump
 .vscode
@@ -24,3 +25,4 @@ Dump
 /build-acpp-windows
 /build-testsa-windows
 /TestSAStandalone
+build-acpp-windows-intellisense

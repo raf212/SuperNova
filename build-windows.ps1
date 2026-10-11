@@ -34,7 +34,7 @@
 [CmdletBinding()]
 param(
     [ValidateRange(1, 128)]
-    [int]$Jobs = [Math]::Max(1, [Environment]::ProcessorCount),
+    [int]$Jobs = [Environment]::ProcessorCount - (2 * [int]([Environment]::ProcessorCount -ge 4)),
 
     [switch]$CleanSuperNova,
 
