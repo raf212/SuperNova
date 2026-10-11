@@ -190,11 +190,74 @@ namespace BidirectionalInMemGraph
             uint32_t DestinationStride{UNSIGNED_ZERO};
         };
 
-        
+        struct RowsDescSN final
+        {
+            CDT DestinationType{CDT::FLOAT32_T};
+            CDT SourceType{CDT::FLOAT32_T};
+            CDT AccumulatorType{CDT::FLOAT32_T};
+
+            uint32_t Rows {UNSIGNED_ZERO};
+            uint32_t Columns {UNSIGNED_ZERO};
+            uint32_t SourceStride{UNSIGNED_ZERO};
+            uint32_t DestinationStride{UNSIGNED_ZERO};
+        };
+
+        struct RMSNormDscSN final
+        {
+            CDT DestinationType{CDT::FLOAT32_T};
+            CDT SourceType{CDT::FLOAT32_T};
+            CDT WeightType{CDT::FLOAT32_T};
+            CDT AccumulatorType{CDT::FLOAT32_T};
+
+            uint32_t Rows{UNSIGNED_ZERO};
+            uint32_t Columns{UNSIGNED_ZERO};
+            uint32_t SourceStride{UNSIGNED_ZERO};
+            uint32_t DestinationStride{UNSIGNED_ZERO};
+
+            double Epsilon{0.0};
+        };
 
 
+        struct ComputerOptimizedPrimitives final
+        {
+            using MatMaulFunctionSN = bool(*)(
+                void* user,
+                ComputerBackend backend,
+                void* destination,
+                const void* left,
+                const void* right,
+                const MatMulSNDesc& description
+            );
+
+            using SoftMaxRowFunction = bool(*)(
+                void* user,
+                ComputerBackend backend,
+                void* destination,
+                const void* source,
+                const RowsDescSN& description
+            );
+
+            using RMSNormFunctionSN = bool(*)(
+                void* user,
+                ComputerBackend backend,
+                void* destination,
+                const void* source,
+                const void* weight,
+                const RMSNormDscSN& desription
+            );
+
+            void* User = nullptr;
+            MatMaulFunctionSN MatMul = nullptr;
+            SoftMaxRowFunction SoftMaxRow = nullptr;
+            RMSNormFunctionSN RMSNormRows = nullptr;
+        };
     };
 
+    template<class T>
+    class SNTOComputerBridge final
+    {
+
+    };
 
 
 }
