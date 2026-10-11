@@ -1,6 +1,6 @@
 #include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
 #include "Models/GHGF/GHGFModelOfAPC.hpp"
-#include "VectorizetionAcpp/VectorizedSuperNova.hpp"
+#include "SuperNovaComputeManager/Computer.hpp"
 #include "TestFiles/StaticAsserts.hpp"
 #include "TestFiles/GHGFTestKit.hpp"
 #include "TestFiles/TestKit.hpp"
