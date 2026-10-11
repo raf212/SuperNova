@@ -1490,7 +1490,7 @@ public:
                 {
                     return false;
                 }
-                auto span = view->RawMutableSpan();
+                auto span = view->RawSpan();
                 if (!span.has_value() || span->size() < PayloadWords_)
                 {
                     return false;
@@ -1897,7 +1897,7 @@ private:
         {
             return false;
         }
-        auto span = view->RawMutableSpan();
+        auto span = view->RawSpan();
         if (!span.has_value())
         {
             return false;
@@ -1938,7 +1938,7 @@ private:
         {
             return false;
         }
-        auto span = view->RawMutableSpan();
+        auto span = view->RawSpan();
         if (!span.has_value())
         {
             return false;
@@ -5244,7 +5244,7 @@ bool PrivateCase() noexcept
     if (
         !view.has_value() || !view->IsValid() || view->Size() != VIEW_WIDTH ||
         view->GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION ||
-        wrong.has_value() || view->RawMutableSpan().has_value() == false ||
+        wrong.has_value() || view->RawSpan().has_value() == false ||
         view->AtomicStore(0u, FirstValue<T>()) ||
         view->AtomicStore(view->Size(), FirstValue<T>()) ||
         apc.BuildAViewOverRegion<T>(
@@ -5258,7 +5258,7 @@ bool PrivateCase() noexcept
         return false;
     }
 
-    auto span = view->RawMutableSpan();
+    auto span = view->RawSpan();
     span.value()[0u] = FirstValue<T>();
     span.value()[span->size() / 2u] = SecondValue<T>();
     span.value().back() = FirstValue<T>();
@@ -5286,7 +5286,7 @@ bool AtomicCase() noexcept
     if (
         !view.has_value() || !view->IsValid() || view->Size() != VIEW_WIDTH ||
         view->GetProtocol() != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
-        view->RawMutableSpan().has_value() || wrong.has_value() ||
+        view->RawSpan().has_value() || wrong.has_value() ||
         view->AtomicStore(view->Size(), FirstValue<T>())
     )
     {
@@ -5349,7 +5349,7 @@ bool ImmutableCase() noexcept
         view->IsValid() &&
         view->Size() == VIEW_WIDTH &&
         view->GetProtocol() == SD::SchemaProtocols::IMMUTABLE_SNAPSHOT &&
-        !view->RawMutableSpan().has_value() &&
+        !view->RawSpan().has_value() &&
         !view->AtomicStore(0u, FirstValue<T>()) &&
         !apc.ZeroARegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
 }
@@ -5617,15 +5617,15 @@ inline bool DeviceViewAndProtocolStorage() noexcept
         feedforward.has_value() && feedforward->IsValid() &&
         feedforward->Size() == 3u * batch &&
         feedforward->GetProtocol() == SD::SchemaProtocols::PRIVATE_REGION &&
-        feedforward->RawMutableSpan().has_value() &&
+        feedforward->RawSpan().has_value() &&
         state.has_value() && state->IsValid() &&
         state->Size() == 2u * batch &&
         state->GetProtocol() == SD::SchemaProtocols::ATOMIC_WORD_ARRAY &&
-        !state->RawMutableSpan().has_value() &&
+        !state->RawSpan().has_value() &&
         weight.has_value() && weight->IsValid() &&
         weight->Size() == 15u &&
         weight->GetProtocol() == SD::SchemaProtocols::IMMUTABLE_SNAPSHOT &&
-        !weight->RawMutableSpan().has_value() &&
+        !weight->RawSpan().has_value() &&
         !queue_view.has_value() &&
         !double_view.has_value() &&
         !wrong_type.has_value() &&
@@ -5698,12 +5698,12 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
         auto first_view = first.BuildAViewOverRegion<std::uint64_t>(
             MacroColumnOfAPC::BOTTOM_UP_SLOT
         );
-        if (!first_view.has_value() || !first_view->RawMutableSpan().has_value())
+        if (!first_view.has_value() || !first_view->RawSpan().has_value())
         {
             return false;
         }
         const std::optional<std::span<std::uint64_t>> mutable_span =
-            first_view->RawMutableSpan();
+            first_view->RawSpan();
         for (std::uint64_t& value : mutable_span.value())
         {
             value = UINT64_MAX;

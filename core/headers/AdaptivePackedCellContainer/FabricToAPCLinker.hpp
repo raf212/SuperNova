@@ -148,7 +148,7 @@ namespace BidirectionalInMemGraph
             {
             case SD::SchemaProtocols::PRIVATE_REGION:
             {
-                std::optional<std::span<DType>> maybe_mutable_span = view.RawMutableSpan();
+                std::optional<std::span<DType>> maybe_mutable_span = view.RawSpan();
                 if (!maybe_mutable_span.has_value())
                 {
                     return false;

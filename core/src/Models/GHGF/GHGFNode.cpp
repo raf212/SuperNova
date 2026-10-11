@@ -114,9 +114,9 @@ namespace BidirectionalInMemGraph
             return false;
         }
         
-        std::optional<std::span<float>> state = state_view.value().RawMutableSpan();
-        std::optional<std::span<float>> error = error_view.value().RawMutableSpan();
-        std::optional<std::span<float>> weight = weight_view.value().RawMutableSpan();
+        std::optional<std::span<float>> state = state_view.value().RawSpan();
+        std::optional<std::span<float>> error = error_view.value().RawSpan();
+        std::optional<std::span<float>> weight = weight_view.value().RawSpan();
         
 
         if (
