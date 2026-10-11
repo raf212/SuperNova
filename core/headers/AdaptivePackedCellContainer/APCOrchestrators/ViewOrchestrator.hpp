@@ -31,6 +31,7 @@ namespace BidirectionalInMemGraph
 
     struct APCStorageGeometry
     {
+        using SD = SchemaDefinition;
         static constexpr size_t BytesPerLocalAddressUnit() noexcept
         {
             return sizeof(uint64_t);
@@ -47,47 +48,61 @@ namespace BidirectionalInMemGraph
         }
 
         template<class DType>
-        static constexpr bool CanInstallTypedSpan(const ResolveRegionBiteView& region) noexcept
+        static constexpr bool CanInstallTypedSpan(
+            const ResolveRegionBiteView& region,
+            SD::DataTypeOfMacroColumn expected_dtype
+        ) noexcept
         {
             static_assert(std::is_trivially_copyable_v<DType>);
-            const std::optional<SchemaOrchestrator::DataTypeOfMacroColumn> expected_dtype = SchemaDefinition::CppTypeToRegionDType<DType>();
 
             if (
                 !region.IsValid() ||
-                !expected_dtype.has_value() ||
-                region.Schema->Dtype != expected_dtype.value() ||
+                region.Schema->Dtype != expected_dtype ||
                 region.ByteCount() < sizeof(DType) ||
                 (region.ByteCount() % sizeof(DType)) != UNSIGNED_ZERO
-            )
+            ) 
             {
                 return false;
             }
 
             const uintptr_t address = reinterpret_cast<uintptr_t>(region.Bytes.data());
-
             return (address % alignof(DType)) == UNSIGNED_ZERO;
-            
         }
 
-        template<class Dtype>
+        template<class DType>
+        static constexpr bool CanInstallTypedSpan(const ResolveRegionBiteView& region) noexcept
+        {
+            const std::optional<SD::DataTypeOfMacroColumn> expected_dtype = SD::CppTypeToRegionDType<DType>();
+            return CanInstallTypedSpan<DType>(region, expected_dtype.value());
+        }
+
+        template<class DType>
+        static constexpr bool CanInstallAtomicSpan(
+            const ResolveRegionBiteView& region,
+            SD::DataTypeOfMacroColumn expected_dtype
+        ) noexcept
+        {
+            if (!CanInstallTypedSpan<DType>(region, expected_dtype)) 
+            {
+                return false;
+            }
+            const uintptr_t address = reinterpret_cast<uintptr_t>(region.Bytes.data());
+            constexpr uint64_t required_alignment = std::atomic_ref<DType>::required_alignment;
+
+            if ((address % required_alignment) != UNSIGNED_ZERO) 
+            {
+                return false;
+            }
+
+            return (sizeof(DType) % required_alignment) == UNSIGNED_ZERO;
+        }
+
+        template<class DType>
         static constexpr bool CanInstallAtomicSpan(const ResolveRegionBiteView& region) noexcept
         {
-            if (!CanInstallTypedSpan<Dtype>(region))
-            {
-                return false;
-            }
-            
-            const uintptr_t address = reinterpret_cast<uintptr_t>(region.Bytes.data());
-
-            constexpr size_t required_alignment = std::atomic_ref<Dtype>::required_alignment;
-            
-            if ((address % required_alignment) != UNSIGNED_ZERO)
-            {
-                return false;
-            }
-
-            return (sizeof(Dtype) % required_alignment) == UNSIGNED_ZERO;
-            
+            const std::optional<SD::DataTypeOfMacroColumn> expected_dtype = SD::CppTypeToRegionDType<DType>();
+            return expected_dtype.has_value() &&
+                CanInstallAtomicSpan<DType>(region, expected_dtype.value());
         }
 
         template<class DType>
