@@ -22,5 +22,7 @@ namespace BidirectionalInMemGraph
     static_assert((HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
     static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
 
+    ///
+    static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 5 * sizeof(uint64_t));
 
 }

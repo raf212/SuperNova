@@ -6,11 +6,18 @@ namespace BidirectionalInMemGraph
 static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
 
 
-    class AdaptivePackedCellContainer : public RegionViewConstructor
+    class AdaptivePackedCellContainer : public FabricToAPCLinker
     {
         friend class GHGFModelOfAPC;
     protected:
         bool IsOpenGeneration_() noexcept;
+
+        bool ResolveBridgeRegion(
+            MacroColumnOfAPC column,
+            uint32_t record_ordinal,
+            ResolveRegionBiteView& out
+        ) noexcept;
+        
     public:
         static constexpr uint8_t REALTION_FIND_TRIES = 1u;
         //Do not change wherever it is default until proven

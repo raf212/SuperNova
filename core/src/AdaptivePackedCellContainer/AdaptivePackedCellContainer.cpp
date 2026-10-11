@@ -14,6 +14,16 @@ namespace BidirectionalInMemGraph
         );
     }
 
+    // bool AdaptivePackedCellContainer::ResolveBridgeRegion(
+    //     MacroColumnOfAPC column,
+    //     uint32_t record_ordinal,
+    //     ResolveRegionBiteView& out
+    // ) noexcept
+    // {
+    //     using SD = SchemaDefinition;
+
+    // }
+
     MutationResult AdaptivePackedCellContainer::AddParent(
         AdaptivePackedCellContainer& parent,
         FabricSegments edge_table,

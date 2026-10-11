@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph
     protected:
         using SD = SchemaDefinition;
 
-        std::span<SD::RegionSchemaRecord> MetrixViewRow_(uint32_t apc_slot) noexcept;
+        SD::SDSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
 
         bool ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept;
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "APCDataStructure.hpp"
+#include <span>
 
 namespace BidirectionalInMemGraph
 {
@@ -79,6 +80,7 @@ namespace BidirectionalInMemGraph
         };
 
         using RegionSchemaTable = std::array<RegionSchemaRecord, ADS::CountOfMacroColumn()>;
+        using SDSpan = std::span<RegionSchemaRecord>;
 
     };
     
