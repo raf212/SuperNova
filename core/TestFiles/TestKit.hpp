@@ -1,3 +1,4 @@
+
 #pragma once
 
 // SuperNova APC/Fabric paper-quality systems test kit (C++20)
@@ -1486,11 +1487,11 @@ public:
             {
                 auto view = apc.BuildAViewOverRegion<std::uint64_t>(
                     MacroColumnOfAPC::BOTTOM_UP_SLOT);
-                if (!view.has_value() || view->Size() < PayloadWords_)
+                if (!view.IsValid() || view.Size() < PayloadWords_)
                 {
                     return false;
                 }
-                auto span = view->RawSpan();
+                auto span = view.RawSpan();
                 if (!span.has_value() || span->size() < PayloadWords_)
                 {
                     return false;
@@ -1885,19 +1886,19 @@ private:
             auto view = apc.BuildAViewOverRegion<std::uint64_t>(
                 MacroColumnOfAPC::TOP_DOWN_SLOT);
             return
-                view.has_value() &&
-                view->Size() > word &&
-                view->AtomicStore(
+                view.IsValid() &&
+                view.Size() > word &&
+                view.AtomicStore(
                     word, value, std::memory_order_release);
         }
 
         auto view = apc.BuildAViewOverRegion<std::uint64_t>(
             MacroColumnOfAPC::BOTTOM_UP_SLOT);
-        if (!view.has_value() || view->Size() <= word)
+        if (!view.IsValid() || view.Size() <= word)
         {
             return false;
         }
-        auto span = view->RawSpan();
+        auto span = view.RawSpan();
         if (!span.has_value())
         {
             return false;
@@ -1924,21 +1925,29 @@ private:
         {
             auto view = apc.BuildAViewOverRegion<std::uint64_t>(
                 MacroColumnOfAPC::TOP_DOWN_SLOT);
-            if (!view.has_value() || view->Size() <= word)
+            if (!view.IsValid() || view.Size() <= word)
             {
                 return false;
             }
-            value = view->AtomicLoad(word, std::memory_order_acquire);
+
+            const auto loaded =
+                view.AtomicLoad(word, std::memory_order_acquire);
+            if (!loaded.has_value())
+            {
+                return false;
+            }
+
+            value = loaded.value();
             return true;
         }
 
         auto view = apc.BuildAViewOverRegion<std::uint64_t>(
             MacroColumnOfAPC::BOTTOM_UP_SLOT);
-        if (!view.has_value() || view->Size() <= word)
+        if (!view.IsValid() || view.Size() <= word)
         {
             return false;
         }
-        auto span = view->RawSpan();
+        auto span = view.RawSpan();
         if (!span.has_value())
         {
             return false;
@@ -5242,23 +5251,23 @@ bool PrivateCase() noexcept
     auto view = apc.BuildAViewOverRegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
     auto wrong = apc.BuildAViewOverRegion<WrongType<T>>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
     if (
-        !view.has_value() || !view->IsValid() || view->Size() != VIEW_WIDTH ||
-        view->GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION ||
-        wrong.has_value() || view->RawSpan().has_value() == false ||
-        view->AtomicStore(0u, FirstValue<T>()) ||
-        view->AtomicStore(view->Size(), FirstValue<T>()) ||
+        !view.IsValid() || view.Size() != VIEW_WIDTH ||
+        view.GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION ||
+        wrong.IsValid() || !view.RawSpan().has_value() ||
+        view.AtomicStore(0u, FirstValue<T>()) ||
+        view.AtomicStore(view.Size(), FirstValue<T>()) ||
         apc.BuildAViewOverRegion<T>(
             MacroColumnOfAPC::BOTTOM_UP_SLOT, 1u
-        ).has_value() ||
+        ).IsValid() ||
         apc.BuildAViewOverRegion<T>(
             MacroColumnOfAPC::ERROR_SLOT
-        ).has_value()
+        ).IsValid()
     )
     {
         return false;
     }
 
-    auto span = view->RawSpan();
+    auto span = view.RawSpan();
     span.value()[0u] = FirstValue<T>();
     span.value()[span->size() / 2u] = SecondValue<T>();
     span.value().back() = FirstValue<T>();
@@ -5284,21 +5293,21 @@ bool AtomicCase() noexcept
     auto view = apc.BuildAViewOverRegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
     auto wrong = apc.BuildAViewOverRegion<WrongType<T>>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
     if (
-        !view.has_value() || !view->IsValid() || view->Size() != VIEW_WIDTH ||
-        view->GetProtocol() != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
-        view->RawSpan().has_value() || wrong.has_value() ||
-        view->AtomicStore(view->Size(), FirstValue<T>())
+        !view.IsValid() || view.Size() != VIEW_WIDTH ||
+        view.GetProtocol() != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
+        view.RawSpan().has_value() || wrong.IsValid() ||
+        view.AtomicStore(view.Size(), FirstValue<T>())
     )
     {
         return false;
     }
 
-    const std::size_t middle = view->Size() / 2u;
+    const std::size_t middle = view.Size() / 2u;
     if (
-        !view->AtomicStore(0u, FirstValue<T>(), std::memory_order_relaxed) ||
-        !view->AtomicStore(middle, SecondValue<T>(), std::memory_order_release) ||
-        view->AtomicLoad(0u, std::memory_order_relaxed) != FirstValue<T>() ||
-        view->AtomicLoad(middle, std::memory_order_acquire) != SecondValue<T>()
+        !view.AtomicStore(0u, FirstValue<T>(), std::memory_order_relaxed) ||
+        !view.AtomicStore(middle, SecondValue<T>(), std::memory_order_release) ||
+        view.AtomicLoad(0u, std::memory_order_relaxed) != FirstValue<T>() ||
+        view.AtomicLoad(middle, std::memory_order_acquire) != SecondValue<T>()
     )
     {
         return false;
@@ -5306,7 +5315,7 @@ bool AtomicCase() noexcept
 
     T expected = FirstValue<T>();
     if (
-        !view->AtomicCompareExchangeStrong(
+        !view.AtomicCompareExchangeStrong(
             0u,
             expected,
             SecondValue<T>(),
@@ -5319,9 +5328,9 @@ bool AtomicCase() noexcept
         return false;
     }
 
-    for (std::size_t i = 0u; i < view->Size(); ++i)
+    for (std::size_t i = 0u; i < view.Size(); ++i)
     {
-        if (view->AtomicLoad(i, std::memory_order_relaxed) != T{}) return false;
+        if (view.AtomicLoad(i, std::memory_order_relaxed) != T{}) return false;
     }
     return true;
 }
@@ -5345,12 +5354,11 @@ bool ImmutableCase() noexcept
         MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     return
-        view.has_value() &&
-        view->IsValid() &&
-        view->Size() == VIEW_WIDTH &&
-        view->GetProtocol() == SD::SchemaProtocols::IMMUTABLE_SNAPSHOT &&
-        !view->RawSpan().has_value() &&
-        !view->AtomicStore(0u, FirstValue<T>()) &&
+        view.IsValid() &&
+        view.Size() == VIEW_WIDTH &&
+        view.GetProtocol() == SD::SchemaProtocols::IMMUTABLE_SNAPSHOT &&
+        !view.RawSpan().has_value() &&
+        !view.AtomicStore(0u, FirstValue<T>()) &&
         !apc.ZeroARegion<T>(MacroColumnOfAPC::BOTTOM_UP_SLOT);
 }
 
@@ -5614,33 +5622,33 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     );
 
     const bool public_views_ok =
-        feedforward.has_value() && feedforward->IsValid() &&
-        feedforward->Size() == 3u * batch &&
-        feedforward->GetProtocol() == SD::SchemaProtocols::PRIVATE_REGION &&
-        feedforward->RawSpan().has_value() &&
-        state.has_value() && state->IsValid() &&
-        state->Size() == 2u * batch &&
-        state->GetProtocol() == SD::SchemaProtocols::ATOMIC_WORD_ARRAY &&
-        !state->RawSpan().has_value() &&
-        weight.has_value() && weight->IsValid() &&
-        weight->Size() == 15u &&
-        weight->GetProtocol() == SD::SchemaProtocols::IMMUTABLE_SNAPSHOT &&
-        !weight->RawSpan().has_value() &&
-        !queue_view.has_value() &&
-        !double_view.has_value() &&
-        !wrong_type.has_value() &&
-        !inactive.has_value() &&
-        second_feedforward.has_value() &&
-        second_feedforward->Size() == 5u * batch;
+        feedforward.IsValid() && feedforward.IsValid() &&
+        feedforward.Size() == 3u * batch &&
+        feedforward.GetProtocol() == SD::SchemaProtocols::PRIVATE_REGION &&
+        feedforward.RawSpan().has_value() &&
+        state.IsValid() && state.IsValid() &&
+        state.Size() == 2u * batch &&
+        state.GetProtocol() == SD::SchemaProtocols::ATOMIC_WORD_ARRAY &&
+        !state.RawSpan().has_value() &&
+        weight.IsValid() && weight.IsValid() &&
+        weight.Size() == 15u &&
+        weight.GetProtocol() == SD::SchemaProtocols::IMMUTABLE_SNAPSHOT &&
+        !weight.RawSpan().has_value() &&
+        !queue_view.IsValid() &&
+        !double_view.IsValid() &&
+        !wrong_type.IsValid() &&
+        !inactive.IsValid() &&
+        second_feedforward.IsValid() &&
+        second_feedforward.Size() == 5u * batch;
 
-    feedforward.reset();
-    state.reset();
-    weight.reset();
-    queue_view.reset();
-    double_view.reset();
-    wrong_type.reset();
-    inactive.reset();
-    second_feedforward.reset();
+    feedforward = {};
+    state = {};
+    weight = {};
+    queue_view = {};
+    double_view = {};
+    wrong_type = {};
+    inactive = {};
+    second_feedforward = {};
 
     const bool retire_ok = apc.Retire() && second_apc.Retire();
     const bool ok = fabric_metadata_ok && row_ok &&
@@ -5698,12 +5706,12 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
         auto first_view = first.BuildAViewOverRegion<std::uint64_t>(
             MacroColumnOfAPC::BOTTOM_UP_SLOT
         );
-        if (!first_view.has_value() || !first_view->RawSpan().has_value())
+        if (!first_view.IsValid() || !first_view.RawSpan().has_value())
         {
             return false;
         }
         const std::optional<std::span<std::uint64_t>> mutable_span =
-            first_view->RawSpan();
+            first_view.RawSpan();
         for (std::uint64_t& value : mutable_span.value())
         {
             value = UINT64_MAX;
@@ -5748,21 +5756,21 @@ inline bool SlotReuseClearsPayloadAndSchema() noexcept
         MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
     bool zeroed =
-        replacement_view.has_value() &&
-        replacement_view->Size() == 2u * VIEW_WIDTH &&
-        replacement_view->GetProtocol() == SD::SchemaProtocols::ATOMIC_WORD_ARRAY &&
-        !stale_dtype.has_value();
+        replacement_view.IsValid() &&
+        replacement_view.Size() == 2u * VIEW_WIDTH &&
+        replacement_view.GetProtocol() == SD::SchemaProtocols::ATOMIC_WORD_ARRAY &&
+        !stale_dtype.IsValid();
     for (std::size_t i = 0u;
-        zeroed && i < replacement_view->Size();
+        zeroed && i < replacement_view.Size();
         ++i)
     {
-        zeroed = replacement_view->AtomicLoad(
+        zeroed = replacement_view.AtomicLoad(
             i, std::memory_order_relaxed
         ) == 0u;
     }
 
-    replacement_view.reset();
-    stale_dtype.reset();
+    replacement_view = {};
+    stale_dtype = {};
     return zeroed && replacement.Retire();
 }
 
@@ -6031,18 +6039,18 @@ inline bool RetirementAndABA()
     auto held_view = child.BuildAViewOverRegion<std::uint64_t>(
         MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
-    if (!held_view.has_value() || child.Retire(1u))
+    if (!held_view.IsValid() || child.Retire(1u))
     {
         return false;
     }
-    held_view.reset();
+    held_view = {};
 
     if (
         !child.Retire() ||
         child.IsActiveAPC() ||
         child.BuildAViewOverRegion<std::uint64_t>(
             MacroColumnOfAPC::BOTTOM_UP_SLOT
-        ).has_value() ||
+        ).IsValid() ||
         !CreateAtomic(fabric, replacement) ||
         replacement.GetThisSlotIdx() != child_slot ||
         !replacement.IsActiveAPC() ||
@@ -6073,7 +6081,7 @@ inline bool ShutdownDrainsOutstandingView()
     auto held_view = apc.BuildAViewOverRegion<std::uint64_t>(
         MacroColumnOfAPC::BOTTOM_UP_SLOT
     );
-    if (!held_view.has_value())
+    if (!held_view.IsValid())
     {
         return false;
     }
@@ -6094,7 +6102,7 @@ inline bool ShutdownDrainsOutstandingView()
     const bool correctly_waiting =
         entered_shutdown && !finished.load(std::memory_order_acquire);
 
-    held_view.reset();
+    held_view = {};
     shutdown.join();
 
     return correctly_waiting &&
@@ -6445,9 +6453,8 @@ inline bool WritePayload(
         );
 
     if (
-        !view.has_value() ||
-        !view->IsValid() ||
-        view->Size() != VIEW_WIDTH
+        !view.IsValid() ||
+        view.Size() != VIEW_WIDTH
     )
     {
         return false;
@@ -6459,7 +6466,7 @@ inline bool WritePayload(
         ++i
     )
     {
-        if (!view->AtomicStore(
+        if (!view.AtomicStore(
             i,
             seed +
                 static_cast<std::uint64_t>(i),
@@ -6484,9 +6491,8 @@ inline bool CheckPayload(
         );
 
     if (
-        !view.has_value() ||
-        !view->IsValid() ||
-        view->Size() != VIEW_WIDTH
+        !view.IsValid() ||
+        view.Size() != VIEW_WIDTH
     )
     {
         return false;
@@ -6499,7 +6505,7 @@ inline bool CheckPayload(
     )
     {
         if (
-            view->AtomicLoad(
+            view.AtomicLoad(
                 i,
                 std::memory_order_acquire
             ) !=
@@ -7503,3 +7509,4 @@ int RunAll(std::size_t lower_node_count, std::size_t higher_node_count,
         usable_thread_count, run_count, filename_prefix);
 }
 }
+

@@ -147,6 +147,7 @@ namespace BidirectionalInMemGraph
     class SNTOComputerBridge final
     {
         friend class Computer;
+        friend class AdaptivePackedCellContainer;
         using CacheOfSNCB = APCStorageGeometry::CacheOfSNCB<DT>;
         using SD = SchemaDefinition;
     private:
@@ -158,17 +159,19 @@ namespace BidirectionalInMemGraph
 
         DT* DataPtr() noexcept
         {
-            return static_cast<bool>(*this) ? SNCBCache_.Data_ : nullptr;
+            return IsValid() ? SNCBCache_.Data_ : nullptr;
         }
 
         const DT* DataPtr() const noexcept
         {
-            return static_cast<bool>(*this) ? SNCBCache_.Data_ : nullptr;
+            return IsValid() ? SNCBCache_.Data_ : nullptr;
         }
     
     public:
         SNTOComputerBridge() noexcept = default;
         SNTOComputerBridge(const SNTOComputerBridge&) = delete;
+        SNTOComputerBridge& operator=(const SNTOComputerBridge&&) noexcept = default;
+        SNTOComputerBridge(SNTOComputerBridge&&) noexcept = default;
         SNTOComputerBridge& operator=(SNTOComputerBridge&&) noexcept = default;
 
         explicit operator bool() const noexcept
@@ -180,19 +183,23 @@ namespace BidirectionalInMemGraph
                 SNCBCache_.ActiveWidth_ <= SNCBCache_.CapacityWidth_;
         }
 
+        bool IsValid() const noexcept
+        {
+            return static_cast<bool>(*this);
+        }
 
         uint32_t Height() const noexcept {return SNCBCache_.Height_; }
         uint32_t CapacityWidth() const noexcept { return SNCBCache_.CapacityWidth_; }
         uint32_t ActiveWidth() const noexcept { return SNCBCache_.ActiveWidth_; }
         uint32_t Slot() const noexcept { return SNCBCache_.Slot_; }
         MacroColumnOfAPC Column() const noexcept { return SNCBCache_.Column_; }
-        SD::SchemaProtocols Protocol() const noexcept { return SNCBCache_.Protocol_; }
+        SD::SchemaProtocols GetProtocol() const noexcept { return SNCBCache_.Protocol_; }
 
 
         uint64_t Size() const noexcept
         {
             if (
-                !static_cast<bool>(*this) ||
+                !IsValid() ||
                 SNCBCache_.Height_ > (UINT64_MAX / static_cast<uint64_t>(SNCBCache_.CapacityWidth_))
             ) 
             {
@@ -204,7 +211,7 @@ namespace BidirectionalInMemGraph
 
         uint64_t ActiveElementCount() const noexcept
         {
-            if (!static_cast<bool>(*this)) {
+            if (!IsValid()) {
                 return UNSIGNED_ZERO;
             }
 
@@ -217,7 +224,7 @@ namespace BidirectionalInMemGraph
 
         std::span<DT> Row(uint32_t row) noexcept
         {
-            if (!static_cast<bool>(*this) || row >= SNCBCache_.Height_) {
+            if (!IsValid() || row >= SNCBCache_.Height_) {
                 return {};
             }
 
@@ -229,7 +236,7 @@ namespace BidirectionalInMemGraph
 
         std::span<const DT> Row(uint32_t row) const noexcept
         {
-            if (!static_cast<bool>(*this) || row >= SNCBCache_.Height_) {
+            if (!IsValid() || row >= SNCBCache_.Height_) {
                 return {};
             }
 
@@ -243,7 +250,7 @@ namespace BidirectionalInMemGraph
         std::optional<std::span<DT>> RawSpan() noexcept
         {
             if (
-                !static_cast<bool>(*this) ||
+                !IsValid() ||
                 SNCBCache_.Protocol_ != SchemaDefinition::SchemaProtocols::PRIVATE_REGION
             ) 
             {
@@ -257,7 +264,7 @@ namespace BidirectionalInMemGraph
         {
             using SP = SD::SchemaProtocols;
             if (
-                !static_cast<bool>(*this) ||
+                !IsValid() ||
                 (
                     SNCBCache_.Protocol_ != SP::PRIVATE_REGION &&
                     SNCBCache_.Protocol_ != SP::IMMUTABLE_SNAPSHOT
@@ -273,7 +280,7 @@ namespace BidirectionalInMemGraph
         std::optional<DT> AtomicLoad(uint64_t idx, std::memory_order order = std::memory_order_acquire) const noexcept
         {
             if (
-                !static_cast<bool>(*this) ||
+                !IsValid() ||
                 SNCBCache_.Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
                 idx >= Size()
             ) 
@@ -291,7 +298,7 @@ namespace BidirectionalInMemGraph
         )
         {
             if (
-                !static_cast<bool>(*this) ||
+                !IsValid() ||
                 SNCBCache_.Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
                 idx >= Size()
             ) 
@@ -312,7 +319,7 @@ namespace BidirectionalInMemGraph
         )
         {
             if (
-                !static_cast<bool>(*this) ||
+                !IsValid() ||
                 SNCBCache_.Protocol_ != SD::SchemaProtocols::ATOMIC_WORD_ARRAY ||
                 idx >= Size()
             ) 
