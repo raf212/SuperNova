@@ -101,22 +101,22 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        std::optional<RegionView<float>> state_view = BuildAViewOverRegion<float>(MacroColumnOfAPC::STATE_SLOT);
-        std::optional<RegionView<float>> error_view = BuildAViewOverRegion<float>(MacroColumnOfAPC::ERROR_SLOT);
-        std::optional<RegionView<float>> weight_view = BuildAViewOverRegion<float>(MacroColumnOfAPC::WEIGHT_SLOT);
+        SNTOComputerBridge<float> state_view = BuildAViewOverRegion<float>(MacroColumnOfAPC::STATE_SLOT);
+        SNTOComputerBridge<float> error_view = BuildAViewOverRegion<float>(MacroColumnOfAPC::ERROR_SLOT);
+        SNTOComputerBridge<float> weight_view = BuildAViewOverRegion<float>(MacroColumnOfAPC::WEIGHT_SLOT);
         
         if (
-            !state_view.has_value() ||
-            !error_view.has_value() ||
-            !weight_view.has_value()
+            !state_view.IsValid() ||
+            !error_view.IsValid() ||
+            !weight_view.IsValid()
         )
         {
             return false;
         }
         
-        std::optional<std::span<float>> state = state_view.value().RawMutableSpan();
-        std::optional<std::span<float>> error = error_view.value().RawMutableSpan();
-        std::optional<std::span<float>> weight = weight_view.value().RawMutableSpan();
+        std::optional<std::span<float>> state = state_view.RawSpan();
+        std::optional<std::span<float>> error = error_view.RawSpan();
+        std::optional<std::span<float>> weight = weight_view.RawSpan();
         
 
         if (

@@ -9,7 +9,7 @@ namespace BidirectionalInMemGraph
 
     class FabricConstructor
     {
-        friend class RegionViewConstructor;
+        friend class AdaptivePackedCellContainer;
         
     protected:
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
@@ -111,11 +111,11 @@ namespace BidirectionalInMemGraph
     class MatrixViewConstructor : public FabricConstructor
     {
         friend class FabricToAPCLinker;
-        friend class RegionViewConstructor;
+        friend class AdaptivePackedCellContainer;
     protected:
         using SD = SchemaDefinition;
 
-        std::span<SD::RegionSchemaRecord> MetrixViewRow_(uint32_t apc_slot) noexcept;
+        SD::RSSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
 
         bool ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept;
 

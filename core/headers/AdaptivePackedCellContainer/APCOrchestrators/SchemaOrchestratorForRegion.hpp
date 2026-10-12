@@ -1,5 +1,6 @@
 #pragma once
 #include "APCDataStructure.hpp"
+#include <span>
 
 namespace BidirectionalInMemGraph
 {
@@ -79,6 +80,7 @@ namespace BidirectionalInMemGraph
         };
 
         using RegionSchemaTable = std::array<RegionSchemaRecord, ADS::CountOfMacroColumn()>;
+        using RSSpan = std::span<RegionSchemaRecord>;
 
     };
     
@@ -269,6 +271,36 @@ namespace BidirectionalInMemGraph
             }
 
             return schema.CellCount / stride.value();
+        }
+
+        static constexpr bool GetALLRequiredComputerInfo(
+            uint64_t& matrix_bytes,
+            uint32_t& matrix_cells,
+            uint32_t& stride_cells,
+            uint32_t& record_count,
+            const RegionSchemaRecord& stored
+        ) noexcept
+        {
+            const std::optional<uint64_t> maybe_matrix_bytes = MatrixByteCount(stored);
+            const std::optional<uint32_t> maybe_matrix_cells = MatrixCellCount(stored);
+            const std::optional<uint32_t> maybe_stride_cells = RecordStrideCells(stored);
+            const std::optional<uint32_t> maybe_record_count = LogicalRecordCount(stored);
+
+            if (
+                !maybe_matrix_bytes.has_value() ||
+                !maybe_matrix_cells.has_value() ||
+                !maybe_stride_cells.has_value() ||
+                !maybe_record_count.has_value()
+            ) 
+            {
+                return false;
+            }
+
+            matrix_bytes = maybe_matrix_bytes.value();
+            matrix_cells = maybe_matrix_cells.value();
+            stride_cells = maybe_stride_cells.value();
+            record_count = maybe_record_count.value();
+            return true;
         }
 
         static constexpr uint32_t AlignRegionCells(uint32_t cell) noexcept

@@ -9,6 +9,7 @@ namespace BidirectionalInMemGraph
 
     class APCFinilizer;
     class AdaptivePackedCellContainer;
+    class Computer;
 
     struct APCDataStructure 
     {

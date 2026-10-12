@@ -22,7 +22,7 @@ namespace BidirectionalInMemGraph
 
         SD::RegionSchemaRecord* row = std::launder(reinterpret_cast<SD::RegionSchemaRecord*>(table_bytes + row_byte_offset));
 
-        return std::span<SD::RegionSchemaRecord>(row, FabCache_->ActiveRegionCount_);
+        return SD::RSSpan(row, FabCache_->ActiveRegionCount_);
     }
 
     bool MatrixViewConstructor::ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept
@@ -54,7 +54,7 @@ namespace BidirectionalInMemGraph
         const SD::RegionSchemaTable& requested
     ) noexcept
     {
-        std::span<SD::RegionSchemaRecord> destination = MetrixViewRow_(apc_slot);
+        SD::RSSpan destination = MetrixViewRow_(apc_slot);
         if (destination.size() != FabCache_->ActiveRegionCount_)
         {
             return false;
@@ -143,7 +143,7 @@ namespace BidirectionalInMemGraph
         }
 
         const size_t apc_begin = FabCache_->SegmentPoolBegin_ +  static_cast<size_t>(apc_slot) * FabCache_->PerAPCRuntimeCellCount_;
-        std::span<SD::RegionSchemaRecord> row = MetrixViewRow_(apc_slot);
+        SD::RSSpan row = MetrixViewRow_(apc_slot);
         if (row.size() != FabCache_->ActiveRegionCount_)
         {
             return false;

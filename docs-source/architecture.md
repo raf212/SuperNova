@@ -164,7 +164,6 @@ table constructors + lifecycle + edge/handle primitives
 | `APCOrchestrators/SchemaOrchestratorForRegion.hpp` | Region schema ABI, dtype/protocol flags and validation. | `SchemaOrchestrator`, `SchemaValidator`, `SchemaDefinition` |
 | `APCOrchestrators/SharedConf.hpp` | Shared enums, sentinels, limits. | `MacroColumnOfAPC`, `FabricSegments`, `StateOfAPC` |
 | `APCOrchestrators/ViewOrchestrator.hpp` | Typed non-owning region views held by an APC use token. | `ResolveRegionBiteView`, `APCStorageGeometry`, `RegionView<T>` |
-| `AdaptivePackedCellContainer/FabricToAPCLinker.hpp` | Runtime facade binding and generation-safe use acquisition. | `FabricToAPCLinker`, `RegionViewConstructor` |
 | `FabricOrchestrators/CoreOfFabricCoordinator.hpp` | Global Fabric metadata, record-book geometry, raw allocator. | `CoreOfFabricCoordinator`, `RecordBookConf`, `RawPackedCellAllocator` |
 | `FabricOrchestrators/EdgeTableConf.hpp` | Packed relation/header layout and DAG legality helpers. | `EdgeBuilder` |
 | `FabricOrchestrators/HandleAndRetirement.hpp` | Generation/active-count control cell and relocation cache validation. | `HandleOfAPCStatic`, `APCRelocationDef` |
@@ -414,7 +413,7 @@ A schema describes **how bytes in an APC region are interpreted**, not where an 
 | Protocol | Contract | Supported by generic `BuildAViewOverRegion`? |
 | --- | --- | --- |
 | `PRIVATE_REGION` | Single record; direct mutable access only while APC use is held. | Yes. |
-| `IMMUTABLE_SNAPSHOT` | Single record intended as immutable read snapshot. | Yes for typed view; `RawMutableSpan()` refuses mutation. |
+| `IMMUTABLE_SNAPSHOT` | Single record intended as immutable read snapshot. | Yes for typed view; `RawSpan()` refuses mutation. |
 | `ATOMIC_WORD_ARRAY` | Single record; element access via `atomic_ref`. | Yes. |
 | `MPMC_FIXED_RECORD_QUEUE` | Power-of-two record ring with per-slot sequence metadata. | Storage/schema initialization exists; generic `RegionView` does **not** expose queue operations in this snapshot. |
 | `DOUBLE_BUFFERED` | Exactly two records; one published/read bank and one write bank. | Storage/schema exists; generic `RegionView` constructor does **not** expose it. |
@@ -495,7 +494,7 @@ A move-held access object combining a typed span with an `APCUseScope`; its life
 | `IsValid()` | none | bool | Any region client. | Requires held use token and nonempty span. |
 | `Size()` | none | size_t | Model/kernel code. | Returns element count only while use token is valid. |
 | `GetProtocol()` | none | protocol enum | Protocol-aware caller. | Inspect access policy before choosing mutation operation. |
-| `RawMutableSpan()` | none | optional<span<T>> | Single-owner/private region algorithms. | Only succeeds for `PRIVATE_REGION`; intentionally refuses immutable/atomic regions. |
+| `RawSpan()` | none | optional<span<T>> | Single-owner/private region algorithms. | Only succeeds for `PRIVATE_REGION`; intentionally refuses immutable/atomic regions. |
 | `AtomicLoad(idx,order)` | element index + memory order | T | Atomic-word region clients. | Returns default T on invalid use/protocol/index; validate the view and index rather than treating default as diagnostic. |
 | `AtomicStore(idx,value,order)` | index/value/order | bool | Atomic-word region clients. | False on wrong protocol/index/use. |
 | `AtomicCompareExchangeStrong(idx,expected,desired,success,failure)` | CAS args | bool | Atomic-word coordination. | `expected` follows normal CAS semantics and may be updated on failure. |
