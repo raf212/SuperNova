@@ -164,7 +164,6 @@ table constructors + lifecycle + edge/handle primitives
 | `APCOrchestrators/SchemaOrchestratorForRegion.hpp` | Region schema ABI, dtype/protocol flags and validation. | `SchemaOrchestrator`, `SchemaValidator`, `SchemaDefinition` |
 | `APCOrchestrators/SharedConf.hpp` | Shared enums, sentinels, limits. | `MacroColumnOfAPC`, `FabricSegments`, `StateOfAPC` |
 | `APCOrchestrators/ViewOrchestrator.hpp` | Typed non-owning region views held by an APC use token. | `ResolveRegionBiteView`, `APCStorageGeometry`, `RegionView<T>` |
-| `AdaptivePackedCellContainer/FabricToAPCLinker.hpp` | Runtime facade binding and generation-safe use acquisition. | `FabricToAPCLinker`, `RegionViewConstructor` |
 | `FabricOrchestrators/CoreOfFabricCoordinator.hpp` | Global Fabric metadata, record-book geometry, raw allocator. | `CoreOfFabricCoordinator`, `RecordBookConf`, `RawPackedCellAllocator` |
 | `FabricOrchestrators/EdgeTableConf.hpp` | Packed relation/header layout and DAG legality helpers. | `EdgeBuilder` |
 | `FabricOrchestrators/HandleAndRetirement.hpp` | Generation/active-count control cell and relocation cache validation. | `HandleOfAPCStatic`, `APCRelocationDef` |

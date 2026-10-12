@@ -44,7 +44,7 @@ namespace BidirectionalInMemGraph
             }
 
 
-            const SD::SDSpan schemas = MetrixViewRow_(i);
+            const SD::RSSpan schemas = MetrixViewRow_(i);
             if (schemas.size() != std::popcount(Profile_.ActiveRegionMask))
             {
                 return false;

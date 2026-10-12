@@ -14,15 +14,79 @@ namespace BidirectionalInMemGraph
         );
     }
 
-    // bool AdaptivePackedCellContainer::ResolveBridgeRegion(
-    //     MacroColumnOfAPC column,
-    //     uint32_t record_ordinal,
-    //     ResolveRegionBiteView& out
-    // ) noexcept
-    // {
-    //     using SD = SchemaDefinition;
+    bool AdaptivePackedCellContainer::ResolveBridgeRegion(
+        MacroColumnOfAPC column,
+        uint32_t record_ordinal,
+        ResolveRegionBiteView& out
+    ) noexcept
+    {
+        using SD = SchemaDefinition;
 
-    // }
+        SD::RSSpan region_row = APCCache_.FabricOwnerPtr_->MetrixViewRow_(APCCache_.APCSlotIdx_);
+        out = ResolveRegionBiteView{};
+        if (
+            !IsActiveAPC() ||
+            !APCCache_.RawAPCBasePtr_ ||
+            region_row.size() != APCCache_.FabricOwnerPtr_->FabCache_->ActiveRegionCount_
+        ) 
+        {
+            return false;
+        }
+
+        const std::optional<uint8_t> compact_index = ADS::CompactRegionIndex(
+            APCCache_.FabricOwnerPtr_->FabCache_->ActiveRegionMask_, 
+            column
+        );
+        if (!compact_index.has_value()) 
+        {
+            return false;
+        }
+
+        const SD::RegionSchemaRecord& stored = region_row[compact_index.value()];
+
+        if (
+            stored.Region != column ||
+            !SD::ValidateStortedRegionSchema(
+                stored,
+                APCCache_.FabricOwnerPtr_->FabCache_->PerAPCRuntimeCellCount_,
+                APCCache_.FabricOwnerPtr_->FabCache_->MatrixBatchCapacity_    
+            )
+        ) 
+        {
+            return false;
+        }
+
+        uint64_t matrix_bytes{};
+        uint32_t matrix_cells{};
+        uint32_t stride_cells{};
+        uint32_t record_count{};
+
+        if (
+            !SD::GetALLRequiredComputerInfo(matrix_bytes, matrix_cells, stride_cells, record_count, stored) ||
+            record_ordinal >= record_count
+        ) 
+        {
+            return false;
+        }
+
+        const uint64_t local_data_cell = static_cast<uint64_t>(stored.CellOffset) + (static_cast<uint64_t>(record_ordinal) * stride_cells);
+
+        if (
+            local_data_cell >= APCCache_.FabricOwnerPtr_->FabCache_->PerAPCRuntimeCellCount_ ||
+            matrix_cells > APCCache_.FabricOwnerPtr_->FabCache_->PerAPCRuntimeCellCount_ - local_data_cell
+        ) 
+        {
+            return false;
+        }
+
+        out.Bytes = std::span<std::byte>(
+            APCCache_.RawAPCBasePtr_ + static_cast<uint64_t>(local_data_cell) * sizeof(uint64_t),
+            static_cast<uint64_t>(matrix_bytes)
+        );
+        out.Schema = &stored;
+        out.RegionOrdinal = record_ordinal;
+        return true;
+    }
 
     MutationResult AdaptivePackedCellContainer::AddParent(
         AdaptivePackedCellContainer& parent,
