@@ -110,7 +110,7 @@ namespace BidirectionalInMemGraph
         };
 
         template<class DT>
-        inline static constexpr bool ComputerSclarV = std::is_same_v<std::remove_cv_t<DT>, uint8_t> ||
+        inline static constexpr bool ComputerScalarV = std::is_same_v<std::remove_cv_t<DT>, uint8_t> ||
             std::is_same_v<std::remove_cv_t<DT>, uint16_t> ||
             std::is_same_v<std::remove_cv_t<DT>, uint32_t> ||
             std::is_same_v<std::remove_cv_t<DT>, uint64_t> ||
@@ -251,8 +251,74 @@ namespace BidirectionalInMemGraph
             SoftMaxRowFunction SoftMaxRow = nullptr;
             RMSNormFunctionSN RMSNormRows = nullptr;
         };
+    };
 
+    template<class DT>
+    inline constexpr bool ComputerScalarV = ComputerDefAndVect::ComputerScalarV<DT>;
 
+    template<class DT>
+    inline constexpr bool ComputerFloatingV = ComputerDefAndVect::ComputerFloatingV<DT>;
+
+    template<class DT>
+    concept Computerscalar = ComputerDefAndVect::ComputerScalarV<DT>;
+
+    template<class DT>
+    concept ComputerFloating = ComputerDefAndVect::ComputerFloatingV<DT>;
+
+    template<class DT>
+
+    struct ComputerMath
+    {
+        template<ComputerFloating DT>
+        static constexpr DT Exp(DT value) noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            return sycl::exp(value);
+        #endif
+            return static_cast<DT>(std::exp(value));
+        }
+
+        template<ComputerFloating DT>
+        static constexpr DT Log(DT value) noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            return sycl::log(value);
+        #endif
+            return static_cast<DT>(std::log(value));
+        }
+
+        template<ComputerFloating DT>
+        static constexpr DT Sqrt(DT value) noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            return sycl::sqrt(value);
+        #endif
+            return static_cast<DT>(std::sqrt(value));
+        }
+
+        template<ComputerFloating DT>
+        static constexpr DT Abs(DT value) noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            return sycl::abs(value);
+        #endif
+            return static_cast<DT>(std::abs(value));
+        }
+
+        template<ComputerFloating DT>
+        static bool IsFinite(DT value) noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            return sycl::isfinite(value);
+        #endif
+            return std::isfinite(value);
+        }
+
+        template<class DT>
+        static constexpr DT Clamp(DT value, DT lower, DT upper) noexcept
+        {
+            return std::clamp(value, lower, upper);
+        }
     };
 
 
