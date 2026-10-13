@@ -128,9 +128,9 @@ namespace BidirectionalInMemGraph
 
         template<class DT>
         inline static constexpr bool ComputerFloatingV = std::is_same_v<std::remove_cv_t<DT>, float> ||
-            std::is_same_v<std::remove_cv_t<DT>, double> ||
+            std::is_same_v<std::remove_cv_t<DT>, double> 
         #if defined (SN_ACPP_ENABLED)
-            std::is_same_v<std::remove_cv_t<DT>, sycl::half>
+            || std::is_same_v<std::remove_cv_t<DT>, sycl::half>
         #endif
         ;
 
@@ -138,11 +138,21 @@ namespace BidirectionalInMemGraph
         struct SmallScalarPromotion
         {
             using U = std::remove_cv_t<DT>;
+        #if defined (SN_ACPP_ENABLED)
             using Type = std::conditional_t<
                 std::is_integral_v<U> && sizeof(U) < sizeof(int32_t),
                 int32_t,
                 U
             >;
+        #else
+            using Type = std::conditional_t<
+                std::is_integral_v<U> &&
+                    sizeof(U) < sizeof(int32_t),
+                int32_t,
+                U
+            >;        
+        #endif
+
         };
 
         #if defined (SN_ACPP_ENABLED)
@@ -272,8 +282,9 @@ namespace BidirectionalInMemGraph
         {
         #if defined (SN_ACPP_ENABLED)
             return sycl::exp(value);
-        #endif
+        #else
             return static_cast<DT>(std::exp(value));
+        #endif
         }
 
         template<ComputerFloating DT>
@@ -281,8 +292,9 @@ namespace BidirectionalInMemGraph
         {
         #if defined (SN_ACPP_ENABLED)
             return sycl::log(value);
-        #endif
+        #else
             return static_cast<DT>(std::log(value));
+        #endif
         }
 
         template<ComputerFloating DT>
@@ -290,8 +302,9 @@ namespace BidirectionalInMemGraph
         {
         #if defined (SN_ACPP_ENABLED)
             return sycl::sqrt(value);
-        #endif
+        #else
             return static_cast<DT>(std::sqrt(value));
+        #endif
         }
 
         template<ComputerFloating DT>
@@ -299,8 +312,9 @@ namespace BidirectionalInMemGraph
         {
         #if defined (SN_ACPP_ENABLED)
             return sycl::abs(value);
-        #endif
+        #else
             return static_cast<DT>(std::abs(value));
+        #endif
         }
 
         template<ComputerFloating DT>
@@ -308,8 +322,9 @@ namespace BidirectionalInMemGraph
         {
         #if defined (SN_ACPP_ENABLED)
             return sycl::isfinite(value);
-        #endif
+        #else
             return std::isfinite(value);
+        #endif
         }
 
         template<class DT>

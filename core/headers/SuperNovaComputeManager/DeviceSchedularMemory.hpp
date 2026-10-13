@@ -224,7 +224,7 @@ namespace ComputerDetail
             const uint64_t extra_cells = (byte_offset_in_cells + trailing_bytes + (sizeof(uint64_t) - 1u)) / sizeof(uint64_t);
 
             const uint64_t required_cells = whole_cells + extra_cells;
-            const uint64_t remaining_cells = slab_cells = offset_cells;
+            const uint64_t remaining_cells = slab_cells - offset_cells;
             return required_cells < remaining_cells;
         }
 
