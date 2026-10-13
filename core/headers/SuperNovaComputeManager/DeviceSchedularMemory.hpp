@@ -249,7 +249,58 @@ namespace ComputerDetail
         }
 
     #if defined (SN_ACPP_ENABLED)
-        
+        static constexpr bool ProbShared(DeviceSN& device) noexcept
+        {
+            sycl::queue* queue = device.Queue();
+            if (!queue || !device.SharedUSM()) 
+            {
+                return false;
+            }
+
+            void* probptr = nullptr;
+            try 
+            {
+                probptr = sycl::aligned_alloc_shared(
+                    BidirectionalInMemGraph::ADS::APC_CACHELINE_SIZE, 
+                    BidirectionalInMemGraph::ADS::APC_CACHELINE_SIZE, 
+                    *queue
+                );
+
+                if (!probptr) 
+                {
+                    return false;
+                }
+
+                queue->memset(
+                    probptr, UNSIGNED_ZERO, BidirectionalInMemGraph::ADS::APC_CACHELINE_SIZE
+                ).wait_and_throw();
+                sycl::free(probptr, *queue);
+                return true;
+            }
+            catch(...)
+            {
+                if (probptr) 
+                {
+                    try 
+                    {
+                        sycl::free(probptr, *queue);
+                    } catch (...) {}
+                }
+                return false;
+            }
+        }
+
+        // static constexpr uint64_t* AllocateShared(
+        //     DeviceSN& device ,
+        //     uint64_t count_of_cells,
+        //     uint64_t allignment
+        // ) noexcept
+        // {
+        //     sycl::queue* queue = device.Queue();
+        //     if (!queue || !device.SharedUSM() || count_of_cells == UNSIGNED_ZERO || count_of_cells > MAX_SLAB_CELLS / size) {
+            
+        //     }
+        // }
 
     #endif
     };
