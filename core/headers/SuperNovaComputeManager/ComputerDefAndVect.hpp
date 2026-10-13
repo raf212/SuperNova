@@ -121,7 +121,7 @@ namespace BidirectionalInMemGraph
             std::is_same_v<std::remove_cv_t<DT>, float> ||
             std::is_same_v<std::remove_cv_t<DT>, double> ||
             std::is_same_v<std::remove_cv_t<DT>, char> ||
-        #if defined (SN_ACPP_ENABLED)
+        #if defined (SN_ACPP_ENABLED) 
             std::is_same_v<std::remove_cv_t<DT>, sycl::half>
         #endif
         ;
