@@ -265,8 +265,6 @@ namespace BidirectionalInMemGraph
     template<class DT>
     concept ComputerFloating = ComputerDefAndVect::ComputerFloatingV<DT>;
 
-    template<class DT>
-
     struct ComputerMath
     {
         template<ComputerFloating DT>

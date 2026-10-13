@@ -170,7 +170,6 @@ namespace BidirectionalInMemGraph
     public:
         SNTOComputerBridge() noexcept = default;
         SNTOComputerBridge(const SNTOComputerBridge&) = delete;
-        SNTOComputerBridge& operator=(const SNTOComputerBridge&&) noexcept = default;
         SNTOComputerBridge(SNTOComputerBridge&&) noexcept = default;
         SNTOComputerBridge& operator=(SNTOComputerBridge&&) noexcept = default;
 
