@@ -4,6 +4,8 @@
 namespace ComputerDetail 
 {
     static constexpr uint8_t UNSIGNED_ZERO = BidirectionalInMemGraph::UNSIGNED_ZERO;
+    static constexpr uint64_t MAX_SLAB_CELLS = BidirectionalInMemGraph::ADS::MAX_SLAB_CELLS;
+
     class DeviceSN final
     {
     private:
@@ -167,32 +169,88 @@ namespace ComputerDetail
 
     struct MemorySN final
     {
-        static constexpr uint64_t BYTE_SIZE_LIMITER = UINT64_MAX / sizeof(uint64_t);
 
         static constexpr bool IsRangeInside(
             const uint64_t* slab,
-            uint64_t cell_count,
+            uint64_t slab_cells,
             const void* data,
             uint64_t bytes
         ) noexcept
         {
-            if (!slab || !data || cell_count > BYTE_SIZE_LIMITER) 
+            if (!slab || !data) 
             {
                 return false;
             }
 
             const uintptr_t slab_begin = reinterpret_cast<uintptr_t>(slab);
             const uintptr_t data_begin = reinterpret_cast<uintptr_t>(data);
-            const uint64_t slab_bytes = cell_count * sizeof(uint64_t);
-
             if (data_begin < slab_begin) 
             {
                 return false;
             }
 
-            const uintptr_t offset = data_begin - slab_begin;
+            const uintptr_t offset_bytes = data_begin - slab_begin;
+            const uintptr_t offset_cells_wide = offset_bytes / sizeof(uint64_t);
 
-            return offset <= slab_bytes && bytes <= slab_bytes - static_cast<uint64_t>(offset);
+            if constexpr (sizeof(uintptr_t) > sizeof(uint64_t)) 
+            {
+                if (offset_cells_wide > MAX_SLAB_CELLS) 
+                {
+                    return false;
+                }
+            }
+
+            const uint64_t offset_cells  = static_cast<uint64_t>(offset_cells_wide);
+            const uint64_t byte_offset_in_cells = static_cast<uint64_t>(offset_bytes % sizeof(uint64_t));
+            if (offset_cells  > slab_cells) 
+            {
+                return false;
+            }
+
+            if (bytes == UNSIGNED_ZERO) 
+            {
+                return offset_cells < slab_cells ||
+                    (offset_cells == slab_cells && byte_offset_in_cells == UNSIGNED_ZERO);
+            }
+
+            if (offset_cells == slab_cells) 
+            {
+                return false;
+            }
+
+            const uint64_t whole_cells = bytes / sizeof(uint64_t);
+            const uint64_t trailing_bytes = bytes % sizeof(uint64_t);
+
+            const uint64_t extra_cells = (byte_offset_in_cells + trailing_bytes + (sizeof(uint64_t) - 1u)) / sizeof(uint64_t);
+
+            const uint64_t required_cells = whole_cells + extra_cells;
+            const uint64_t remaining_cells = slab_cells = offset_cells;
+            return required_cells < remaining_cells;
         }
+
+        template<class DT>
+        static constexpr bool IsTypeRangeInside(
+            const uint64_t* slab,
+            uint64_t slab_cells,
+            const DT* data,
+            uint64_t count
+        ) noexcept
+        {
+            
+            if (
+                count == UNSIGNED_ZERO ||
+                count > MAX_SLAB_CELLS / sizeof(DT)
+            ) 
+            {
+                return false;
+            }
+
+            return IsRangeInside(slab, slab_cells, data, count * sizeof(DT));
+        }
+
+    #if defined (SN_ACPP_ENABLED)
+        
+
+    #endif
     };
 }

@@ -1,4 +1,4 @@
-#include "SuperNovaComputeManager/ComputerDetail.hpp"
+#include "SuperNovaComputeManager/DeviceSchedularMemory.hpp"
 
 namespace ComputerDetail
 {
