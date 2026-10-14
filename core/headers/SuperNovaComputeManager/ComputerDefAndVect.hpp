@@ -15,7 +15,7 @@
 #include <utility>
 
 
-///TEMPORARY
+///TEMPORARY to keep track
 #define SN_ACPP_ENABLED true
 //just for inselisense
 
@@ -54,13 +54,6 @@ namespace BidirectionalInMemGraph
             CUSTOM = 6
         };
 
-        enum class ComputerFutureUse : uint8_t
-        {
-            UNKNOWN = 0,
-            HOST = 1,
-            ACCELERAROR = 3
-        };
-
         enum class ComputerError : uint8_t
         {
             NONE = 0,
@@ -83,28 +76,24 @@ namespace BidirectionalInMemGraph
             uint64_t GPUWorkThreshold = GPU_WORK_THRESHOLD;
             float CoOpCPUFraction = COOP_CPU_FRACTION;
             bool AllowCPUFallback = true;
-            bool PrefereSharedUSM = true;
             bool EnablePrefetch = true;
         };
 
-        struct ComputerRuntimeInfo final 
+        struct ComputerRuntimeInfo final
         {
-            ComputerBackend Backend = ComputerBackend::CPU;
+            ComputerBackend DefaultBackend = ComputerBackend::AUTOMATIC;
             bool AdaptiveCppCompiled = false;
             bool AcceleratorAvailable = false;
-            bool SharedUSMAvailable = false;
-            bool Atomic64Available = false;
-            bool ConcurrentSharedUSM = false;
-            bool SlabUsesSharedUSM = false;
+            bool InterCoOpAvailable = false;
+            bool SlabInterCoOpReady = false;
             bool Configured = false;
-            std::string DeviceName{}; 
+            std::string DeviceName{};
         };
 
         struct ComputeExecutionPolicy final
         {
             ComputerBackend Backend = ComputerBackend::AUTOMATIC;
             ComputerWorkType WorkType = ComputerWorkType::ELEMENTWISE;
-            ComputerFutureUse FutureUse = ComputerFutureUse::UNKNOWN;
             bool Deterministic = false;
             bool AllowCPUFallback = true;
         };
@@ -140,34 +129,15 @@ namespace BidirectionalInMemGraph
             using U = std::remove_cv_t<DT>;
         #if defined (SN_ACPP_ENABLED)
             using Type = std::conditional_t<
-                std::is_integral_v<U> && sizeof(U) < sizeof(int32_t),
-                int32_t,
-                U
+                std::is_same_v<U, sycl::half>, 
+                float, 
+                std::conditional_t<std::is_integral_v<U> && sizeof(U) < sizeof(int32_t), int32_t, U>
             >;
         #else
-            using Type = std::conditional_t<
-                std::is_integral_v<U> &&
-                    sizeof(U) < sizeof(int32_t),
-                int32_t,
-                U
-            >;        
+            using Type = std::conditional_t<std::is_integral_v<U> && sizeof(U) < sizeof(int32_t), int32_t, U>;    
         #endif
 
         };
-
-        #if defined (SN_ACPP_ENABLED)
-        template<>
-        struct SmallScalarPromotion<sycl::half>
-        {
-            using Type = float;
-        };
-        #endif
-
-
-        template<class... Ts>
-        using DefaultAccumulatorSN = std::common_type_t<
-            typename SmallScalarPromotion<std::remove_cv_t<Ts>>::Type...
-        >;
 
         template<class DT>
         static constexpr std::optional<CDT> DataTypeOfSN() noexcept
@@ -223,8 +193,6 @@ namespace BidirectionalInMemGraph
             uint32_t Columns{UNSIGNED_ZERO};
             uint32_t SourceStride{UNSIGNED_ZERO};
             uint32_t DestinationStride{UNSIGNED_ZERO};
-
-            double Epsilon{0.0};
         };
 
 
@@ -275,6 +243,22 @@ namespace BidirectionalInMemGraph
     template<class DT>
     concept ComputerFloating = ComputerDefAndVect::ComputerFloatingV<DT>;
 
+    template<class... Ts>
+    using DefaultAccumulatorSN = std::common_type_t<
+        typename ComputerDefAndVect::SmallScalarPromotion<std::remove_cv_t<Ts>>::Type...
+    >;
+
+    //POST DEFINATION OF FLOAT16 when Acpp
+#if defined (SN_ACPP_ENABLED)
+    template<>
+    inline constexpr std::optional<SchemaValidator::DataTypeOfMacroColumn>
+    SchemaValidator::CppTypeToRegionDType<sycl::half>() noexcept
+    {
+        return SchemaValidator::DataTypeOfMacroColumn::FLOAT16_T;
+    }
+#endif
+    //
+
     struct ComputerMath
     {
         template<ComputerFloating DT>
@@ -311,7 +295,7 @@ namespace BidirectionalInMemGraph
         static constexpr DT Abs(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
-            return sycl::abs(value);
+            return sycl::fabs(value);
         #else
             return static_cast<DT>(std::abs(value));
         #endif

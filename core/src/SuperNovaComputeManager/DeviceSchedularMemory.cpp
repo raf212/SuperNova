@@ -31,6 +31,9 @@ namespace ComputerDetail
             SharedUSM_ = device.has(sycl::aspect::usm_shared_allocations);
             ConcurrentSharedUSM_ = device.has(sycl::aspect::usm_shared_allocations);
             Atomic64_ = device.has(sycl::aspect::atomic64);
+
+            
+
             FP16_ = device.has(sycl::aspect::fp16);
             FP64_ = device.has(sycl::aspect::fp64);
             Name_ = device.get_info<sycl::info::device::name>();
@@ -39,8 +42,9 @@ namespace ComputerDetail
         {
             return false;
         }
-    #endif  
+    #else  
         return false;
+    #endif
     }
 
     bool DeviceSN::Syncronize() noexcept
@@ -59,8 +63,9 @@ namespace ComputerDetail
         {
             return false;
         }
-    #endif
+    #else
         return true;
+    #endif
     }
 
     

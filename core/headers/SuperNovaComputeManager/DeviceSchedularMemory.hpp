@@ -1,10 +1,16 @@
 #pragma once
 #include "ComputerDefAndVect.hpp"
 
+namespace BidirectionalInMemGraph{
 namespace ComputerDetail 
 {
-    static constexpr uint8_t UNSIGNED_ZERO = BidirectionalInMemGraph::UNSIGNED_ZERO;
-    static constexpr uint64_t MAX_SLAB_CELLS = BidirectionalInMemGraph::ADS::MAX_SLAB_CELLS;
+    using CDV = ComputerDefAndVect;
+    using ComputerConf = CDV::ComputerConf;
+    using ComputeExecutionPolicy = CDV::ComputeExecutionPolicy;
+    using ComputerBackend = CDV::ComputerBackend;
+    using ComputerWorkType = CDV::ComputerWorkType;
+
+    static constexpr uint64_t MAX_SLAB_CELLS = ADS::MAX_SLAB_CELLS;
 
     class DeviceSN final
     {
@@ -74,12 +80,6 @@ namespace ComputerDetail
 
     struct SchedulerSN
     {
-        using ComputerConf = BidirectionalInMemGraph::ComputerDefAndVect::ComputerConf;
-        using ComputeExecutionPolicy = BidirectionalInMemGraph::ComputerDefAndVect::ComputeExecutionPolicy;
-        using ComputerBackend = BidirectionalInMemGraph::ComputerDefAndVect::ComputerBackend;
-        using ComputerWorkType = BidirectionalInMemGraph::ComputerDefAndVect::ComputerWorkType;
-        using ComputerFutureUse = BidirectionalInMemGraph::ComputerDefAndVect::ComputerFutureUse;
-
         static constexpr uint64_t SaturateMult(uint64_t value, uint64_t factor) noexcept
         {
             if (value == UNSIGNED_ZERO || factor == UNSIGNED_ZERO) 
@@ -261,8 +261,8 @@ namespace ComputerDetail
             try 
             {
                 probptr = sycl::aligned_alloc_shared(
-                    BidirectionalInMemGraph::ADS::APC_CACHELINE_SIZE, 
-                    BidirectionalInMemGraph::ADS::APC_CACHELINE_SIZE, 
+                    ADS::APC_CACHELINE_SIZE, 
+                    ADS::APC_CACHELINE_SIZE, 
                     *queue
                 );
 
@@ -272,7 +272,7 @@ namespace ComputerDetail
                 }
 
                 queue->memset(
-                    probptr, UNSIGNED_ZERO, BidirectionalInMemGraph::ADS::APC_CACHELINE_SIZE
+                    probptr, UNSIGNED_ZERO, ADS::APC_CACHELINE_SIZE
                 ).wait_and_throw();
                 sycl::free(probptr, *queue);
                 return true;
@@ -304,4 +304,5 @@ namespace ComputerDetail
 
     #endif
     };
+}
 }
