@@ -229,6 +229,43 @@ namespace BidirectionalInMemGraph
             SoftMaxRowFunction SoftMaxRow = nullptr;
             RMSNormFunctionSN RMSNormRows = nullptr;
         };
+
+    #if defined (SN_ACPP_ENABLED)
+        // static constexpr bool CheckInterCoOp_(const sycl::device& device) noexcept
+        // {
+        //     using ATC = sycl::atomic_ref<
+        //         uint64_t, sycl::memory_order::acq_rel, 
+        //         sycl::memory_scope::system, sycl::access::address_space::global_space
+        //     >;
+
+        //     if (
+        //         sizeof(uint64_t) % std::atomic_ref<uint64_t>::required_alignment != UNSIGNED_ZERO ||
+        //         sizeof(uint64_t) % ATC::required_alignment != UNSIGNED_ZERO
+        //     ) 
+        //     {
+        //         return false;
+        //     }
+
+        //     try 
+        //     {
+        //         if (
+        //             !device.has(sycl::aspect::atomic64) ||
+        //             !device.has(sycl::aspect::usm_shared_allocations) ||
+        //             !device.has(sycl::aspect::usm_atomic_shared_allocations)
+        //         ) 
+        //         {
+        //             return false;
+        //         }
+        //         const auto orders = device.get_info<
+        //             sycl::info::device::atomic_memory_order_capabilities>();
+        //         const auto scopes = device.get_info<sycl::info::device::atomic_memory_scope_capabilities>();
+
+
+        //     } catch (declaration) {
+            
+        //     }
+        // }
+    #endif
     };
 
     template<class DT>

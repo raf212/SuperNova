@@ -16,12 +16,12 @@ namespace ComputerDetail
     {
     private:
         bool Availavle_{false};
-        bool SharedUSM_{false};
-        bool ConcurrentSharedUSM_{false};
-        bool Atomic64_{false};
+        bool InterCoOp_{false};
         bool FP16_{false};
         bool FP64_{false};
         std::string Name_{};
+
+        std::atomic_bool AsyncError_{false};
 
     #if defined (SN_ACPP_ENABLED)
         std::optional<sycl::queue> Queue_{};
@@ -33,15 +33,9 @@ namespace ComputerDetail
         DeviceSN& operator=(const DeviceSN&) = delete;
 
         void Reset() noexcept;
-
         bool ConfigureGpu() noexcept;
-
         bool Syncronize() noexcept;
-
         bool Available() const noexcept {return Availavle_;}
-        bool SharedUSM() const noexcept {return SharedUSM_;};
-        bool ConcurrentSharedUSM() const noexcept {return ConcurrentSharedUSM_;}
-        bool Atomic64() const noexcept {return Atomic64_;}
         bool FP16() const noexcept {return FP16_;}
         bool FP64() const noexcept {return FP64_;}
 
@@ -98,71 +92,71 @@ namespace ComputerDetail
             return conf.AllowCPUFallback && policy.AllowCPUFallback;
         }
 
-        static constexpr std::optional<ComputerBackend> Resolve(
-            uint64_t work_units,
-            const ComputerConf& conf,
-            const ComputeExecutionPolicy& policy,
-            const DeviceSN& device,
-            bool shared_slab
-        ) noexcept
-        {
-            ComputerBackend requested = policy.Backend == ComputerBackend::AUTOMATIC ?
-                conf.DefaultBackend : policy.Backend;
+        // static constexpr std::optional<ComputerBackend> Resolve(
+        //     uint64_t work_units,
+        //     const ComputerConf& conf,
+        //     const ComputeExecutionPolicy& policy,
+        //     const DeviceSN& device,
+        //     bool shared_slab
+        // ) noexcept
+        // {
+        //     ComputerBackend requested = policy.Backend == ComputerBackend::AUTOMATIC ?
+        //         conf.DefaultBackend : policy.Backend;
 
-            if (
-                policy.Deterministic && 
-                policy.WorkType == ComputerWorkType::REDUCTION
-            ) 
-            {
-                return ComputerBackend::CPU;
-            }
+        //     if (
+        //         policy.Deterministic && 
+        //         policy.WorkType == ComputerWorkType::REDUCTION
+        //     ) 
+        //     {
+        //         return ComputerBackend::CPU;
+        //     }
 
-            if (requested == ComputerBackend::CPU) 
-            {
-                return ComputerBackend::CPU;
-            }
+        //     if (requested == ComputerBackend::CPU) 
+        //     {
+        //         return ComputerBackend::CPU;
+        //     }
 
-            const bool accel_device_ready = device.Available() && shared_slab;
+        //     const bool accel_device_ready = device.Available() && shared_slab;
 
-            if (requested == ComputerBackend::GPU) 
-            {
-                if (accel_device_ready && device.ConcurrentSharedUSM()) 
-                {
-                    return ComputerBackend::GPU;
-                }
+        //     if (requested == ComputerBackend::GPU) 
+        //     {
+        //         if (accel_device_ready && device.ConcurrentSharedUSM()) 
+        //         {
+        //             return ComputerBackend::GPU;
+        //         }
 
-                return FallBackAllowed(conf, policy) ? std::optional(ComputerBackend::CPU) : std::nullopt;
-            }
+        //         return FallBackAllowed(conf, policy) ? std::optional(ComputerBackend::CPU) : std::nullopt;
+        //     }
 
-            if (requested == ComputerBackend::COOPERATIVE) 
-            {
-                if (accel_device_ready && device.ConcurrentSharedUSM()) 
-                {
-                    return ComputerBackend::COOPERATIVE;
-                }
+        //     if (requested == ComputerBackend::COOPERATIVE) 
+        //     {
+        //         if (accel_device_ready && device.ConcurrentSharedUSM()) 
+        //         {
+        //             return ComputerBackend::COOPERATIVE;
+        //         }
 
-                return FallBackAllowed(conf, policy) ? std::optional(ComputerBackend::CPU) : std::nullopt;
-            }
+        //         return FallBackAllowed(conf, policy) ? std::optional(ComputerBackend::CPU) : std::nullopt;
+        //     }
 
-            if (!accel_device_ready) 
-            {
-                return ComputerBackend::CPU;
-            }
+        //     if (!accel_device_ready) 
+        //     {
+        //         return ComputerBackend::CPU;
+        //     }
 
-            uint64_t threshold = std::max<uint64_t>(1u, conf.GPUWorkThreshold);
+        //     uint64_t threshold = std::max<uint64_t>(1u, conf.GPUWorkThreshold);
 
-            if (policy.FutureUse == ComputerFutureUse::HOST) 
-            {
-                threshold = threshold > UINT64_MAX / 2u ? UINT64_MAX : threshold * 2u;
-            }
+        //     if (policy.FutureUse == ComputerFutureUse::HOST) 
+        //     {
+        //         threshold = threshold > UINT64_MAX / 2u ? UINT64_MAX : threshold * 2u;
+        //     }
 
-            else if (policy.FutureUse == ComputerFutureUse::ACCELERAROR) 
-            {
-                threshold = std::max<uint64_t>(1u, threshold / 2u);
-            }
+        //     else if (policy.FutureUse == ComputerFutureUse::ACCELERAROR) 
+        //     {
+        //         threshold = std::max<uint64_t>(1u, threshold / 2u);
+        //     }
 
-            return work_units >= threshold ? ComputerBackend::GPU : ComputerBackend::CPU;
-        }
+        //     return work_units >= threshold ? ComputerBackend::GPU : ComputerBackend::CPU;
+        // }
 
     };
 
@@ -248,61 +242,61 @@ namespace ComputerDetail
             return IsRangeInside(slab, slab_cells, data, count * sizeof(DT));
         }
 
-    #if defined (SN_ACPP_ENABLED)
-        static constexpr bool ProbShared(DeviceSN& device) noexcept
-        {
-            sycl::queue* queue = device.Queue();
-            if (!queue || !device.SharedUSM()) 
-            {
-                return false;
-            }
+    // #if defined (SN_ACPP_ENABLED)
+    //     static constexpr bool ProbShared(DeviceSN& device) noexcept
+    //     {
+    //         sycl::queue* queue = device.Queue();
+    //         if (!queue || !device.SharedUSM()) 
+    //         {
+    //             return false;
+    //         }
 
-            void* probptr = nullptr;
-            try 
-            {
-                probptr = sycl::aligned_alloc_shared(
-                    ADS::APC_CACHELINE_SIZE, 
-                    ADS::APC_CACHELINE_SIZE, 
-                    *queue
-                );
+    //         void* probptr = nullptr;
+    //         try 
+    //         {
+    //             probptr = sycl::aligned_alloc_shared(
+    //                 ADS::APC_CACHELINE_SIZE, 
+    //                 ADS::APC_CACHELINE_SIZE, 
+    //                 *queue
+    //             );
 
-                if (!probptr) 
-                {
-                    return false;
-                }
+    //             if (!probptr) 
+    //             {
+    //                 return false;
+    //             }
 
-                queue->memset(
-                    probptr, UNSIGNED_ZERO, ADS::APC_CACHELINE_SIZE
-                ).wait_and_throw();
-                sycl::free(probptr, *queue);
-                return true;
-            }
-            catch(...)
-            {
-                if (probptr) 
-                {
-                    try 
-                    {
-                        sycl::free(probptr, *queue);
-                    } catch (...) {}
-                }
-                return false;
-            }
-        }
+    //             queue->memset(
+    //                 probptr, UNSIGNED_ZERO, ADS::APC_CACHELINE_SIZE
+    //             ).wait_and_throw();
+    //             sycl::free(probptr, *queue);
+    //             return true;
+    //         }
+    //         catch(...)
+    //         {
+    //             if (probptr) 
+    //             {
+    //                 try 
+    //                 {
+    //                     sycl::free(probptr, *queue);
+    //                 } catch (...) {}
+    //             }
+    //             return false;
+    //         }
+    //     }
 
-        // static constexpr uint64_t* AllocateShared(
-        //     DeviceSN& device ,
-        //     uint64_t count_of_cells,
-        //     uint64_t allignment
-        // ) noexcept
-        // {
-        //     sycl::queue* queue = device.Queue();
-        //     if (!queue || !device.SharedUSM() || count_of_cells == UNSIGNED_ZERO || count_of_cells > MAX_SLAB_CELLS / size) {
+    //     static constexpr uint64_t* AllocateShared(
+    //         DeviceSN& device ,
+    //         uint64_t count_of_cells,
+    //         uint64_t allignment
+    //     ) noexcept
+    //     {
+    //         sycl::queue* queue = device.Queue();
+    //         if (!queue || !device.SharedUSM() || count_of_cells == UNSIGNED_ZERO || count_of_cells > MAX_SLAB_CELLS / size) {
             
-        //     }
-        // }
+    //         }
+    //     }
 
-    #endif
+    // #endif
     };
 }
 }
