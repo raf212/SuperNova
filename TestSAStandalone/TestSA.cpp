@@ -23,41 +23,44 @@
 #include <vector>
 
 // =============================================================================
-// AdaptiveCpp Patch 1 + Patch 2 validation suite
+// AdaptiveCpp atomic-capability + host/shared USM InterCoOp validation suite
 // =============================================================================
 //
-// This program targets the two atomic-capability patches directly.
+// This standalone program validates the atomic-capability patches at three
+// independent layers:
 //
-// Patch 1 coverage:
-//   * info::device::atomic_memory_order_capabilities
-//   * info::device::atomic_memory_scope_capabilities
-//   * info::context::{atomic_memory_order_capabilities,
-//                    atomic_memory_scope_capabilities}
-//   * device::has(aspect::usm_atomic_shared_allocations) public dispatch
-//   * conservative/fallback capability invariants
-//   * context capability intersection semantics
+//   1. Atomic semantic capability:
+//      * atomic_memory_order_capabilities
+//      * atomic_memory_scope_capabilities
+//      * context intersection semantics
 //
-// Patch 2 coverage:
-//   * backend-specific capability reporting for CUDA/HIP/Level Zero/OpenCL/OpenMP
-//   * device-scope integral/floating atomic execution
-//   * work-group-scope local atomic execution
-//   * system-scope shared-USM integral/floating atomic execution
-//   * 64-bit store/load/exchange/CAS/add/sub/and/or/xor/min/max
-//   * release/acquire publication CPU -> device
-//   * release/acquire publication device -> CPU
-//   * concurrent CPU + device acq_rel fetch_add on one shared uint64_t
-//   * CPU/device compare-exchange races on shared uint64_t cells
-//   * explicit atomic_fence smoke execution
+//   2. USM allocation capability (kept deliberately independent of scope):
+//      * usm_host_allocations / usm_atomic_host_allocations
+//      * usm_shared_allocations / usm_atomic_shared_allocations
+//      * host-USM and shared-USM allocation/access smoke tests
+//
+//   3. Executable atomic semantics:
+//      * device/work-group atomics
+//      * system-scope RMW sequences independently on host USM and shared USM
+//      * CPU -> device release/acquire publication
+//      * device -> CPU release/acquire publication
+//      * CPU/device fetch_add on the same uint64_t
+//      * CPU/device fetch_or + fetch_and on the same uint64_t
+//      * CPU/device compare-exchange races
+//      * explicit system-scope atomic_fence smoke tests
 //
 // IMPORTANT:
-//   A capability that is NOT advertised causes the corresponding execution test
-//   to SKIP. A capability that IS advertised and then fails execution is a FAIL.
-//   This is intentional: unsupported hardware is not a bug, false advertising is.
+//   memory_scope::system is NOT inferred from either USM allocation aspect.
+//   A path qualifies only when BOTH the semantic atomic contract and that
+//   allocation kind's atomic-USM aspect are advertised.
+//
+//   Unsupported capability => corresponding execution test SKIPs.
+//   Advertised capability that fails execution => FAIL.
 //
 // Suggested builds:
-//   acpp -std=c++20 --acpp-targets=generic TestSA-Patch1-Patch2.cpp -o TestSA
-//   acpp -std=c++20 --acpp-targets=cuda:sm_XX TestSA-Patch1-Patch2.cpp -o TestSA
-//   acpp -std=c++20 --acpp-targets=hip:gfxXXXX TestSA-Patch1-Patch2.cpp -o TestSA
+//   acpp -std=c++20 --acpp-targets=generic TestSA.cpp -o TestSA
+//   acpp -std=c++20 --acpp-targets=cuda:sm_XX TestSA.cpp -o TestSA
+//   acpp -std=c++20 --acpp-targets=hip:gfxXXXX TestSA.cpp -o TestSA
 //
 // Useful invocations:
 //   ./TestSA
@@ -74,7 +77,6 @@ using U32 = std::uint32_t;
 using U64 = std::uint64_t;
 
 constexpr std::chrono::milliseconds kHostPollTimeout{5000};
-constexpr std::uint64_t kDeviceSpinLimit = 5'000'000ULL;
 constexpr std::size_t kDefaultStress = 100'000;
 
 struct Options {
@@ -257,32 +259,52 @@ Options ParseOptions(int argc, char** argv) {
   return options;
 }
 
+enum class InteropUsmKind { Host, Shared };
+
+const char* InteropUsmName(InteropUsmKind kind) {
+  return kind == InteropUsmKind::Host ? "host USM" : "shared USM";
+}
+
+const char* InteropUsmShortName(InteropUsmKind kind) {
+  return kind == InteropUsmKind::Host ? "host" : "shared";
+}
+
 template<class T>
-class SharedUsmArray {
+class InteropUsmArray {
 public:
-  SharedUsmArray(sycl::queue& queue, std::size_t count, std::size_t alignment)
-      : queue_{&queue}, count_{count} {
-    ptr_ = sycl::aligned_alloc_shared<T>(alignment, count, queue);
-    if(!ptr_)
-      throw std::runtime_error("sycl::aligned_alloc_shared returned nullptr");
+  InteropUsmArray(sycl::queue& queue, InteropUsmKind kind,
+                  std::size_t count, std::size_t alignment)
+      : queue_{&queue}, kind_{kind}, count_{count} {
+    if(kind == InteropUsmKind::Host)
+      ptr_ = sycl::aligned_alloc_host<T>(alignment, count, queue);
+    else
+      ptr_ = sycl::aligned_alloc_shared<T>(alignment, count, queue);
+
+    if(!ptr_) {
+      throw std::runtime_error(
+          std::string{"sycl::aligned_alloc_"} + InteropUsmShortName(kind) +
+          " returned nullptr");
+    }
   }
 
-  ~SharedUsmArray() {
+  ~InteropUsmArray() {
     if(ptr_)
       sycl::free(ptr_, *queue_);
   }
 
-  SharedUsmArray(const SharedUsmArray&) = delete;
-  SharedUsmArray& operator=(const SharedUsmArray&) = delete;
+  InteropUsmArray(const InteropUsmArray&) = delete;
+  InteropUsmArray& operator=(const InteropUsmArray&) = delete;
 
   T* get() noexcept { return ptr_; }
   const T* get() const noexcept { return ptr_; }
   T& operator[](std::size_t i) noexcept { return ptr_[i]; }
   const T& operator[](std::size_t i) const noexcept { return ptr_[i]; }
   std::size_t size() const noexcept { return count_; }
+  InteropUsmKind kind() const noexcept { return kind_; }
 
 private:
   sycl::queue* queue_ = nullptr;
+  InteropUsmKind kind_ = InteropUsmKind::Shared;
   T* ptr_ = nullptr;
   std::size_t count_ = 0;
 };
@@ -328,6 +350,43 @@ constexpr std::size_t SharedAtomicAlignment() {
   return std::max({alignof(T),
                    SysAtomic::required_alignment,
                    std::atomic_ref<T>::required_alignment});
+}
+
+
+bool HasUsmAllocation(const sycl::device& device, InteropUsmKind kind) {
+  return kind == InteropUsmKind::Host
+      ? device.has(sycl::aspect::usm_host_allocations)
+      : device.has(sycl::aspect::usm_shared_allocations);
+}
+
+bool HasAtomicUsmAllocation(const sycl::device& device, InteropUsmKind kind) {
+  return kind == InteropUsmKind::Host
+      ? device.has(sycl::aspect::usm_atomic_host_allocations)
+      : device.has(sycl::aspect::usm_atomic_shared_allocations);
+}
+
+bool HasSystemAcqRelContract(const sycl::device& device) {
+  const auto orders = device.get_info<
+      sycl::info::device::atomic_memory_order_capabilities>();
+  const auto scopes = device.get_info<
+      sycl::info::device::atomic_memory_scope_capabilities>();
+
+  return Contains(orders, sycl::memory_order::acquire) &&
+         Contains(orders, sycl::memory_order::release) &&
+         Contains(orders, sycl::memory_order::acq_rel) &&
+         Contains(scopes, sycl::memory_scope::system);
+}
+
+bool IsInteropPathQualified(const sycl::device& device, InteropUsmKind kind) {
+  return device.has(sycl::aspect::atomic64) &&
+         HasUsmAllocation(device, kind) &&
+         HasAtomicUsmAllocation(device, kind) &&
+         HasSystemAcqRelContract(device);
+}
+
+bool IsInterCoOpQualified(const sycl::device& device) {
+  return IsInteropPathQualified(device, InteropUsmKind::Host) ||
+         IsInteropPathQualified(device, InteropUsmKind::Shared);
 }
 
 template<class T>
@@ -400,6 +459,9 @@ void TestPatch1DeviceInfo(const sycl::device& device, TestState& state) {
                 "system scope report is accompanied by device scope");
 
   const bool usm_device = device.has(sycl::aspect::usm_device_allocations);
+  const bool usm_host = device.has(sycl::aspect::usm_host_allocations);
+  const bool usm_atomic_host =
+      device.has(sycl::aspect::usm_atomic_host_allocations);
   const bool usm_shared = device.has(sycl::aspect::usm_shared_allocations);
   const bool usm_atomic_shared =
       device.has(sycl::aspect::usm_atomic_shared_allocations);
@@ -412,23 +474,35 @@ void TestPatch1DeviceInfo(const sycl::device& device, TestState& state) {
 
   state.Check(aspect_consistent(sycl::aspect::usm_device_allocations),
               "usm_device_allocations has() agrees with aspects list");
+  state.Check(aspect_consistent(sycl::aspect::usm_host_allocations),
+              "usm_host_allocations has() agrees with aspects list");
+  state.Check(aspect_consistent(sycl::aspect::usm_atomic_host_allocations),
+              "usm_atomic_host_allocations has() agrees with aspects list");
   state.Check(aspect_consistent(sycl::aspect::usm_shared_allocations),
               "usm_shared_allocations has() agrees with aspects list");
   state.Check(aspect_consistent(sycl::aspect::usm_atomic_shared_allocations),
-              "PATCH 1 usm_atomic_shared_allocations dispatch agrees with aspects list");
+              "usm_atomic_shared_allocations has() agrees with aspects list");
   state.Check(aspect_consistent(sycl::aspect::atomic64),
               "atomic64 has() agrees with aspects list");
 
+  if(usm_atomic_host)
+    state.Check(usm_host, "atomic host USM implies host USM");
   if(usm_atomic_shared)
-    state.Check(usm_shared,
-                "atomic shared USM implies shared USM");
+    state.Check(usm_shared, "atomic shared USM implies shared USM");
 
   std::cout << "  atomic64                    : " << atomic64 << '\n';
   std::cout << "  usm_device_allocations      : " << usm_device << '\n';
+  std::cout << "  usm_host_allocations        : " << usm_host << '\n';
+  std::cout << "  usm_atomic_host_allocs      : " << usm_atomic_host << '\n';
   std::cout << "  usm_shared_allocations      : " << usm_shared << '\n';
   std::cout << "  usm_atomic_shared_allocs    : " << usm_atomic_shared << '\n';
-  std::cout << "  acq_rel                     : " << acq_rel << '\n';
+  std::cout << "  acquire/release/acq_rel     : "
+            << (acquire && release && acq_rel) << '\n';
   std::cout << "  system scope                : " << system_scope << '\n';
+  std::cout << "  host-USM InterCoOp path     : "
+            << IsInteropPathQualified(device, InteropUsmKind::Host) << '\n';
+  std::cout << "  shared-USM InterCoOp path   : "
+            << IsInteropPathQualified(device, InteropUsmKind::Shared) << '\n';
 }
 
 // -----------------------------------------------------------------------------
@@ -443,6 +517,8 @@ void TestPatch2BackendReporting(const sycl::device& device, TestState& state) {
   const auto has_order = [&](sycl::memory_order o) { return Contains(orders, o); };
   const auto has_scope = [&](sycl::memory_scope s) { return Contains(scopes, s); };
 
+  const bool atomic_host =
+      device.has(sycl::aspect::usm_atomic_host_allocations);
   const bool atomic_shared =
       device.has(sycl::aspect::usm_atomic_shared_allocations);
 
@@ -460,8 +536,8 @@ void TestPatch2BackendReporting(const sycl::device& device, TestState& state) {
                     has_scope(sycl::memory_scope::work_group) &&
                     has_scope(sycl::memory_scope::device),
                 "PATCH 2 GPU backend reports sub_group/work_group/device scopes");
-    state.Check(has_scope(sycl::memory_scope::system) == atomic_shared,
-                "PATCH 2 GPU system scope matches atomic shared-USM qualification");
+    // Deliberately do NOT equate system scope with either atomic-USM aspect.
+    // Scope and allocation capability are orthogonal dimensions.
     break;
 
   case sycl::backend::omp:
@@ -476,14 +552,14 @@ void TestPatch2BackendReporting(const sycl::device& device, TestState& state) {
                     has_scope(sycl::memory_scope::device) &&
                     has_scope(sycl::memory_scope::system),
                 "PATCH 2 OpenMP reports sub_group/work_group/device/system scopes");
+    state.Check(atomic_host,
+                "PATCH 2 OpenMP reports atomic host USM");
     state.Check(atomic_shared,
                 "PATCH 2 OpenMP reports atomic shared USM");
     break;
 
   case sycl::backend::metal:
   case sycl::backend::vk:
-    // These backends were not given Patch-2-specific overrides. Verify that the
-    // Patch-1 conservative fallback remains usable rather than inventing claims.
     state.Check(has_order(sycl::memory_order::relaxed),
                 "unpatched backend retains relaxed baseline order");
     state.Check(has_scope(sycl::memory_scope::sub_group) &&
@@ -657,9 +733,9 @@ void RunIntegralDeviceUsmSequence(sycl::queue& q, TestState& state,
 }
 
 template<class T, sycl::memory_scope Scope, sycl::memory_order Order>
-void RunIntegralSharedSequence(sycl::queue& q, TestState& state,
-                               std::string_view label) {
-  SharedUsmArray<T> memory{q, 17, SharedAtomicAlignment<T>()};
+void RunIntegralInteropSequence(sycl::queue& q, TestState& state,
+                                InteropUsmKind kind, std::string_view label) {
+  InteropUsmArray<T> memory{q, kind, 17, SharedAtomicAlignment<T>()};
   for(std::size_t i = 0; i < memory.size(); ++i)
     memory[i] = T{};
 
@@ -764,9 +840,9 @@ void RunFloatingDeviceUsmSequence(sycl::queue& q, TestState& state,
 }
 
 template<class T, sycl::memory_scope Scope, sycl::memory_order Order>
-void RunFloatingSharedSequence(sycl::queue& q, TestState& state,
-                               std::string_view label) {
-  SharedUsmArray<T> memory{q, 10, SharedAtomicAlignment<T>()};
+void RunFloatingInteropSequence(sycl::queue& q, TestState& state,
+                                InteropUsmKind kind, std::string_view label) {
+  InteropUsmArray<T> memory{q, kind, 10, SharedAtomicAlignment<T>()};
   for(std::size_t i = 0; i < memory.size(); ++i)
     memory[i] = T{};
   T* ptr = memory.get();
@@ -874,22 +950,42 @@ void TestDeviceContention64(sycl::queue& q, const sycl::device& device,
 // runtime failures in the Patch-2 fence path; publication semantics are tested
 // separately below using real host/device synchronization.
 // -----------------------------------------------------------------------------
+void TestUsmAllocationSmoke(sycl::queue& q, const sycl::device& device,
+                            TestState& state, InteropUsmKind kind) {
+  const std::string prefix = std::string{InteropUsmName(kind)} + " allocation";
+  if(!HasUsmAllocation(device, kind)) {
+    state.Skip(prefix + ": allocation aspect unavailable");
+    return;
+  }
+
+  InteropUsmArray<U64> memory{q, kind, 2, alignof(U64)};
+  constexpr U64 magic = 0x1234'5678'9ABC'DEF0ULL;
+  memory[0] = magic;
+  memory[1] = 0;
+  U64* p = memory.get();
+
+  q.single_task([=]() { p[1] = p[0] ^ U64{0x55}; }).wait_and_throw();
+  state.Check(memory[1] == (magic ^ U64{0x55}),
+              prefix + ": host write -> device read/write -> host read works");
+}
+
 void TestAtomicFenceSmoke(sycl::queue& q, const sycl::device& device,
-                          TestState& state) {
+                          TestState& state, InteropUsmKind kind) {
   const auto orders = device.get_info<
       sycl::info::device::atomic_memory_order_capabilities>();
   const auto scopes = device.get_info<
       sycl::info::device::atomic_memory_scope_capabilities>();
+  const std::string prefix = std::string{InteropUsmName(kind)} + " system fence";
 
   if(!Contains(orders, sycl::memory_order::acquire) ||
      !Contains(orders, sycl::memory_order::release) ||
      !Contains(scopes, sycl::memory_scope::system) ||
-     !device.has(sycl::aspect::usm_shared_allocations)) {
-    state.Skip("system atomic_fence smoke prerequisites unavailable");
+     !HasAtomicUsmAllocation(device, kind)) {
+    state.Skip(prefix + ": prerequisites unavailable");
     return;
   }
 
-  SharedUsmArray<U32> marker{q, 1, alignof(U32)};
+  InteropUsmArray<U32> marker{q, kind, 1, SharedAtomicAlignment<U32>()};
   marker[0] = 0;
   U32* ptr = marker.get();
   q.single_task([=]() {
@@ -900,72 +996,44 @@ void TestAtomicFenceSmoke(sycl::queue& q, const sycl::device& device,
                         sycl::memory_scope::system);
    }).wait_and_throw();
 
-  state.Check(marker[0] == 1,
-              "system-scope acquire/release atomic_fence path executes");
+  state.Check(marker[0] == 1, prefix + ": acquire/release path executes");
 }
 
-// -----------------------------------------------------------------------------
-// CPU -> GPU release/acquire publication on shared uint64 data.
-// The kernel runs on a separate host thread so even a synchronous backend can
-// wait for a host publication without deadlocking the test driver thread.
-// -----------------------------------------------------------------------------
-void TestCpuToDevicePublication64(sycl::queue& q, TestState& state) {
-  // [0]=ready, [1]=go/flag, [2]=payload, [3]=observed, [4]=timeout marker
-  SharedUsmArray<U64> m{q, 5, SharedAtomicAlignment<U64>()};
+// Host release -> device system-scope acquire. The host publishes before the
+// kernel is submitted, avoiding a scheduler-dependent device spin loop while
+// still validating cross-agent release/acquire visibility on the allocation.
+void TestCpuToDevicePublication64(sycl::queue& q, TestState& state,
+                                  InteropUsmKind kind) {
+  InteropUsmArray<U64> m{q, kind, 4, SharedAtomicAlignment<U64>()};
   for(std::size_t i = 0; i < m.size(); ++i)
     m[i] = 0;
 
-  U64* p = m.get();
-  std::exception_ptr worker_error;
-
-  std::thread worker([&] {
-    try {
-      q.single_task([=]() {
-         GlobalAtomic<U64, sycl::memory_scope::system> ready{p[0]};
-         GlobalAtomic<U64, sycl::memory_scope::system> flag{p[1]};
-         ready.store(1, sycl::memory_order::release,
-                     sycl::memory_scope::system);
-
-         U64 seen = 0;
-         for(U64 spin = 0; spin < kDeviceSpinLimit && seen == 0; ++spin)
-           seen = flag.load(sycl::memory_order::acquire,
-                            sycl::memory_scope::system);
-
-         if(seen == 1)
-           p[3] = p[2];
-         else
-           p[4] = 1;
-       }).wait_and_throw();
-    } catch(...) {
-      worker_error = std::current_exception();
-    }
-  });
-
-  const bool ready_seen = HostWaitEqual(m[0], U64{1});
-  if(!ready_seen)
-    state.Fail("CPU->device publication: host did not observe device ready flag");
-  else
-    state.Pass("CPU->device publication: host observed device ready flag");
-
   constexpr U64 magic = 0xD1CE'B00C'CAFEBABEULL;
-  m[2] = magic;
-  std::atomic_ref<U64>{m[1]}.store(1, std::memory_order_release);
+  m[1] = magic;
+  std::atomic_ref<U64>{m[0]}.store(1, std::memory_order_release);
 
-  worker.join();
-  RethrowThreadException(worker_error);
+  U64* p = m.get();
+  q.single_task([=]() {
+     GlobalAtomic<U64, sycl::memory_scope::system> flag{p[0]};
+     const U64 seen = flag.load(sycl::memory_order::acquire,
+                                sycl::memory_scope::system);
+     p[2] = seen;
+     if(seen == 1)
+       p[3] = p[1];
+   }).wait_and_throw();
 
-  state.Check(m[4] == 0,
-              "CPU->device publication: device observed release flag before spin timeout");
+  const std::string prefix = std::string{InteropUsmName(kind)} + " CPU->device";
+  state.Check(m[2] == 1, prefix + ": device acquire observes CPU release store");
   state.Check(m[3] == magic,
-              "CPU release + device system-scope acquire publishes plain payload");
+              prefix + ": CPU release/device acquire publishes plain payload");
 }
 
-// -----------------------------------------------------------------------------
-// GPU -> CPU release/acquire publication.
-// -----------------------------------------------------------------------------
-void TestDeviceToCpuPublication64(sycl::queue& q, TestState& state) {
-  // [0]=flag, [1]=payload
-  SharedUsmArray<U64> m{q, 2, SharedAtomicAlignment<U64>()};
+// Device release -> host acquire. The device never waits for the host; the host
+// polls with a real wall-clock timeout, so this cannot fail merely because a CPU
+// backend consumed an arbitrary fixed spin count too quickly.
+void TestDeviceToCpuPublication64(sycl::queue& q, TestState& state,
+                                  InteropUsmKind kind) {
+  InteropUsmArray<U64> m{q, kind, 2, SharedAtomicAlignment<U64>()};
   m[0] = 0;
   m[1] = 0;
   U64* p = m.get();
@@ -986,126 +1054,162 @@ void TestDeviceToCpuPublication64(sycl::queue& q, TestState& state) {
   });
 
   const bool observed = HostWaitEqual(m[0], U64{1});
-  if(observed) {
-    state.Pass("device->CPU publication: host acquired device release flag");
-    state.Check(m[1] == magic,
-                "device system-scope release + CPU acquire publishes plain payload");
-  } else {
-    state.Fail("device->CPU publication: host timed out waiting for release flag");
-  }
-
   worker.join();
   RethrowThreadException(worker_error);
+
+  const std::string prefix = std::string{InteropUsmName(kind)} + " device->CPU";
+  state.Check(observed, prefix + ": CPU acquire observes device release store");
+  if(observed)
+    state.Check(m[1] == magic,
+                prefix + ": device release/CPU acquire publishes plain payload");
 }
 
-// -----------------------------------------------------------------------------
-// CPU + device simultaneous fetch_add on the same uint64_t.
-// This is the strongest practical InterCoOp stress in this file.
-// -----------------------------------------------------------------------------
+// CPU and device both fetch_add the same word. A host-side start gate aligns the
+// CPU loop with kernel submission without making the device spin waiting for a
+// host flag. The exact 2*N result verifies one coherent atomic modification order.
 void TestConcurrentHostDeviceAdd64(sycl::queue& q, TestState& state,
-                                   std::size_t stress) {
-  // [0]=counter, [1]=ready, [2]=go, [3]=device timed out, [4]=done
-  SharedUsmArray<U64> m{q, 5, SharedAtomicAlignment<U64>()};
-  for(std::size_t i = 0; i < m.size(); ++i)
-    m[i] = 0;
-
+                                   InteropUsmKind kind, std::size_t stress) {
+  InteropUsmArray<U64> m{q, kind, 1, SharedAtomicAlignment<U64>()};
+  m[0] = 0;
   U64* p = m.get();
   const U64 iterations = static_cast<U64>(stress);
+
+  std::atomic<bool> worker_ready{false};
+  std::atomic<bool> start{false};
   std::exception_ptr worker_error;
 
   std::thread worker([&] {
     try {
+      worker_ready.store(true, std::memory_order_release);
+      while(!start.load(std::memory_order_acquire))
+        std::this_thread::yield();
+
       q.single_task([=]() {
          GlobalAtomic<U64, sycl::memory_scope::system> counter{p[0]};
-         GlobalAtomic<U64, sycl::memory_scope::system> ready{p[1]};
-         GlobalAtomic<U64, sycl::memory_scope::system> go{p[2]};
-         GlobalAtomic<U64, sycl::memory_scope::system> done{p[4]};
-
-         ready.store(1, sycl::memory_order::release,
-                     sycl::memory_scope::system);
-
-         U64 started = 0;
-         for(U64 spin = 0; spin < kDeviceSpinLimit && started == 0; ++spin)
-           started = go.load(sycl::memory_order::acquire,
-                             sycl::memory_scope::system);
-
-         if(started != 1) {
-           p[3] = 1;
-           done.store(1, sycl::memory_order::release,
-                      sycl::memory_scope::system);
-           return;
-         }
-
          for(U64 i = 0; i < iterations; ++i)
            counter.fetch_add(1, sycl::memory_order::acq_rel,
                              sycl::memory_scope::system);
-
-         done.store(1, sycl::memory_order::release,
-                    sycl::memory_scope::system);
        }).wait_and_throw();
     } catch(...) {
       worker_error = std::current_exception();
     }
   });
 
-  const bool ready_seen = HostWaitEqual(m[1], U64{1});
-  state.Check(ready_seen,
-              "concurrent add: CPU observes device ready release");
+  while(!worker_ready.load(std::memory_order_acquire))
+    std::this_thread::yield();
 
   std::atomic_ref<U64> counter{m[0]};
-  std::atomic_ref<U64> go{m[2]};
-  go.store(1, std::memory_order_release);
-
+  start.store(true, std::memory_order_release);
   for(U64 i = 0; i < iterations; ++i)
     counter.fetch_add(1, std::memory_order_acq_rel);
 
   worker.join();
   RethrowThreadException(worker_error);
 
-  state.Check(m[3] == 0,
-              "concurrent add: device observed host go release before timeout");
-  state.Check(m[4] == 1,
-              "concurrent add: device completed its atomic loop");
-
   const U64 expected = iterations * 2;
   const U64 actual = counter.load(std::memory_order_acquire);
-  if(actual == expected) {
-    state.Pass("concurrent CPU + device uint64 fetch_add has exact 2*N result");
-  } else {
-    std::ostringstream out;
-    out << "concurrent CPU + device uint64 fetch_add expected " << expected
-        << " got " << actual;
-    state.Fail(out.str());
-  }
+  std::ostringstream label;
+  label << InteropUsmName(kind)
+        << " concurrent CPU/device uint64 fetch_add exact 2*N ("
+        << expected << ')';
+  state.Check(actual == expected, label.str());
 }
 
-// -----------------------------------------------------------------------------
-// Batch of independent CPU/device CAS races. Exactly one side may change each
-// cell from zero. This catches incoherent compare-exchange behavior.
-// -----------------------------------------------------------------------------
-void TestHostDeviceCasRace64(sycl::queue& q, TestState& state) {
+// Mixed host/device bitwise RMW on the same word. OR and AND are commutative,
+// so the final state is deterministic regardless of which participant wins the
+// race first while still exercising the common atomic domain.
+void TestHostDeviceBitwise64(sycl::queue& q, TestState& state,
+                             InteropUsmKind kind) {
+  InteropUsmArray<U64> m{q, kind, 1, SharedAtomicAlignment<U64>()};
+  U64* p = m.get();
+  const std::string prefix = std::string{InteropUsmName(kind)} + " CPU/device";
+
+  auto run = [&](bool do_or) {
+    m[0] = do_or ? U64{0} : U64{0xF};
+    std::atomic<bool> worker_ready{false};
+    std::atomic<bool> start{false};
+    std::exception_ptr worker_error;
+
+    std::thread worker([&] {
+      try {
+        worker_ready.store(true, std::memory_order_release);
+        while(!start.load(std::memory_order_acquire))
+          std::this_thread::yield();
+        q.single_task([=]() {
+           GlobalAtomic<U64, sycl::memory_scope::system> a{p[0]};
+           if(do_or)
+             a.fetch_or(U64{0x2}, sycl::memory_order::acq_rel,
+                        sycl::memory_scope::system);
+           else
+             a.fetch_and(~U64{0x2}, sycl::memory_order::acq_rel,
+                         sycl::memory_scope::system);
+         }).wait_and_throw();
+      } catch(...) {
+        worker_error = std::current_exception();
+      }
+    });
+
+    while(!worker_ready.load(std::memory_order_acquire))
+      std::this_thread::yield();
+    std::atomic_ref<U64> host{m[0]};
+    start.store(true, std::memory_order_release);
+    if(do_or)
+      host.fetch_or(U64{0x1}, std::memory_order_acq_rel);
+    else
+      host.fetch_and(~U64{0x1}, std::memory_order_acq_rel);
+
+    worker.join();
+    RethrowThreadException(worker_error);
+    return host.load(std::memory_order_acquire);
+  };
+
+  state.Check(run(true) == U64{0x3},
+              prefix + " fetch_or merges both participants exactly");
+  state.Check(run(false) == U64{0xC},
+              prefix + " fetch_and merges both participants exactly");
+}
+
+void TestHostDeviceCasRace64(sycl::queue& q, TestState& state,
+                             InteropUsmKind kind) {
   constexpr std::size_t N = 1024;
-  SharedUsmArray<U64> cells{q, N, SharedAtomicAlignment<U64>()};
-  SharedUsmArray<U64> gpu_success{q, N, SharedAtomicAlignment<U64>()};
+  InteropUsmArray<U64> cells{q, kind, N, SharedAtomicAlignment<U64>()};
+  InteropUsmArray<U64> device_success{q, kind, N, SharedAtomicAlignment<U64>()};
   for(std::size_t i = 0; i < N; ++i) {
     cells[i] = 0;
-    gpu_success[i] = 0;
+    device_success[i] = 0;
   }
 
   U64* c = cells.get();
-  U64* g = gpu_success.get();
+  U64* d = device_success.get();
+  std::atomic<bool> worker_ready{false};
+  std::atomic<bool> start{false};
+  std::exception_ptr worker_error;
 
-  auto event = q.parallel_for(sycl::range<1>{N}, [=](sycl::id<1> id) {
-    const std::size_t i = id[0];
-    GlobalAtomic<U64, sycl::memory_scope::system> a{c[i]};
-    U64 expected = 0;
-    const bool won = a.compare_exchange_strong(
-        expected, U64{2},
-        sycl::memory_order::acq_rel,
-        sycl::memory_order::acquire,
-        sycl::memory_scope::system);
-    g[i] = won ? 1 : 0;
+  std::thread worker([&] {
+    try {
+      worker_ready.store(true, std::memory_order_release);
+      while(!start.load(std::memory_order_acquire))
+        std::this_thread::yield();
+
+      q.parallel_for(sycl::range<1>{N}, [=](sycl::id<1> id) {
+        const std::size_t i = id[0];
+        GlobalAtomic<U64, sycl::memory_scope::system> a{c[i]};
+        U64 expected = 0;
+        const bool won = a.compare_exchange_strong(
+            expected, U64{2},
+            sycl::memory_order::acq_rel,
+            sycl::memory_order::acquire,
+            sycl::memory_scope::system);
+        d[i] = won ? 1 : 0;
+      }).wait_and_throw();
+    } catch(...) {
+      worker_error = std::current_exception();
+    }
   });
+
+  while(!worker_ready.load(std::memory_order_acquire))
+    std::this_thread::yield();
+  start.store(true, std::memory_order_release);
 
   std::vector<bool> host_success(N, false);
   for(std::size_t i = 0; i < N; ++i) {
@@ -1117,41 +1221,143 @@ void TestHostDeviceCasRace64(sycl::queue& q, TestState& state) {
         std::memory_order_acquire);
   }
 
-  event.wait_and_throw();
+  worker.join();
+  RethrowThreadException(worker_error);
 
   std::size_t bad = 0;
   for(std::size_t i = 0; i < N; ++i) {
     const U64 value = std::atomic_ref<U64>{cells[i]}.load(std::memory_order_acquire);
-    const bool gpu_won = gpu_success[i] != 0;
+    const bool device_won = device_success[i] != 0;
     const bool host_won = host_success[i];
-    const bool exactly_one = gpu_won != host_won;
-    const bool value_matches = (gpu_won && value == 2) || (host_won && value == 1);
+    const bool exactly_one = device_won != host_won;
+    const bool value_matches =
+        (device_won && value == 2) || (host_won && value == 1);
     if(!exactly_one || !value_matches)
       ++bad;
   }
 
-  if(bad == 0)
-    state.Pass("1024 CPU/device CAS races each have exactly one coherent winner");
-  else {
-    std::ostringstream out;
-    out << "CPU/device CAS race produced " << bad << " invalid cells out of " << N;
-    state.Fail(out.str());
-  }
+  std::ostringstream label;
+  label << InteropUsmName(kind)
+        << " 1024 CPU/device CAS races each have exactly one coherent winner";
+  state.Check(bad == 0, label.str());
 }
 
-bool IsInterCoOpQualified(const sycl::device& device) {
+void TestInteropSemanticSuite(sycl::queue& q, const sycl::device& device,
+                              TestState& state, InteropUsmKind kind,
+                              std::size_t stress) {
+  const std::string path = InteropUsmName(kind);
+  if(!IsInteropPathQualified(device, kind)) {
+    state.Skip(path + ": uint64 host/device InterCoOp contract not advertised");
+    return;
+  }
+
+  std::cout << "\n  -- " << path << " CPU/device InterCoOp semantics --\n";
+  TestCpuToDevicePublication64(q, state, kind);
+  TestDeviceToCpuPublication64(q, state, kind);
+  TestConcurrentHostDeviceAdd64(q, state, kind, stress);
+  TestHostDeviceBitwise64(q, state, kind);
+  TestHostDeviceCasRace64(q, state, kind);
+}
+
+void RunSystemScopePathTests(sycl::queue& q, const sycl::device& device,
+                             TestState& state, const Options& options,
+                             InteropUsmKind kind) {
   const auto orders = device.get_info<
       sycl::info::device::atomic_memory_order_capabilities>();
   const auto scopes = device.get_info<
       sycl::info::device::atomic_memory_scope_capabilities>();
 
-  return device.has(sycl::aspect::atomic64) &&
-         device.has(sycl::aspect::usm_shared_allocations) &&
-         device.has(sycl::aspect::usm_atomic_shared_allocations) &&
-         Contains(orders, sycl::memory_order::acq_rel) &&
-         Contains(orders, sycl::memory_order::acquire) &&
-         Contains(orders, sycl::memory_order::release) &&
-         Contains(scopes, sycl::memory_scope::system);
+  const bool acq_rel = Contains(orders, sycl::memory_order::acq_rel);
+  const bool seq_cst = Contains(orders, sycl::memory_order::seq_cst);
+  const bool system_scope = Contains(scopes, sycl::memory_scope::system);
+  const bool atomic64 = device.has(sycl::aspect::atomic64);
+  const bool fp64 = device.has(sycl::aspect::fp64);
+  const bool allocation = HasUsmAllocation(device, kind);
+  const bool atomic_allocation = HasAtomicUsmAllocation(device, kind);
+
+  std::cout << "\n  -- " << InteropUsmName(kind) << " path --\n";
+  std::cout << "  allocation aspect           : " << allocation << '\n';
+  std::cout << "  atomic allocation aspect    : " << atomic_allocation << '\n';
+  std::cout << "  system scope                : " << system_scope << '\n';
+  std::cout << "  acq_rel                     : " << acq_rel << '\n';
+  std::cout << "  uint64 InterCoOp qualified  : "
+            << IsInteropPathQualified(device, kind) << '\n';
+
+  TestUsmAllocationSmoke(q, device, state, kind);
+
+  if(!(system_scope && allocation && atomic_allocation)) {
+    state.Skip(std::string{InteropUsmName(kind)} +
+               ": system-scope atomic RMW suite prerequisites unavailable");
+    return;
+  }
+
+  const auto label = [&](std::string_view what) {
+    return std::string{InteropUsmName(kind)} + " " + std::string{what};
+  };
+
+  RunIntegralInteropSequence<U32, sycl::memory_scope::system,
+                             sycl::memory_order::relaxed>(
+      q, state, kind, label("uint32 system-scope complete RMW / relaxed"));
+  RunFloatingInteropSequence<float, sycl::memory_scope::system,
+                             sycl::memory_order::relaxed>(
+      q, state, kind, label("float system-scope RMW / relaxed"));
+
+  if(acq_rel) {
+    RunIntegralInteropSequence<U32, sycl::memory_scope::system,
+                               sycl::memory_order::acq_rel>(
+        q, state, kind, label("uint32 system-scope complete RMW / acq_rel"));
+    RunFloatingInteropSequence<float, sycl::memory_scope::system,
+                               sycl::memory_order::acq_rel>(
+        q, state, kind, label("float system-scope RMW / acq_rel"));
+  }
+
+  if(seq_cst) {
+    RunIntegralInteropSequence<U32, sycl::memory_scope::system,
+                               sycl::memory_order::seq_cst>(
+        q, state, kind, label("uint32 system-scope complete RMW / seq_cst"));
+    RunFloatingInteropSequence<float, sycl::memory_scope::system,
+                               sycl::memory_order::seq_cst>(
+        q, state, kind, label("float system-scope RMW / seq_cst"));
+  }
+
+  if(atomic64) {
+    RunIntegralInteropSequence<U64, sycl::memory_scope::system,
+                               sycl::memory_order::relaxed>(
+        q, state, kind, label("uint64 system-scope complete RMW / relaxed"));
+    if(acq_rel)
+      RunIntegralInteropSequence<U64, sycl::memory_scope::system,
+                                 sycl::memory_order::acq_rel>(
+          q, state, kind, label("uint64 system-scope complete RMW / acq_rel"));
+    if(seq_cst)
+      RunIntegralInteropSequence<U64, sycl::memory_scope::system,
+                                 sycl::memory_order::seq_cst>(
+          q, state, kind, label("uint64 system-scope complete RMW / seq_cst"));
+  } else {
+    state.Skip(label("uint64 system-scope sequence: atomic64 unavailable"));
+  }
+
+  if(fp64 && atomic64) {
+    RunFloatingInteropSequence<double, sycl::memory_scope::system,
+                               sycl::memory_order::relaxed>(
+        q, state, kind, label("double system-scope RMW / relaxed"));
+    if(acq_rel)
+      RunFloatingInteropSequence<double, sycl::memory_scope::system,
+                                 sycl::memory_order::acq_rel>(
+          q, state, kind, label("double system-scope RMW / acq_rel"));
+    if(seq_cst)
+      RunFloatingInteropSequence<double, sycl::memory_scope::system,
+                                 sycl::memory_order::seq_cst>(
+          q, state, kind, label("double system-scope RMW / seq_cst"));
+  } else {
+    state.Skip(label("double system-scope sequence: fp64+atomic64 unavailable"));
+  }
+
+  TestAtomicFenceSmoke(q, device, state, kind);
+
+  // The synchronization suite is valid for any device exposing this contract.
+  // On a GPU it is literally CPU<->GPU; on the OpenMP device it validates the
+  // same host/system atomic domain without claiming heterogeneous hardware.
+  TestInteropSemanticSuite(q, device, state, kind, options.stress);
 }
 
 void TestPatch2Execution(const sycl::device& device, TestState& state,
@@ -1166,56 +1372,51 @@ void TestPatch2Execution(const sycl::device& device, TestState& state,
   const bool acq_rel = Contains(orders, sycl::memory_order::acq_rel);
   const bool seq_cst = Contains(orders, sycl::memory_order::seq_cst);
   const bool device_scope = Contains(scopes, sycl::memory_scope::device);
-  const bool system_scope = Contains(scopes, sycl::memory_scope::system);
   const bool usm_device = device.has(sycl::aspect::usm_device_allocations);
-  const bool usm_shared = device.has(sycl::aspect::usm_shared_allocations);
-  const bool atomic_shared =
-      device.has(sycl::aspect::usm_atomic_shared_allocations);
   const bool atomic64 = device.has(sycl::aspect::atomic64);
   const bool fp64 = device.has(sycl::aspect::fp64);
 
-  std::cout << "\n  -- Patch 2 execution tests --\n";
-
+  std::cout << "\n  -- Device/work-group atomic execution --\n";
   TestWorkGroupAtomic(q, device, state);
 
   if(device_scope && usm_device) {
-    RunIntegralDeviceUsmSequence<U32, sycl::memory_scope::device, sycl::memory_order::relaxed>(
-        q, state,
-        "uint32 device-scope complete RMW sequence / relaxed");
-    RunFloatingDeviceUsmSequence<float, sycl::memory_scope::device, sycl::memory_order::relaxed>(
-        q, state,
-        "float device-scope RMW sequence / relaxed");
+    RunIntegralDeviceUsmSequence<U32, sycl::memory_scope::device,
+                                 sycl::memory_order::relaxed>(
+        q, state, "uint32 device-scope complete RMW / relaxed");
+    RunFloatingDeviceUsmSequence<float, sycl::memory_scope::device,
+                                 sycl::memory_order::relaxed>(
+        q, state, "float device-scope RMW / relaxed");
 
     if(acq_rel) {
-      RunIntegralDeviceUsmSequence<U32, sycl::memory_scope::device, sycl::memory_order::acq_rel>(
-          q, state,
-          "uint32 device-scope complete RMW sequence / acq_rel");
-      RunFloatingDeviceUsmSequence<float, sycl::memory_scope::device, sycl::memory_order::acq_rel>(
-          q, state,
-          "float device-scope RMW sequence / acq_rel");
+      RunIntegralDeviceUsmSequence<U32, sycl::memory_scope::device,
+                                   sycl::memory_order::acq_rel>(
+          q, state, "uint32 device-scope complete RMW / acq_rel");
+      RunFloatingDeviceUsmSequence<float, sycl::memory_scope::device,
+                                   sycl::memory_order::acq_rel>(
+          q, state, "float device-scope RMW / acq_rel");
     }
 
     if(seq_cst) {
-      RunIntegralDeviceUsmSequence<U32, sycl::memory_scope::device, sycl::memory_order::seq_cst>(
-          q, state,
-          "uint32 device-scope complete RMW sequence / seq_cst");
-      RunFloatingDeviceUsmSequence<float, sycl::memory_scope::device, sycl::memory_order::seq_cst>(
-          q, state,
-          "float device-scope RMW sequence / seq_cst");
+      RunIntegralDeviceUsmSequence<U32, sycl::memory_scope::device,
+                                   sycl::memory_order::seq_cst>(
+          q, state, "uint32 device-scope complete RMW / seq_cst");
+      RunFloatingDeviceUsmSequence<float, sycl::memory_scope::device,
+                                   sycl::memory_order::seq_cst>(
+          q, state, "float device-scope RMW / seq_cst");
     }
 
     if(atomic64) {
-      RunIntegralDeviceUsmSequence<U64, sycl::memory_scope::device, sycl::memory_order::relaxed>(
-          q, state,
-          "uint64 device-scope complete RMW sequence / relaxed");
+      RunIntegralDeviceUsmSequence<U64, sycl::memory_scope::device,
+                                   sycl::memory_order::relaxed>(
+          q, state, "uint64 device-scope complete RMW / relaxed");
       if(acq_rel)
-        RunIntegralDeviceUsmSequence<U64, sycl::memory_scope::device, sycl::memory_order::acq_rel>(
-            q, state,
-            "uint64 device-scope complete RMW sequence / acq_rel");
+        RunIntegralDeviceUsmSequence<U64, sycl::memory_scope::device,
+                                     sycl::memory_order::acq_rel>(
+            q, state, "uint64 device-scope complete RMW / acq_rel");
       if(seq_cst)
-        RunIntegralDeviceUsmSequence<U64, sycl::memory_scope::device, sycl::memory_order::seq_cst>(
-            q, state,
-            "uint64 device-scope complete RMW sequence / seq_cst");
+        RunIntegralDeviceUsmSequence<U64, sycl::memory_scope::device,
+                                     sycl::memory_order::seq_cst>(
+            q, state, "uint64 device-scope complete RMW / seq_cst");
       TestDeviceContention64(q, device, state, options.stress);
     } else {
       state.Skip("uint64 device-scope sequence: atomic64 not advertised");
@@ -1223,17 +1424,17 @@ void TestPatch2Execution(const sycl::device& device, TestState& state,
     }
 
     if(fp64 && atomic64) {
-      RunFloatingDeviceUsmSequence<double, sycl::memory_scope::device, sycl::memory_order::relaxed>(
-          q, state,
-          "double device-scope RMW sequence / relaxed");
+      RunFloatingDeviceUsmSequence<double, sycl::memory_scope::device,
+                                   sycl::memory_order::relaxed>(
+          q, state, "double device-scope RMW / relaxed");
       if(acq_rel)
-        RunFloatingDeviceUsmSequence<double, sycl::memory_scope::device, sycl::memory_order::acq_rel>(
-            q, state,
-            "double device-scope RMW sequence / acq_rel");
+        RunFloatingDeviceUsmSequence<double, sycl::memory_scope::device,
+                                     sycl::memory_order::acq_rel>(
+            q, state, "double device-scope RMW / acq_rel");
       if(seq_cst)
-        RunFloatingDeviceUsmSequence<double, sycl::memory_scope::device, sycl::memory_order::seq_cst>(
-            q, state,
-            "double device-scope RMW sequence / seq_cst");
+        RunFloatingDeviceUsmSequence<double, sycl::memory_scope::device,
+                                     sycl::memory_order::seq_cst>(
+            q, state, "double device-scope RMW / seq_cst");
     } else {
       state.Skip("double device-scope atomic sequence: fp64+atomic64 unavailable");
     }
@@ -1241,80 +1442,22 @@ void TestPatch2Execution(const sycl::device& device, TestState& state,
     state.Skip("device-scope RMW suite: device scope or device USM unavailable");
   }
 
-  if(system_scope && usm_shared && atomic_shared) {
-    RunIntegralSharedSequence<U32, sycl::memory_scope::system, sycl::memory_order::relaxed>(
-        q, state,
-        "uint32 system-scope complete RMW sequence / relaxed");
-    RunFloatingSharedSequence<float, sycl::memory_scope::system, sycl::memory_order::relaxed>(
-        q, state,
-        "float system-scope RMW sequence / relaxed");
-
-    if(acq_rel) {
-      RunIntegralSharedSequence<U32, sycl::memory_scope::system, sycl::memory_order::acq_rel>(
-          q, state,
-          "uint32 system-scope complete RMW sequence / acq_rel");
-      RunFloatingSharedSequence<float, sycl::memory_scope::system, sycl::memory_order::acq_rel>(
-          q, state,
-          "float system-scope RMW sequence / acq_rel");
+  // Crucially, host and shared USM are evaluated independently. A backend can
+  // expose system scope while only one (or neither) allocation kind is atomic.
+  const auto run_path = [&](InteropUsmKind kind) {
+    try {
+      RunSystemScopePathTests(q, device, state, options, kind);
+    } catch(const sycl::exception& e) {
+      state.Fail(std::string{InteropUsmName(kind)} +
+                 ": SYCL exception while testing path: " + e.what());
+    } catch(const std::exception& e) {
+      state.Fail(std::string{InteropUsmName(kind)} +
+                 ": std::exception while testing path: " + e.what());
     }
+  };
 
-    if(seq_cst) {
-      RunIntegralSharedSequence<U32, sycl::memory_scope::system, sycl::memory_order::seq_cst>(
-          q, state,
-          "uint32 system-scope complete RMW sequence / seq_cst");
-      RunFloatingSharedSequence<float, sycl::memory_scope::system, sycl::memory_order::seq_cst>(
-          q, state,
-          "float system-scope RMW sequence / seq_cst");
-    }
-
-    if(atomic64) {
-      RunIntegralSharedSequence<U64, sycl::memory_scope::system, sycl::memory_order::relaxed>(
-          q, state,
-          "uint64 system-scope complete RMW sequence / relaxed");
-      if(acq_rel) {
-        RunIntegralSharedSequence<U64, sycl::memory_scope::system, sycl::memory_order::acq_rel>(
-            q, state,
-            "uint64 system-scope complete RMW sequence / acq_rel");
-      }
-      if(seq_cst) {
-        RunIntegralSharedSequence<U64, sycl::memory_scope::system, sycl::memory_order::seq_cst>(
-            q, state,
-            "uint64 system-scope complete RMW sequence / seq_cst");
-      }
-    } else {
-      state.Skip("uint64 system-scope sequence: atomic64 not advertised");
-    }
-
-    if(fp64 && atomic64) {
-      RunFloatingSharedSequence<double, sycl::memory_scope::system, sycl::memory_order::relaxed>(
-          q, state,
-          "double system-scope RMW sequence / relaxed");
-      if(acq_rel)
-        RunFloatingSharedSequence<double, sycl::memory_scope::system, sycl::memory_order::acq_rel>(
-            q, state,
-            "double system-scope RMW sequence / acq_rel");
-      if(seq_cst)
-        RunFloatingSharedSequence<double, sycl::memory_scope::system, sycl::memory_order::seq_cst>(
-            q, state,
-            "double system-scope RMW sequence / seq_cst");
-    } else {
-      state.Skip("double system-scope atomic sequence: fp64+atomic64 unavailable");
-    }
-
-    TestAtomicFenceSmoke(q, device, state);
-  } else {
-    state.Skip("system-scope RMW suite: system scope or atomic shared USM unavailable");
-  }
-
-  if(IsInterCoOpQualified(device)) {
-    std::cout << "\n  -- uint64 host/device InterCoOp semantic tests --\n";
-    TestCpuToDevicePublication64(q, state);
-    TestDeviceToCpuPublication64(q, state);
-    TestConcurrentHostDeviceAdd64(q, state, options.stress);
-    TestHostDeviceCasRace64(q, state);
-  } else {
-    state.Skip("uint64 host/device InterCoOp suite: device does not advertise full contract");
-  }
+  run_path(InteropUsmKind::Host);
+  run_path(InteropUsmKind::Shared);
 
   q.wait_and_throw();
 }
@@ -1341,7 +1484,7 @@ int main(int argc, char** argv) {
     const Options options = ParseOptions(argc, argv);
 
     std::cout
-        << "AdaptiveCpp Patch 1 + Patch 2 comprehensive atomic validation\n"
+        << "AdaptiveCpp host/shared USM + atomic semantic validation\n"
         << "C++ standard expectation: C++20 (std::atomic_ref)\n"
         << "Stress iterations per CPU/device side: " << options.stress << "\n";
 
@@ -1361,6 +1504,10 @@ int main(int argc, char** argv) {
 
     std::size_t intercoop_devices = 0;
     std::size_t gpu_intercoop_devices = 0;
+    std::size_t host_intercoop_devices = 0;
+    std::size_t shared_intercoop_devices = 0;
+    std::size_t gpu_host_intercoop_devices = 0;
+    std::size_t gpu_shared_intercoop_devices = 0;
 
     for(std::size_t i = 0; i < devices.size(); ++i) {
       if(options.device_index && i != *options.device_index)
@@ -1376,9 +1523,30 @@ int main(int argc, char** argv) {
         std::cout << "\n  -- Patch 2 backend reporting tests --\n";
         TestPatch2BackendReporting(device, state);
 
-        const bool intercoop = IsInterCoOpQualified(device);
-        std::cout << "\n  SuperNova uint64 InterCoOp qualification: "
+        const bool host_intercoop =
+            IsInteropPathQualified(device, InteropUsmKind::Host);
+        const bool shared_intercoop =
+            IsInteropPathQualified(device, InteropUsmKind::Shared);
+        const bool intercoop = host_intercoop || shared_intercoop;
+
+        std::cout << "\n  SuperNova uint64 InterCoOp qualification\n"
+                  << "    host-USM path   : "
+                  << (host_intercoop ? "TRUE" : "FALSE") << '\n'
+                  << "    shared-USM path : "
+                  << (shared_intercoop ? "TRUE" : "FALSE") << '\n'
+                  << "    any path        : "
                   << (intercoop ? "TRUE" : "FALSE") << '\n';
+
+        if(host_intercoop) {
+          ++host_intercoop_devices;
+          if(device.is_gpu())
+            ++gpu_host_intercoop_devices;
+        }
+        if(shared_intercoop) {
+          ++shared_intercoop_devices;
+          if(device.is_gpu())
+            ++gpu_shared_intercoop_devices;
+        }
         if(intercoop) {
           ++intercoop_devices;
           if(device.is_gpu())
@@ -1420,8 +1588,12 @@ int main(int argc, char** argv) {
     std::cout << "  PASS : " << state.passed << '\n';
     std::cout << "  FAIL : " << state.failed << '\n';
     std::cout << "  SKIP : " << state.skipped << '\n';
-    std::cout << "  InterCoOp-qualified devices     : " << intercoop_devices << '\n';
-    std::cout << "  InterCoOp-qualified GPU devices : " << gpu_intercoop_devices << '\n';
+    std::cout << "  InterCoOp-qualified devices          : " << intercoop_devices << '\n';
+    std::cout << "  InterCoOp-qualified GPU devices      : " << gpu_intercoop_devices << '\n';
+    std::cout << "  Host-USM qualified devices           : " << host_intercoop_devices << '\n';
+    std::cout << "  Shared-USM qualified devices         : " << shared_intercoop_devices << '\n';
+    std::cout << "  Host-USM qualified GPU devices       : " << gpu_host_intercoop_devices << '\n';
+    std::cout << "  Shared-USM qualified GPU devices     : " << gpu_shared_intercoop_devices << '\n';
 
     if(state.failed == 0) {
       std::cout << "\nRESULT: PASS\n";

@@ -498,6 +498,7 @@ rebuild_adaptivecpp_only() {
     -DClang_DIR="$CLANG_DIR" \
     -DCLANG_EXECUTABLE_PATH="$CLANG_CXX_PATH" \
     -DACPP_COMPILER_FEATURE_PROFILE=full \
+    -DWITH_CUDA_BACKEND=ON \
     -DCMAKE_INSTALL_PREFIX="$ACPP_ROOT"
 
   step "Building and installing AdaptiveCpp"
