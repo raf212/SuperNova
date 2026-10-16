@@ -257,7 +257,67 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     struct Scheduler final
     {
+        static constexpr uint64_t SaturatingMultiply(uint64_t value, uint64_t factor) noexcept
+        {
+            if (value == UNSIGNED_ZERO || factor == UNSIGNED_ZERO) 
+            {
+                return UNSIGNED_ZERO;
+            }
+        }
 
+        static constexpr bool FallbackAllowed(
+            const CDV::ComputerConf& config,
+            const CDV::ComputeExecutionPolicy& policy
+        ) noexcept
+        {
+            return config.AllowCPUFallback && policy.AllowCPUFallback;
+        }
+
+        static constexpr CDV::ComputerBackend Resolve(
+            uint64_t work_units,
+            const CDV::ComputerConf& config,
+            const CDV::ComputeExecutionPolicy& policy,
+            const Device& device
+        ) noexcept
+        {
+            CDV::ComputerBackend requested = policy.Backend == CDV::ComputerBackend::AUTOMATIC ?
+                config.DefaultBackend : policy.Backend;
+            if (
+                policy.Deterministic && 
+                policy.WorkType == CDV::ComputerWorkType::REDUCTION
+            ) 
+            {
+                return CDV::ComputerBackend::CPU;
+            }
+            if (requested == CDV::ComputerBackend::CPU) 
+            {
+                return CDV::ComputerBackend::CPU;
+            }
+
+            const bool accelerator_ready = device.NumericReady();
+            if (requested == CDV::ComputerBackend::GPU) 
+            {
+                if (accelerator_ready) 
+                {
+                    return CDV::ComputerBackend::GPU;
+                }
+                return FallbackAllowed(config, policy) ? 
+                    CDV::ComputerBackend::CPU : CDV::ComputerBackend::GPU;
+            }
+
+            if (!accelerator_ready) 
+            {
+                return CDV::ComputerBackend::CPU;
+            }
+            uint64_t threshold = std::max<uint64_t>(1u, config.GPUWorkThreshold);
+            return work_units >= threshold ? 
+                CDV::ComputerBackend::GPU : CDV::ComputerBackend::CPU;
+        }
+
+        struct Memory final
+        {
+
+        };
     };
 
 }
