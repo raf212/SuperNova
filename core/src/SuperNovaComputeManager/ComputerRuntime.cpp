@@ -24,4 +24,21 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return false;
     }
 
+    bool Device::StagingAvailable() const noexcept
+    {
+    #if defined (SN_ACPP_ENABLED)
+        try 
+        {
+            return Runtime_ && Runtime_->Gpu.has(sycl::aspect::usm_device_allocations);
+        }
+        catch(...)
+        {
+            return false;
+        }
+    #else
+        return false;
+    #endif
+    }
+
+
 }

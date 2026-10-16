@@ -156,7 +156,107 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return compute && control;
         }
 
+        bool Availavle() noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            return static_cast<bool>(Runtime_);
+        #else
+            return false;
+        #endif
+        }
 
+        void MarkField() noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            if (Runtime_) 
+            {
+                Runtime_->MarkFaild();
+            }
+        #endif
+        }
+
+        bool StagingAvailable() const noexcept;
+
+        bool NumericReady() const noexcept
+        {
+        #if defined (SN_ACPP_ENABLED)
+            return StagingAvailable() && Runtime_->Healthy();
+        #else
+            return false;
+        #endif
+        }
+
+        template<class DT>
+        static constexpr bool AtomicTypeSupport() noexcept
+        {
+            using U = std::remove_cv_t<DT>;
+            return (sizeof(U)== sizeof(uint32_t) || sizeof(U)== sizeof(uint64_t)) &&
+                (std::is_same_v<U,int> || std::is_same_v<U,unsigned int> ||
+                std::is_same_v<U,long> || std::is_same_v<U,unsigned long> ||
+                std::is_same_v<U,long long> || std::is_same_v<U,unsigned long long> ||
+                std::is_same_v<U,float> || std::is_same_v<U,double>);
+        }
+
+        template<class DT>
+        bool SupportArithmeticType() const noexcept
+        {
+            using U = std::remove_cv_t<DT>;
+        #if defined (SN_ACPP_ENABLED)
+            if constexpr (std::is_same_v<U, sycl::half>) 
+            {
+                return FP16_;
+            }
+        #endif
+            if constexpr (std::is_same_v<U, double>) 
+            {
+                return FP64_;
+            }
+            return true;
+        }
+
+
+        template<class DT> 
+        bool SupportsDeviceAtomicRMW() const  noexcept
+        {
+            using U = std::remove_cv_t<DT>;
+            if constexpr (!AtomicTypeSupport<DT>()) return false;
+        #if defined (SN_ACPP_ENABLED)
+            using Atomic = sycl::atomic_ref<U, sycl::memory_order_relaxed, sycl::memory_scope::device, 
+                            sycl::access::address_space::global_space>;
+            try 
+            {
+                return NumericReady() && 
+                    SupportArithmeticType<DT>() &&
+                    sizeof(U) % Atomic::required_alignment == UNSIGNED_ZERO &&
+                    (
+                        sizeof(U) != sizeof(uint64_t) ||
+                        Runtime_->Gpu.has(sycl::aspect::atomic64)
+                    );
+            }
+            catch(...)
+            {
+                return false;
+            }
+        #else
+            return false;
+        #endif
+        }
+
+        const std::string& Name() const noexcept {return Name_;}
+
+    #if defined (SN_ACPP_ENABLED)
+        std::shared_ptr<Runtime> RuntimeSharedPtr() const noexcept {return Runtime_;}
+
+        sycl::queue* ControlQueuePtr() noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
+
+        sycl::queue* ComputeQueuePtr() noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
+        const sycl::queue* ComputeQueuePtr() const noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
+
+    #endif
+    };
+
+    struct Scheduler final
+    {
 
     };
 
