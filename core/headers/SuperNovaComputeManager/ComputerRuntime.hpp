@@ -407,10 +407,89 @@ namespace BidirectionalInMemGraph::ComputerDetail
     template<class DT>
     class StagedRange final
     {
+    private:
+        using NumericRange = CDV::NumericRange<DT>;
+        using U = std::remove_cv_t<DT>;
 
+        Device& Device_;
+        NumericRange Range_;
+        U* Local_{nullptr};
+    public:
+        StagedRange(Device& device, NumericRange range) noexcept :
+            Device_(device), Range_(range)
+        {}
+        StagedRange(const StagedRange&) = delete;
+        StagedRange& operator = (const StagedRange&) = delete;
+        StagedRange(StagedRange&& other) noexcept :
+            Device_(other.Device_), Range_(other.Range_), Local_(std::exchange(other.Local_, nullptr))
+        {}
+        ~StagedRange() noexcept
+        {
+            if (!Local_) return;
+            (void)Device_.Sync();
+            try 
+            {
+                sycl::free(Local_, *Device_.ComputeQueuePtr());
+            }
+            catch (...)
+            {
+
+            }
+        }
+
+        bool Upload() noexcept
+        {
+            const std::optional<uint64_t> bytes = Memory::ByteCount<U>(Range_.Count);
+            if (!bytes ||!Range_.Host || !Range_.Count == UNSIGNED_ZERO) 
+            {
+                return false;
+            }
+            
+            uint64_t alignment = std::max(alignof(U), uint64_t{ADS::APC_CACHELINE_SIZE});
+
+            if constexpr (Device::AtomicTypeSupport<U>()) 
+            {
+                using Atomic = sycl::atomic_ref<U, sycl::memory_order_relaxed, 
+                    sycl::memory_scope::device, sycl::access::address_space::global_space>;
+
+                alignment = std::max(alignment, uint64_t{Atomic::required_alignment});
+            }
+
+            Local_ = sycl::aligned_alloc_device<U>(
+                alignment,
+                Range_.Count,
+                *Device_.ComputeQueuePtr()
+            );
+            if (!Local_) return false;
+
+            Device_.ComputeQueuePtr()->memcpy(
+                Range_.Host, 
+                Local_, 
+                *Memory::ByteCount<U>(Range_.Count)
+            );
+            return true;
+        }
+
+        DT* Data() const noexcept {return Local_;}
+
+        void* Download() 
+        {
+            if constexpr (!std::is_const_v<DT>) 
+            {
+                Device_.ComputeQueuePtr()->memcpy(
+                    Range_.Host,
+                    Local_,
+                    *Memory::ByteCount<U>(Range_.Count)
+                );
+            }
+        }
     };
-
 #endif
+
+struct Executor final
+{
+
+};
 
 
 
