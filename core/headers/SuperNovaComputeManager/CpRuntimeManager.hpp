@@ -304,5 +304,112 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     };
 
+    struct Reduction final
+    {
+        template<class DT, class Transform>
+        static constexpr bool CPU(
+            uint64_t count,
+            Transform transform,
+            DT& result
+        ) noexcept
+        {
+            DT sum{};
+            for (uint64_t i = 0; i < count; i++) 
+            {
+                sum += transform(i);
+            }
 
+            result = sum;
+            return true;
+        }
+
+    #if defined (SN_ACPP_ENABLED)
+        template<class DT, class Transform, class Combine = sycl::plus<DT>>
+        static constexpr bool GPU(
+            Device& device,
+            uint64_t count,
+            Transform transform,
+            DT& result,
+            DT identity = {},
+            Combine combo = {}
+        ) noexcept
+        {
+            static_assert(Computerscalar<DT>, "unsupported dtype");
+            static_assert(std::is_trivially_copyable_v<Transform>, "Transform not tgrivially copyable");
+
+            sycl::queue* queue = device.ComputeQueuePtr();
+            if (!queue) return false;
+            DT* scratch = nullptr;
+            DT completed{};
+            try 
+            {
+                scratch = sycl::malloc_device<DT>(1u, *queue);
+                if (!scratch) return false;
+                queue->submit([=](sycl::handler& handle)
+                {
+                    auto reduction = sycl::reduction(
+                        scratch, 
+                        identity, 
+                        combo,
+                        sycl::property_list{sycl::property::reduction::initialize_to_identity{}}
+                    );
+
+                    handle.parallel_for(
+                        sycl::range<1>{count}, 
+                        reduction,
+                        [=](sycl::id<1>id, auto& value)
+                        {
+                            value.combo(transform(static_cast<uint64_t>(id[0])));
+                        }
+                    );
+                });
+
+                queue->memcpy(&completed, scratch, sizeof(DT));
+                const bool ok = device.SyncComputeQ();
+                sycl::free(std::exchange(scratch, nullptr), *queue);
+                if (!ok) result = completed;
+                return ok;
+            }
+            catch (...)
+            {
+                (void)device.SyncComputeQ();
+                if (scratch) 
+                {
+                    try 
+                    {
+                        sycl::free(scratch, *queue);
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                return false;
+            }
+        }
+
+        template<class Pradicate>
+        static constexpr bool AllGPU(
+            Device& device,
+            uint64_t count,
+            Pradicate predicate,
+            bool& result
+        ) noexcept
+        {
+            int all = 1;
+            const bool ok = GPU<int>(
+                device,
+                count,
+                [=](uint64_t i) noexcept
+                {
+                    return static_cast<bool>(predicate(i)) ? 1 : 0;
+                },
+                all,
+                1,
+                sycl::minimum<int>{}
+            );
+            if (ok) result = (all != UNSIGNED_ZERO);
+            return ok;
+        }
+    #endif
+    };
 }
