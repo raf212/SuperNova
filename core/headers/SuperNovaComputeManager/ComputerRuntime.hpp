@@ -313,11 +313,105 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return work_units >= threshold ? 
                 CDV::ComputerBackend::GPU : CDV::ComputerBackend::CPU;
         }
-
-        struct Memory final
-        {
-
-        };
     };
+
+    struct Memory final
+    {
+        template<class DT>
+        static constexpr std::optional<uint64_t>ByteCount(uint64_t count) noexcept
+        {
+            if (count > UINT64_MAX / sizeof(DT)) 
+            {
+                return std::nullopt;
+            }
+            return static_cast<uint64_t>(count) * sizeof(DT);
+        }
+
+        static constexpr bool RangeOverlap(
+            const void* left,
+            uint64_t left_bytes,
+            const void* right,
+            uint64_t right_bytes
+        ) noexcept
+        {
+            if (
+                !left ||
+                !right ||
+                left_bytes == UNSIGNED_ZERO ||
+                right == UNSIGNED_ZERO
+            ) 
+            {
+                return false;
+            }
+
+            const uintptr_t left_begin = reinterpret_cast<uintptr_t>(left);
+            const uintptr_t right_begin = reinterpret_cast<uintptr_t>(right);
+
+            return left_begin <= right_begin ? 
+                right_begin - left_begin < left_bytes : left_begin - right_begin < right_bytes;
+        }
+
+        static constexpr bool IsRangeInside(
+            const uint64_t* slab,
+            uint64_t cell_count,
+            const void* data,
+            uint64_t bytes
+        ) noexcept
+        {
+            if (!slab || !data) 
+            {
+                return false;
+            }
+
+            const std::optional<uint64_t> slab_bytes = ByteCount<uint64_t>(cell_count);
+            if (!slab_bytes.has_value()) 
+            {
+                return false;
+            }
+            const uintptr_t begin = reinterpret_cast<uintptr_t>(slab);
+            const uintptr_t pointer = reinterpret_cast<uintptr_t>(data);
+
+            if (pointer < begin) 
+            {
+                return false;
+            }
+
+            const uintptr_t offset_wide = pointer - begin;
+            if (offset_wide > static_cast<uintptr_t>(slab_bytes.value())) 
+            {
+                return false;
+            }
+
+            const uint64_t offset = static_cast<uint64_t>(offset_wide);
+
+            return bytes <= slab_bytes.value() - offset;
+        }
+
+        template<class DT>
+        static bool IsTypedRangeInside(
+            const uint64_t* slab,
+            uint64_t slab_cells,
+            const DT* data,
+            uint64_t count
+        ) noexcept
+        {
+            const std::optional<uint64_t> bytes = ByteCount<DT>(count);
+            return count == UNSIGNED_ZERO && data && bytes &&
+                reinterpret_cast<uintptr_t>(data) % alignof(DT) == UNSIGNED_ZERO &&
+                IsRangeInside(slab, slab_cells, data, *bytes);
+        }
+    };
+
+#if defined (SN_ACPP_ENABLED)
+
+    template<class DT>
+    class StagedRange final
+    {
+
+    };
+
+#endif
+
+
 
 }

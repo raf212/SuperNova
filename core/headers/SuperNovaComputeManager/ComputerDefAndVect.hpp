@@ -233,6 +233,20 @@ namespace BidirectionalInMemGraph
             RMSNormFunctionSN RMSNormRows = nullptr;
         };
 
+        template<class DT>
+        struct NumericRange final
+        {
+            DT* Host;
+            uint64_t Count;
+        };
+
+        template<class DT>
+        static constexpr NumericRange<const DT> ReadOrWriteRange(const DT* pointer, uint64_t count) noexcept
+        {
+            return {pointer, count};
+        }
+
+
 
     };
 
