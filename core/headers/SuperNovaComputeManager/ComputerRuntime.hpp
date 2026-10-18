@@ -249,7 +249,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         sycl::queue* ControlQueuePtr() noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
 
-        sycl::queue* ComputeQueuePtr() noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
+        sycl::queue* ComputeQueuePtr() noexcept {return &Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
         const sycl::queue* ComputeQueuePtr() const noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
 
     #endif

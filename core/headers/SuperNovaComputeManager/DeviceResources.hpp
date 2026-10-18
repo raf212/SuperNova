@@ -33,7 +33,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         uint64_t Count_{0};
         std::optional<sycl::event> Tail_{};
 
-        std::optional<sycl::event> Transfer(
+        std::optional<sycl::event> Transfer_(
             DT* host,
             uint64_t count,
             uint64_t offset,
@@ -130,7 +130,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             std::span<const sycl::event> dependencies = {}
         ) noexcept
         {
-            return Transfer(
+            return Transfer_(
                 const_cast<DT*>(source.data()), source.size(), offset, false, dependencies
             );
         }
@@ -141,7 +141,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             std::span<const sycl::event> dependencies = {}
         ) noexcept
         {
-            return Transfer(
+            return Transfer_(
                 destination.data(),
                 destination.size(),
                 offset,
@@ -199,6 +199,86 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }
 
     };  
+
+    template<class Record>
+    class DevicePlanDoubleBuffer
+    {
+    private:
+        static constexpr uint8_t DOUBLE = 2u;
+
+        static_assert(std::is_trivially_copyable_v<Record> && !std::is_const_v<Record>);
+        std::shared_ptr<Runtime> Runtime_;
+        Record* Bank_[DOUBLE] {nullptr, nullptr};
+        void* Stage_[DOUBLE] {nullptr, nullptr};
+        bool HostUsm_[DOUBLE] {false, false};
+        uint64_t Count_[DOUBLE] {UNSIGNED_ZERO, UNSIGNED_ZERO};
+        uint64_t Capacity_{UNSIGNED_ZERO};
+        std::optional<sycl::event> Ready_[DOUBLE]{};
+        std::optional<sycl::event> LastUse_[DOUBLE]{};
+        unsigned Active_{UNSIGNED_ZERO};
+        bool Published_{false};
+        uint64_t Revision_{UNSIGNED_ZERO};
+
+        bool Completed_(const std::optional<sycl::event>& e)
+        {
+            return !e ||
+                e->get_info<sycl::info::event::command_execution_status>() == sycl::info::event_command_status::complete;
+        }
+
+        void Relese_() noexcept
+        {
+            if (!Runtime_) return;
+            for (uint64_t i = 0u; i < DOUBLE; i++) 
+            {
+                if (Ready_[i]) (void) Runtime_->Wait(*Ready_[i]);
+                if (LastUse_[i]) (void) Runtime_->Wait(*LastUse_[i]);
+                try 
+                {
+                    if (Bank_[i]) sycl::free(Bank_[i], Runtime_->Contex);
+                }
+                catch (...)
+                {
+                }
+
+                try 
+                {
+                    if (Stage_[i]) 
+                    {
+                        if (HostUsm_[i]) 
+                        {
+                            sycl::free(Stage_[i], Runtime_->Contex);
+                        }
+                        else 
+                        {
+                            ::operator delete(
+                                Stage_[i],
+                                std::align_val_t{std::max(alignof(Record), size_t{ADS::APC_CACHELINE_SIZE})}
+                            );
+                        }
+                    }
+                }
+                catch (...)
+                {
+                }
+                Bank_[i] = nullptr;
+                Stage_[i] = nullptr;
+            }
+            Capacity_ = UNSIGNED_ZERO;
+        }
+    public:
+        explicit DevicePlanDoubleBuffer(std::shared_ptr<Runtime> runtime) noexcept:
+            Runtime_(std::move(runtime))
+        {}
+        DevicePlanDoubleBuffer(const DevicePlanDoubleBuffer&) = delete;
+        DevicePlanDoubleBuffer& operator = (const DevicePlanDoubleBuffer&) = delete;
+        ~DevicePlanDoubleBuffer() noexcept
+        {
+            Relese_();
+        }
+        
+        
+    };
+
 
 #endif
 
