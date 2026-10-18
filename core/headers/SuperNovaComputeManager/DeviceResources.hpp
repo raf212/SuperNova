@@ -33,6 +33,51 @@ namespace BidirectionalInMemGraph::ComputerDetail
         uint64_t Count_{0};
         std::optional<sycl::event> Tail_{};
 
+        std::optional<sycl::event> Transfer(
+            DT* host,
+            uint64_t count,
+            uint64_t offset,
+            bool upload,
+            std::span<const sycl::event> dependencies 
+        ) noexcept
+        {
+            if (
+                !Data_ || !host || count == UNSIGNED_ZERO ||
+                offset > Count_ || count > Count_ - offset || !Runtime_->Healthy()
+            ) 
+            {
+                return std::nullopt;
+            }
+
+            try 
+            {
+                Tail_ = Runtime_->ControlQueue.submit(
+                    [&](sycl::handler& h)
+                    {
+                        if (Tail_) h.depends_on(*Tail_);
+                        for (const auto& e : dependencies) 
+                        {
+                            h.depends_on(e);
+                        }
+                        if (upload) 
+                        {
+                            h.memcpy(Data_ + offset, host, count *sizeof(DT));
+                        }
+                        else 
+                        {
+                            h.memcpy(host, Data_ + offset, count * sizeof(DT));
+                        }
+                    }
+                );
+                return Tail_;
+            }
+            catch (...)
+            {
+                Runtime_->MarkFaild();
+                return std::nullopt;
+            }
+        }
+
     public:
         explicit ResidentDeviceRegion(std::shared_ptr<Runtime> runtime) noexcept :
             Runtime_(std::move(runtime))
@@ -48,8 +93,111 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 sycl::free(Data_, Runtime_->Contex);
             }
             catch (...)
-            {}
+            {
+            }
         }
+
+        bool Allocate(uint64_t count) noexcept
+        {
+            if (Data_ || !Runtime_ || !Memory::ByteCount<DT>(count).has_value()) 
+            {
+                return false;
+            }
+
+            try 
+            {
+                Data_ = sycl::aligned_alloc_device<DT>(
+                    std::max(alignof(DT)),
+                    ADS::APC_CACHELINE_SIZE,
+                    count,
+                    Runtime_->ComputeQueue
+                );
+                if (!Data_) return false;
+                Count_ = count;
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        uint64_t Size() noexcept {return Count_;}
+
+        std::optional<sycl::event> Upload(
+            std::span<const DT> source, 
+            uint64_t offset = UNSIGNED_ZERO,
+            std::span<const sycl::event> dependencies = {}
+        ) noexcept
+        {
+            return Transfer(
+                const_cast<DT*>(source.data()), source.size(), offset, false, dependencies
+            );
+        }
+
+        std::optional<sycl::event> Download(
+            std::span<DT> destination,
+            uint64_t offset = UNSIGNED_ZERO,
+            std::span<const sycl::event> dependencies = {}
+        ) noexcept
+        {
+            return Transfer(
+                destination.data(),
+                destination.size(),
+                offset,
+                false,
+                dependencies
+            );
+        }
+
+        template<class OP>
+        std::optional<sycl::event> Submit(
+            uint64_t work_items,
+            OP operation,
+            std::span<const sycl::event> dependencies = {}
+        ) noexcept
+        {
+            static_assert(std::is_trivially_copyable_v<OP>);
+            if (!Data_ || work_items == UNSIGNED_ZERO || !Runtime_->Healthy()) 
+            {
+                return std::nullopt;
+            }
+
+            const auto data = Data_;
+            const auto count = Count_;
+            try 
+            {
+                Tail_ = Runtime_->ComputeQueue.submit(
+                    [&](sycl::handler& h)
+                    {
+                        if (Tail_) h.depends_on(*Tail_);
+                        for (const auto& e : dependencies) 
+                        {
+                            h.depends_on(e);
+                        }
+                        h.parallel_for(
+                            sycl::range<1>{work_items},
+                            [=](sycl::id<1> i)
+                            {
+                                operation(static_cast<uint64_t>(i[0]), data, count);
+                            }
+                        );
+                    }
+                );
+                return Tail_;
+            }
+            catch (...)
+            {
+                Runtime_->MarkFaild();
+                return std::nullopt;
+            }
+        }
+
+        bool Wait() noexcept
+        {
+            return !Tail_ || Runtime_->Wait(*Tail_);
+        }
+
     };  
 
 #endif
