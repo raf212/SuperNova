@@ -228,7 +228,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         void Relese_() noexcept
         {
             if (!Runtime_) return;
-            for (uint64_t i = 0u; i < DOUBLE; i++) 
+            for (size_t i = 0u; i < DOUBLE; i++) 
             {
                 if (Ready_[i]) (void) Runtime_->Wait(*Ready_[i]);
                 if (LastUse_[i]) (void) Runtime_->Wait(*LastUse_[i]);
@@ -276,6 +276,104 @@ namespace BidirectionalInMemGraph::ComputerDetail
             Relese_();
         }
         
+        bool Allocate(uint64_t capacity) noexcept
+        {
+            if (
+                capacity == UNSIGNED_ZERO ||
+                !Runtime_ ||
+                Capacity_ != UNSIGNED_ZERO ||
+                !Memory::ByteCount<Record>(capacity)
+            ) 
+            {
+                return false;
+            }
+
+            const uint64_t alignment = std::max(alignof(Record), ADS::APC_CACHELINE_SIZE);
+            try 
+            {
+                const bool host_usm = Runtime_->Gpu.has(sycl::aspect::usm_host_allocations);
+                for (size_t i = 0; i < DOUBLE; i++) 
+                {
+                    Bank_[i] = sycl::aligned_alloc<Record>(alignment, capacity, Runtime_->ComputeQueue);
+                    if (!Bank_[i])
+                    {
+                        Relese_();
+                        return false;
+                    }
+                    if (host_usm) 
+                    {
+                        Stage_[i] = sycl::aligned_alloc_host(alignment, capacity * sizeof(Record), Runtime_->Contex);
+                        HostUsm_[i] = Stage_[i] != nullptr;
+                    }
+                    if (!Stage_[i]) 
+                    {
+                        Stage_[i] = ::operator new(capacity * sizeof(Record), std::align_val_t{alignment});
+                    }
+                }
+                Capacity_ = capacity;
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        PlanUpdateResult TryPublish(std::span<const Record> records) noexcept
+        {
+            if (
+                Capacity_ == UNSIGNED_ZERO ||
+                records.size() > Capacity_ ||
+                (records.size() && !records.data()) ||
+                Revision_ == FABRIC_CELL_SENTINAL
+            ) 
+            {
+                return PlanUpdateResult::INVALID;
+            }
+            if (!Runtime_->Healthy()) 
+            {
+                return PlanUpdateResult::FAILED;
+            }
+
+            const unsigned next = Published_ ? (Active_ ^1u) : UNSIGNED_ZERO;
+            try 
+            {
+                if (!Completed_(Ready_[next]) || !Completed_(LastUse_[next])) 
+                {
+                    return PlanUpdateResult::BUSY;
+                }
+                if (
+                    (Ready_[next] && !Runtime_->Wait(*Ready_[next])) ||
+                    (LastUse_[next && Runtime_->Wait(*LastUse_[next])])
+                ) 
+                {
+                    return PlanUpdateResult::FAILED;
+                }
+                if (records.size()) 
+                {
+                    std::memcpy(Stage_[next], records.data(), records.size_bytes());
+                }
+                auto event = Runtime_->ControlQueue.submit(
+                    [&](sycl::handler& h)
+                    {
+                        if (Ready_[next]) h.depends_on(*Ready_[next]);
+                        if (LastUse_[next]) h.depends_on(*LastUse_[next]);
+                        if (records.size()) h.memcpy(Bank_[next], Stage_[next], records.size_bytes());
+                        else h.single_task([]{});
+                    }
+                );
+                Ready_[next] = event;
+                Count_[next] = records.size();
+                Active_ = next;
+                Published_ = true;
+                ++Revision_;
+                return PlanUpdateResult::ACCEPTED;
+            }
+            catch (...)
+            {
+                return PlanUpdateResult::FAILED;
+            }
+        }
         
     };
 
