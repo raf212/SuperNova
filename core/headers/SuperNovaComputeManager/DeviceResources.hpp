@@ -374,10 +374,89 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 return PlanUpdateResult::FAILED;
             }
         }
+
+        uint64_t Revision() const noexcept {return Revision_;}
+
+        template<class OP>
+        std::optional<sycl::event> Submit(
+            uint64_t work_items,
+            OP operation,
+            std::span<const sycl::event> dependencies = {}
+        ) noexcept
+        {
+            static_assert(std::is_trivially_copyable_v<OP>);
+            if (!Published_ || work_items == UNSIGNED_ZERO || !Runtime_->Healthy()) 
+                return std::nullopt;
+            const unsigned bank = Active_;
+            const DevicePlanView<Record> view{Bank_[bank], Count_[bank], Revision_};
+            try 
+            {
+                auto event = Runtime_->ComputeQueue.submit(
+                    [&](sycl::handler& h)
+                    {
+                        h.depends_on(*Ready_[bank]);
+                        for (const auto& e: dependencies) 
+                        {
+                            h.depends_on(e);
+                        }
+                        h.parallel_for(
+                            sycl::range<1>{work_items}, 
+                            [=](sycl::id<1> i)
+                            {
+                                operation(static_cast<uint64_t>(i[0], view));
+                            }
+                        );
+                    }
+                );
+                LastUse_[bank] = event;
+                return event;
+            }
+            catch (...)
+            {
+                Runtime_->MarkFaild();
+                return std::nullopt;
+            }
+        }
+
+        template<class DT, class OP>
+        std::optional<sycl::event> Submit(
+            uint64_t work_items,
+            ResidentDeviceRegion<DT>& numeric,
+            OP operation,
+            std::span<const sycl::event> dependencies = {}
+        ) noexcept
+        {
+            static_assert(std::is_trivially_copyable_v<OP>);
+            if (numeric.Runtime_ != Runtime_ || !numeric.Data_) 
+                return std::nullopt;
+            try 
+            {
+                std::vector<sycl::event> deps(dependencies.begin(), dependencies.end());
+                if (numeric.Tail_) 
+                {
+                    deps.push_back(*numeric.Tail_);
+                }
+                const auto data = numeric.Data_;
+                const auto count = numeric.Count_;
+                auto event = Submit(
+                    work_items, 
+                    [=](uint64_t i, DevicePlanView<DT>view)
+                    {
+                        operation(i, view, data, count);
+                    },
+                    std::span<const sycl::event>{deps}
+                );
+                if (event) numeric.Tail_ = event;
+                return event;
+            }
+            catch(...)
+            {
+                Runtime_->MarkFaild();
+                return std::nullopt;
+            }
+        }
         
     };
-
-
 #endif
 
 }
