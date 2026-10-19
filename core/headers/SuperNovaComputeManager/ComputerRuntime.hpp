@@ -1,5 +1,6 @@
 #pragma once
 #include "ComputerDefAndVect.hpp"
+#include <exception>
 
 namespace BidirectionalInMemGraph::ComputerDetail
 {
@@ -40,17 +41,17 @@ namespace BidirectionalInMemGraph::ComputerDetail
             )
         {}
 
-        constexpr bool Healthy() const noexcept
+        bool Healthy() const noexcept
         {
             return !Failed->load(std::memory_order_relaxed);
         }
 
-        constexpr void MarkFaild() noexcept
+        void MarkFaild() noexcept
         {
             Failed->store(true, std::memory_order_relaxed);
         }
 
-        constexpr bool Wait(sycl::queue& queue) noexcept
+        bool Wait(sycl::queue& queue) noexcept
         {
             try 
             {
@@ -71,7 +72,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
         }
 
-        constexpr bool Wait(sycl::event& event) noexcept
+        bool Wait(sycl::event& event) noexcept
         {
             try 
             {
@@ -92,10 +93,19 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
         }
 
+        // Completion and numerical health are distinct: async failure can
+        // poison results even when every submitted command has completed.
+        bool Drain() noexcept
+        {
+            bool compute = false, control = false;
+            try {ComputeQueue.wait(); compute = true;} catch (...) {}
+            try {ControlQueue.wait(); control = true;} catch (...) {}
+            return compute && control;
+        }
+
         ~Runtime() noexcept 
         {
-            (void) Wait(ComputeQueue);
-            (void) Wait(ControlQueue);
+            if (!Drain()) std::terminate();
         }
 
     };
@@ -136,7 +146,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         #if defined (SN_ACPP_ENABLED)
             return !Runtime_ || Runtime_->Wait(Runtime_->ComputeQueue);
         #else
-            return false;
+            return true;
         #endif
         }
 
@@ -145,7 +155,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         #if defined (SN_ACPP_ENABLED)
             return !Runtime_ || Runtime_->Wait(Runtime_->ControlQueue);
         #else
-            return false;
+            return true;
         #endif
         }
 
@@ -156,7 +166,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return compute && control;
         }
 
-        bool Availavle() noexcept
+        bool Available() const noexcept
         {
         #if defined (SN_ACPP_ENABLED)
             return static_cast<bool>(Runtime_);
@@ -198,7 +208,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }
 
         template<class DT>
-        bool SupportArithmeticType() const noexcept
+        bool SupportsArithmeticType() const noexcept
         {
             using U = std::remove_cv_t<DT>;
         #if defined (SN_ACPP_ENABLED)
@@ -219,14 +229,14 @@ namespace BidirectionalInMemGraph::ComputerDetail
         bool SupportsDeviceAtomicRMW() const  noexcept
         {
             using U = std::remove_cv_t<DT>;
-            if constexpr (!AtomicTypeSupport<DT>()) return false;
+            if constexpr (AtomicTypeSupport<DT>()) {
         #if defined (SN_ACPP_ENABLED)
-            using Atomic = sycl::atomic_ref<U, sycl::memory_order_relaxed, sycl::memory_scope::device, 
+            using Atomic = sycl::atomic_ref<U, sycl::memory_order::relaxed, sycl::memory_scope::device, 
                             sycl::access::address_space::global_space>;
             try 
             {
                 return NumericReady() && 
-                    SupportArithmeticType<DT>() &&
+                    SupportsArithmeticType<DT>() &&
                     sizeof(U) % Atomic::required_alignment == UNSIGNED_ZERO &&
                     (
                         sizeof(U) != sizeof(uint64_t) ||
@@ -240,17 +250,32 @@ namespace BidirectionalInMemGraph::ComputerDetail
         #else
             return false;
         #endif
+            } else {return false;}
         }
 
+        bool Drain() noexcept
+        {
+        #if defined(SN_ACPP_ENABLED)
+            return !Runtime_ || Runtime_->Drain();
+        #else
+            return true;
+        #endif
+        }
+
+        bool SynchronizeCompute() noexcept {return SyncComputeQ();}
+        bool SynchronizeControl() noexcept {return SyncControlQ();}
+        bool Synchronize() noexcept {return Sync();}
+        template<class T> static constexpr bool AtomicTypeSupported() noexcept {return AtomicTypeSupport<T>();}
         const std::string& Name() const noexcept {return Name_;}
 
     #if defined (SN_ACPP_ENABLED)
         std::shared_ptr<Runtime> RuntimeSharedPtr() const noexcept {return Runtime_;}
+        std::shared_ptr<Runtime> AcquireRuntime() const noexcept {return Runtime_;}
 
-        sycl::queue* ControlQueuePtr() noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
+        sycl::queue* ControlQueuePtr() noexcept {return Runtime_ ? &Runtime_->ControlQueue : nullptr;}
 
-        sycl::queue* ComputeQueuePtr() noexcept {return &Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
-        const sycl::queue* ComputeQueuePtr() const noexcept {return &Runtime_ ? &Runtime_->ControlQueue : nullptr;}
+        sycl::queue* ComputeQueuePtr() noexcept {return Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
+        const sycl::queue* ComputeQueuePtr() const noexcept {return Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
 
     #endif
     };
@@ -263,6 +288,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             {
                 return UNSIGNED_ZERO;
             }
+            return value > UINT64_MAX / factor ? UINT64_MAX : value * factor;
         }
 
         static constexpr bool FallbackAllowed(

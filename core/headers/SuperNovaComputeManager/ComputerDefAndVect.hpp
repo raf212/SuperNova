@@ -16,7 +16,10 @@
 
 
 ///TEMPORARY to keep track
-#define SN_ACPP_ENABLED true
+// Define either backend macro only in the AdaptiveCpp build configuration.
+#if defined(SUPERNOVA_ENABLE_ADAPTIVECPP) && !defined(SN_ACPP_ENABLED)
+#define SN_ACPP_ENABLED
+#endif
 //just for inselisense
 
 #if defined (SN_ACPP_ENABLED)
@@ -106,9 +109,9 @@ namespace BidirectionalInMemGraph
             std::is_same_v<std::remove_cv_t<DT>, int64_t> ||
             std::is_same_v<std::remove_cv_t<DT>, float> ||
             std::is_same_v<std::remove_cv_t<DT>, double> ||
-            std::is_same_v<std::remove_cv_t<DT>, char> ||
+            std::is_same_v<std::remove_cv_t<DT>, char>
         #if defined (SN_ACPP_ENABLED) 
-            std::is_same_v<std::remove_cv_t<DT>, sycl::half>
+            || std::is_same_v<std::remove_cv_t<DT>, sycl::half>
         #endif
         ;
 
@@ -190,18 +193,19 @@ namespace BidirectionalInMemGraph
             uint32_t Columns{UNSIGNED_ZERO};
             uint32_t SourceStride{UNSIGNED_ZERO};
             uint32_t DestinationStride{UNSIGNED_ZERO};
+            double Epsilon{0.0};
         };
 
         enum class PrimitiveResult : uint8_t
         {
             SUCCESS = 0,
             UNSUPPORTED = 1,
-            FAILD = 3
+            FAILED = 3
         };
 
         struct ComputerOptimizedPrimitives final
         {
-            using MatMaulFunctionSN = bool(*)(
+            using MatMaulFunctionSN = PrimitiveResult(*)(
                 void* user,
                 ComputerBackend backend,
                 void* destination,
@@ -210,7 +214,7 @@ namespace BidirectionalInMemGraph
                 const MatMulSNDesc& description
             );
 
-            using SoftMaxRowFunction = bool(*)(
+            using SoftMaxRowFunction = PrimitiveResult(*)(
                 void* user,
                 ComputerBackend backend,
                 void* destination,
@@ -218,7 +222,7 @@ namespace BidirectionalInMemGraph
                 const RowsDescSN& description
             );
 
-            using RMSNormFunctionSN = bool(*)(
+            using RMSNormFunctionSN = PrimitiveResult(*)(
                 void* user,
                 ComputerBackend backend,
                 void* destination,
@@ -338,4 +342,29 @@ namespace BidirectionalInMemGraph
     };
 
 
+}
+
+namespace BidirectionalInMemGraph {
+using ComputerBackend = ComputerDefAndVect::ComputerBackend;
+using ComputerWorkType = ComputerDefAndVect::ComputerWorkType;
+using ComputerError = ComputerDefAndVect::ComputerError;
+using ComputerConfig = ComputerDefAndVect::ComputerConf;
+using ComputerExecutionPolicy = ComputerDefAndVect::ComputeExecutionPolicy;
+using ComputerRuntimeInfo = ComputerDefAndVect::ComputerRuntimeInfo;
+using ComputerOptimizedPrimitives = ComputerDefAndVect::ComputerOptimizedPrimitives;
+using PrimitiveResult = ComputerDefAndVect::PrimitiveResult;
+using MatMulSNDesc = ComputerDefAndVect::MatMulSNDesc;
+using RowsDescSN = ComputerDefAndVect::RowsDescSN;
+using RMSNormDescSN = ComputerDefAndVect::RMSNormDscSN;
+using RMSNormDscSN = ComputerDefAndVect::RMSNormDscSN;
+template<class T> concept ComputerScalar = ComputerScalarV<T>;
+template<class... Ts> using ComputerDefaultAccumulator = DefaultAccumulatorSN<Ts...>;
+template<class T> constexpr auto ComputerDataTypeOf() noexcept {
+    return ComputerDefAndVect::DataTypeOfSN<T>();
+}
+}
+namespace BidirectionalInMemGraph::ComputerDetail {
+template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
+template<class T> constexpr NumericRange<const T> ReadRange(const T* p, uint64_t n) noexcept {return {p,n};}
+template<class T> constexpr NumericRange<T> WriteRange(T* p, uint64_t n) noexcept {return {p,n};}
 }

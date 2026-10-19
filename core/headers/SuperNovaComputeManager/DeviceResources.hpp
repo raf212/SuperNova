@@ -29,7 +29,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         static_assert(std::is_trivially_copyable_v<DT> && !std::is_const_v<DT>);
     private:
         std::shared_ptr<Runtime> Runtime_;
-        DT* Data_;
+        DT* Data_{nullptr};
         uint64_t Count_{0};
         std::optional<sycl::event> Tail_{};
 
@@ -42,7 +42,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ) noexcept
         {
             if (
-                !Data_ || !host || count == UNSIGNED_ZERO ||
+                !Runtime_ || !Data_ || !host || count == UNSIGNED_ZERO ||
                 offset > Count_ || count > Count_ - offset || !Runtime_->Healthy()
             ) 
             {
@@ -87,7 +87,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ~ResidentDeviceRegion() noexcept
         {
             if (!Data_) return;
-            if (Tail_) (void)Runtime_->Wait(*Tail_);
+            if (!Runtime_->Drain()) std::terminate();
             try 
             {
                 sycl::free(Data_, Runtime_->Contex);
@@ -99,7 +99,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool Allocate(uint64_t count) noexcept
         {
-            if (Data_ || !Runtime_ || !Memory::ByteCount<DT>(count).has_value()) 
+            if (Data_ || !Runtime_ || count == UNSIGNED_ZERO || !Memory::ByteCount<DT>(count).has_value()) 
             {
                 return false;
             }
@@ -107,8 +107,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             try 
             {
                 Data_ = sycl::aligned_alloc_device<DT>(
-                    std::max(alignof(DT)),
-                    ADS::APC_CACHELINE_SIZE,
+                    std::max<size_t>(alignof(DT), ADS::APC_CACHELINE_SIZE),
                     count,
                     Runtime_->ComputeQueue
                 );
@@ -123,6 +122,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }
 
         uint64_t Size() noexcept {return Count_;}
+        DT* Data() const noexcept {return Data_;}
 
         std::optional<sycl::event> Upload(
             std::span<const DT> source, 
@@ -131,7 +131,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ) noexcept
         {
             return Transfer_(
-                const_cast<DT*>(source.data()), source.size(), offset, false, dependencies
+                const_cast<DT*>(source.data()), source.size(), offset, true, dependencies
             );
         }
 
@@ -228,6 +228,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         void Relese_() noexcept
         {
             if (!Runtime_) return;
+            if (!Runtime_->Drain()) std::terminate();
             for (size_t i = 0u; i < DOUBLE; i++) 
             {
                 if (Ready_[i]) (void) Runtime_->Wait(*Ready_[i]);
@@ -288,13 +289,13 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 return false;
             }
 
-            const uint64_t alignment = std::max(alignof(Record), ADS::APC_CACHELINE_SIZE);
+            const size_t alignment = std::max<size_t>(alignof(Record), ADS::APC_CACHELINE_SIZE);
             try 
             {
                 const bool host_usm = Runtime_->Gpu.has(sycl::aspect::usm_host_allocations);
                 for (size_t i = 0; i < DOUBLE; i++) 
                 {
-                    Bank_[i] = sycl::aligned_alloc<Record>(alignment, capacity, Runtime_->ComputeQueue);
+                    Bank_[i] = sycl::aligned_alloc_device<Record>(alignment, capacity, Runtime_->ComputeQueue);
                     if (!Bank_[i])
                     {
                         Relese_();
@@ -315,6 +316,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
             catch (...)
             {
+                Relese_();
                 return false;
             }
         }
@@ -344,7 +346,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 }
                 if (
                     (Ready_[next] && !Runtime_->Wait(*Ready_[next])) ||
-                    (LastUse_[next && Runtime_->Wait(*LastUse_[next])])
+                    (LastUse_[next] && !Runtime_->Wait(*LastUse_[next]))
                 ) 
                 {
                     return PlanUpdateResult::FAILED;
@@ -403,7 +405,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                             sycl::range<1>{work_items}, 
                             [=](sycl::id<1> i)
                             {
-                                operation(static_cast<uint64_t>(i[0], view));
+                                operation(static_cast<uint64_t>(i[0]), view);
                             }
                         );
                     }
@@ -440,7 +442,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 const auto count = numeric.Count_;
                 auto event = Submit(
                     work_items, 
-                    [=](uint64_t i, DevicePlanView<DT>view)
+                    [=](uint64_t i, DevicePlanView<Record> view)
                     {
                         operation(i, view, data, count);
                     },
