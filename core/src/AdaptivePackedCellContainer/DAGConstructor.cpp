@@ -539,6 +539,9 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryRead();
+        if (!phase) return MutationResult::RETRY;
+
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             parent_slot >= FabCache_->CountOfAPC_ ||
@@ -748,6 +751,9 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryRead();
+        if (!phase) return MutationResult::RETRY;
+
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             parent_slot >= FabCache_->CountOfAPC_ ||
@@ -909,7 +915,7 @@ namespace BidirectionalInMemGraph
                     previous_delta->Before.Parent != parent_handle ||
                     next_delta->Before.Parent != parent_handle ||
                     previous_delta->Before.Siblings.Next != self ||
-                    previous_delta->Before.Siblings.Previous != self
+                    next_delta->Before.Siblings.Previous != self
                 )
                 {
                     AbortRowTransaction_(transaction);
@@ -954,6 +960,9 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryRead();
+        if (!phase) return MutationResult::RETRY;
+
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             old_parent_slot >= FabCache_->CountOfAPC_ ||

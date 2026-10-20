@@ -127,6 +127,9 @@ namespace BidirectionalInMemGraph
             return APCUseScope{};
         }
 
+        auto phase = APCCache_.FabricOwnerPtr_->ExecutionGate().TryRead(true);
+        if (!phase) return {};
+
         std::atomic_ref<uint64_t> control(*APCCache_.GenerationCellPtr_);
         uint64_t observed = control.load(std::memory_order_acquire);
 
@@ -155,7 +158,7 @@ namespace BidirectionalInMemGraph
                 std::memory_order_relaxed
             ))
             {
-                return APCUseScope(APCCache_.GenerationCellPtr_);
+                return APCUseScope(APCCache_.GenerationCellPtr_, std::move(phase));
             }
         }
     }
@@ -166,6 +169,9 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
+
+        auto phase = APCCache_.FabricOwnerPtr_->ExecutionGate().TryRead(true);
+        if (!phase) return false;
 
         const uint64_t raw = std::atomic_ref<const uint64_t>(*APCCache_.GenerationCellPtr_).load(std::memory_order_acquire);
 

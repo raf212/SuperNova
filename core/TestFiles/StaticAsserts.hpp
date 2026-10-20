@@ -23,6 +23,6 @@ namespace BidirectionalInMemGraph
     static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
 
     ///
-    static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 5 * sizeof(uint64_t));
+    static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 8 * sizeof(uint64_t));
 
 }
