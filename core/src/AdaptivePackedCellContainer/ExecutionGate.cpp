@@ -2,7 +2,7 @@
 
 namespace BidirectionalInMemGraph
 {
-    void ReadLeas::Reset(FabricExecutionGate* owner) noexcept
+    void ReadLease::Reset(FabricExecutionGate* owner) noexcept
     {
         if (Gate_ && Counted_) 
         {
@@ -40,7 +40,7 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
-    ReadLeas FabricExecutionGate::TryRead(bool allow_epoch_pin) noexcept
+    ReadLease FabricExecutionGate::TryRead(bool allow_epoch_pin) noexcept
     {
         if (IsPoisoned()) 
         {
@@ -57,14 +57,14 @@ namespace BidirectionalInMemGraph
             {
                 std::terminate();
             }
-            return ReadLeas(this, true);
+            return ReadLease(this, true);
         }
         uint64_t state = State_.load(std::memory_order_acquire);
         while (state < WRITER - 1) 
         {
             if (State_.compare_exchange_strong(state, state + 1, std::memory_order_acq_rel)) 
             {
-                return ReadLeas(this, true);
+                return ReadLease(this, true);
             }
         }
     }

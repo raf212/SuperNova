@@ -1,4 +1,3 @@
-
 #pragma once 
 #include <array>
 #include <utility>
@@ -113,18 +112,19 @@ namespace BidirectionalInMemGraph
         friend class FabricToAPCLinker;
     private:
         uint64_t* ControlCell_{nullptr};
-        explicit APCUseScope(uint64_t* control_cell) noexcept
-            : ControlCell_(control_cell)
+        ReadLease Phase_{};
+        explicit APCUseScope(uint64_t* control_cell, ReadLease phase) noexcept
+            : ControlCell_(control_cell), Phase_(std::move(phase))
         {}
     
     public:
-        constexpr APCUseScope() noexcept = default;
+        APCUseScope() noexcept = default;
 
         APCUseScope(const APCUseScope&) = delete;
         APCUseScope& operator = (const APCUseScope&) = delete;
 
         APCUseScope(APCUseScope&& other) noexcept
-            :ControlCell_(std::exchange(other.ControlCell_, nullptr))
+            :ControlCell_(std::exchange(other.ControlCell_, nullptr)), Phase_(std::move(other.Phase_))
         {}
 
         APCUseScope& operator = (APCUseScope&& other) noexcept
@@ -135,6 +135,7 @@ namespace BidirectionalInMemGraph
             }
             Release();
             ControlCell_ = std::exchange(other.ControlCell_, nullptr);
+            Phase_ = std::move(other.Phase_);
             return *this;
         }
 
@@ -156,6 +157,7 @@ namespace BidirectionalInMemGraph
             }
             std::atomic_ref<uint64_t>(*ControlCell_).fetch_sub(1u, std::memory_order_release);
             ControlCell_ = nullptr;
+            Phase_.Reset();
         }
     };
 

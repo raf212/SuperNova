@@ -8,20 +8,23 @@ namespace BidirectionalInMemGraph
 {
     class FabricExecutionGate;
 
-    class ReadLeas final
+    class ReadLease final
     {
     private:
         friend class FabricExecutionGate;
         FabricExecutionGate* Gate_{nullptr};
         bool Counted_{false};
-        ReadLeas(FabricExecutionGate* gate, bool counted) noexcept :
+        ReadLease(FabricExecutionGate* gate, bool counted) noexcept :
             Gate_(gate), Counted_(counted)
         {}
     public:
-        ReadLeas() noexcept = default;
-        ReadLeas(const ReadLeas&) = delete;
-        ReadLeas& operator = (const ReadLeas&) = delete;
-        ReadLeas(ReadLeas&& x) noexcept 
+        ReadLease() noexcept = default;
+        ReadLease(const ReadLease&) = delete;
+        ReadLease& operator = (const ReadLease&) = delete;
+        ReadLease(ReadLease&& x) noexcept:
+            Gate_(std::exchange(x.Gate_, nullptr)), Counted_(x.Counted_)
+        {}
+        ReadLease& operator = (ReadLease&& x) noexcept 
         {
             if (this != &x) 
             {
@@ -29,8 +32,9 @@ namespace BidirectionalInMemGraph
                 Gate_ = std::exchange(x.Gate_, nullptr);
                 Counted_ = x.Counted_;
             }
+            return *this;
         }
-        ~ReadLeas()
+        ~ReadLease()
         {
             Reset(Gate_);
         }
@@ -41,6 +45,10 @@ namespace BidirectionalInMemGraph
         }
 
         void Reset(FabricExecutionGate* owner) noexcept;
+        void Reset() noexcept
+        {
+            Reset(Gate_);
+        }
     };
 
     class ExclusiveLease final
@@ -82,12 +90,16 @@ namespace BidirectionalInMemGraph
         }
 
         void Reset(FabricExecutionGate* owner) noexcept;
+        void Reset() noexcept
+        {
+            Reset(Gate_);
+        }
     };
 
     class FabricExecutionGate final
     {
     private:
-        friend class ReadLeas;
+        friend class ReadLease;
         friend class ExclusiveLease;
         static constexpr uint64_t WRITER = uint64_t{1} << (BIT_COUNT_OF_UINT64_T - 1);
         std::atomic<uint64_t> State_{UNSIGNED_ZERO};
@@ -124,7 +136,7 @@ namespace BidirectionalInMemGraph
 
         bool ConfirmedRestored() noexcept;
 
-        ReadLeas TryRead(bool allow_epoch_pin = false) noexcept;
+        ReadLease TryRead(bool allow_epoch_pin = false) noexcept;
 
         ExclusiveLease TryEpoch() noexcept;
 
