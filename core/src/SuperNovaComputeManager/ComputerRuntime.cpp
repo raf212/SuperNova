@@ -13,7 +13,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             FP16_ = gpu.has(sycl::aspect::fp16);
             FP64_ = gpu.has(sycl::aspect::fp64);
             Name_ = gpu.get_info<sycl::info::device::name>();
-            runtime = std::move(runtime);
+            Runtime_ = std::move(runtime);
             return true;
         }
         catch(...)

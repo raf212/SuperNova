@@ -175,6 +175,9 @@ namespace BidirectionalInMemGraph
         uint32_t max_direct_parent_per_axis
     ) noexcept
     {
+        auto phase = ExecutionGate().TryMaintenance();
+        if (!phase) return false;
+
         bool expected = false;
         if (!InitializationInProgress_.compare_exchange_strong(expected, true, std::memory_order_acq_rel, std::memory_order_acquire))
         {
@@ -353,6 +356,7 @@ namespace BidirectionalInMemGraph
         }
         //CONFERMATION
         FabricInitialized_.store(true, std::memory_order_release);
+        (void)ExecutionGate().ConfirmedRestored();
         internal_init_guard.SuccesInit = true;
         return true;
         
@@ -360,6 +364,9 @@ namespace BidirectionalInMemGraph
     
     void SlabToFabricConverterAndCordinator::ShutDownFabric() noexcept
     {
+        auto phase = ExecutionGate().TryMaintenance();
+        if (!phase) return ;
+
         uint64_t* old_ptr = SlabBasePtr_;
         const size_t old_count = FabCache_ ? FabCache_->SlabCellCount_ : UNSIGNED_ZERO;
         const CFC::FabricBackigOwnership old_ownership = BackingOwnership_;
@@ -388,6 +395,11 @@ namespace BidirectionalInMemGraph
 
     bool SlabToFabricConverterAndCordinator::SaveFabric(std::span<uint64_t> destination) noexcept
     {
+        if (ExecutionGate().IsPoisoned()) return false;
+
+        auto phase = ExecutionGate().TryMaintenance();
+        if (!phase) return false;
+
         if (
             !IsFabricActive() ||
             !FabCache_ ||
@@ -423,6 +435,9 @@ namespace BidirectionalInMemGraph
         CFC::FabricBackigOwnership ownership 
     ) noexcept
     {
+        auto phase = ExecutionGate().TryMaintenance();
+        if (!phase) return false;
+
         if (
             !raw_cells || cell_count < CFC::FABRIC_UNIT_COUNT || 
             ownership == CFC::FabricBackigOwnership::NONE ||
@@ -490,6 +505,7 @@ namespace BidirectionalInMemGraph
         BackingOwnership_ = ownership;
         SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         FabricInitialized_.store(true, std::memory_order_release);
+        (void)ExecutionGate().ConfirmedRestored();
 
         return true;
         
@@ -497,6 +513,11 @@ namespace BidirectionalInMemGraph
 
     CoreOfFabricCoordinator::DetachFabric SlabToFabricConverterAndCordinator::DetachFabric() noexcept
     {
+        if (ExecutionGate().IsPoisoned()) return {};
+
+        auto phase = ExecutionGate().TryMaintenance();
+        if (!phase) return {};
+
         CFC::DetachFabric detached{};
         if (
             !IsFabricActive() ||

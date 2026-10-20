@@ -45,6 +45,9 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> expected_generation 
     ) noexcept
     {
+        auto admission = ExecutionGate().TryRead(true);
+        if (!admission) return false;
+
         if (
             slot >= FabCache_->CountOfAPC_ ||
             apc.IsFabricBound_() ||
@@ -96,6 +99,9 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> expected_generation
     ) noexcept
     {
+        auto admission = ExecutionGate().TryRead(true);
+        if (!admission) return false;
+
         if (!IsFabricActive() || apc_use)
         {
             return false;
@@ -700,6 +706,9 @@ namespace BidirectionalInMemGraph
         bool override_table
     ) noexcept
     {
+        auto phase = ExecutionGate().TryRead();
+        if (!phase) return false;
+
         if (!IsFabricActive() || desired_apc.IsFabricBound_())
         {
             return false;
@@ -1009,6 +1018,9 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryRead();
+        if (!phase) return false;
+
         if (
             slot >= FabCache_->CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(generation)
