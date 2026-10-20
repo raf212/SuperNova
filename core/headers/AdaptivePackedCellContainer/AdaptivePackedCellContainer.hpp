@@ -156,6 +156,8 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
             cache.ActiveWidth_ = resolved.Schema->MatrixWidth;
             cache.CapacityWidth_ = resolved.Schema->MatrixWidth;
             cache.Slot_ = APCCache_.APCSlotIdx_;
+            cache.Generation_ = APCCache_.CurrentGeneration_;
+            cache.RecordOrdinal_ = record_ordinal;
             cache.Column_ = column;
             cache.Protocol_ = resolved.Schema->Protocol;
             cache.Use_ = std::move(use);
@@ -206,4 +208,4 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
     };
 
 
-}  
+}

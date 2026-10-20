@@ -10,6 +10,10 @@ namespace BidirectionalInMemGraph
     class FabricConstructor
     {
         friend class AdaptivePackedCellContainer;
+    public:
+        FabricExecutionGate& ExecutionGate() noexcept {return ExecutionGate_;}
+    protected:
+        FabricExecutionGate ExecutionGate_{};
         
     protected:
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;

@@ -89,6 +89,16 @@ protected:
 
 public:
 
+    void NotifyExternalStructuralCommits(uint64_t count) noexcept;
+
+    template<class DT>
+    SNTOComputerBridge<DT> PinNumericRegion(
+        uint32_t slot,
+        MacroColumnOfAPC column,
+        uint32_t ordinal = UNSIGNED_ZERO,
+        std::optional<uint32_t> generation = std::nullopt
+    ) noexcept;
+    
     bool CreateAPC(
         AdaptivePackedCellContainer& desired_apc,
         const SD::RegionSchemaTable& region_schemas,

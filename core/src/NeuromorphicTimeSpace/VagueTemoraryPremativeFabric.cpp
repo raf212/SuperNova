@@ -4,6 +4,40 @@
 
 namespace BidirectionalInMemGraph
 {
+    void APCFinilizer::NotifyExternalStructuralCommits(uint64_t count) noexcept
+    {
+        if (
+            ExecutionGate().EpochOwnedByCaller() &&
+            TrackDAGRevision_.load(std::memory_order_relaxed)
+        ) 
+        {
+            SealedDAGRevision_.fetch_add(count, std::memory_order_release);
+        }
+    }
+
+    template<class DT>
+    SNTOComputerBridge<DT> APCFinilizer::PinNumericRegion(
+        uint32_t slot,
+        MacroColumnOfAPC column,
+        uint32_t ordinal,
+        std::optional<uint32_t> generation
+    ) noexcept
+    {
+        auto admission = ExecutionGate().TryRead(true);
+        AdaptivePackedCellContainer apc{};
+        if (!admission || !BindExistingAPCSnapshot_(slot, apc, generation)) 
+        {
+            return {};
+        }
+
+        auto region = apc.template BuildAViewOverRegion<DT>(column, ordinal);
+        if (region.GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION) 
+        {
+            return {};
+        }
+        return region;
+    }
+
 
     bool APCFinilizer::BindExistingAPCSnapshot_(
         uint32_t slot,

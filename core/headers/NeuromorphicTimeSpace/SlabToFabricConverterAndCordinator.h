@@ -36,6 +36,9 @@ namespace BidirectionalInMemGraph
         ~SlabToFabricConverterAndCordinator() noexcept
         {
             ShutDownFabric();
+            // A rejected close must not destroy the admission gate while a
+            // retained APC scope still refers to it.
+            if (SlabBasePtr_) std::terminate();
         }
 
         SlabToFabricConverterAndCordinator(const SlabToFabricConverterAndCordinator&) = delete;
