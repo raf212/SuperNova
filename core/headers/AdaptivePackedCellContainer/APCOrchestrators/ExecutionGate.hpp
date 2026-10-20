@@ -116,8 +116,19 @@ namespace BidirectionalInMemGraph
         {
             Poisoned_.store(true, std::memory_order_release);
         }
-        
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+
+        bool EpochOwnedByCaller() const noexcept
+        {
+            return Owner_ == this && !Maintenance_;
+        }
+
+        bool ConfirmedRestored() noexcept;
+
+        ReadLeas TryRead(bool allow_epoch_pin = false) noexcept;
+
+        ExclusiveLease TryEpoch() noexcept;
+
+        ExclusiveLease TryMaintenance() noexcept;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
     };
 
 }
