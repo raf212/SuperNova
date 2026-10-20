@@ -2,11 +2,11 @@
 
 namespace BidirectionalInMemGraph
 {
-    void ReadLease::Reset(FabricExecutionGate* owner) noexcept
+    void ReadLease::Reset() noexcept
     {
         if (Gate_ && Counted_) 
         {
-            if (owner != Gate_) 
+            if (FabricExecutionGate::Owner_ != Gate_)
             {
                 Gate_->HotStamp_.fetch_add(1, std::memory_order_release);
             }
@@ -15,16 +15,16 @@ namespace BidirectionalInMemGraph
         Gate_ = nullptr;
     }
 
-    void ExclusiveLease::Reset(FabricExecutionGate* owner) noexcept
+    void ExclusiveLease::Reset() noexcept
     {
         if (Gate_ && Counted_) 
         {
-            if (owner != Gate_) 
+            if (FabricExecutionGate::Owner_ != Gate_)
             {
                 std::terminate();
             }
-            owner->Owner_ = nullptr;
-            owner->Maintenance_ = false;
+            FabricExecutionGate::Owner_ = nullptr;
+            FabricExecutionGate::Owner_->Maintenance_ = false;
             Gate_->State_.fetch_and(~FabricExecutionGate::WRITER, std::memory_order_release);
         }
         Gate_ = nullptr;
@@ -67,6 +67,7 @@ namespace BidirectionalInMemGraph
                 return ReadLease(this, true);
             }
         }
+        return {}; // Gate is writer-held or saturated; never fall through.
     }
 
     ExclusiveLease FabricExecutionGate::TryEpoch() noexcept

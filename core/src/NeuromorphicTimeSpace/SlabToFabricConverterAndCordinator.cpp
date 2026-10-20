@@ -364,8 +364,16 @@ namespace BidirectionalInMemGraph
     
     void SlabToFabricConverterAndCordinator::ShutDownFabric() noexcept
     {
+        // Preserve the original blocking/draining shutdown contract.
+        // Disallow fresh Fabric access before waiting for existing read pins.
+        if (ExecutionGate().EpochOwnedByCaller()) return;
+        const bool was_initialized = FabricInitialized_.exchange(false, std::memory_order_acq_rel);
         auto phase = ExecutionGate().TryMaintenance();
-        if (!phase) return ;
+        while (!phase)
+        {
+            std::this_thread::yield();
+            phase = ExecutionGate().TryMaintenance();
+        }
 
         uint64_t* old_ptr = SlabBasePtr_;
         const size_t old_count = FabCache_ ? FabCache_->SlabCellCount_ : UNSIGNED_ZERO;
@@ -373,7 +381,7 @@ namespace BidirectionalInMemGraph
         if (
             old_ptr &&
             FabCache_ &&
-            FabricInitialized_.load(std::memory_order_acquire)
+            was_initialized
         )
         {
             QuiesceFabric_();

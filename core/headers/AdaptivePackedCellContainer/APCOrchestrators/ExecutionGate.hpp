@@ -28,7 +28,7 @@ namespace BidirectionalInMemGraph
         {
             if (this != &x) 
             {
-                Reset(Gate_);
+                Reset();
                 Gate_ = std::exchange(x.Gate_, nullptr);
                 Counted_ = x.Counted_;
             }
@@ -36,7 +36,7 @@ namespace BidirectionalInMemGraph
         }
         ~ReadLease()
         {
-            Reset(Gate_);
+            Reset();
         }
 
         explicit operator bool() const noexcept 
@@ -44,11 +44,7 @@ namespace BidirectionalInMemGraph
             return Gate_ != nullptr;
         }
 
-        void Reset(FabricExecutionGate* owner) noexcept;
-        void Reset() noexcept
-        {
-            Reset(Gate_);
-        }
+        void Reset() noexcept;
     };
 
     class ExclusiveLease final
@@ -64,19 +60,23 @@ namespace BidirectionalInMemGraph
         ExclusiveLease() noexcept = default;
         ExclusiveLease(const ExclusiveLease&) = delete;
         ExclusiveLease& operator = (const ExclusiveLease&) = delete;
-        ExclusiveLease(ExclusiveLease&& x) noexcept 
+        ExclusiveLease(ExclusiveLease&& x) noexcept :
+            Gate_(std::exchange(x.Gate_, nullptr)), Counted_(std::exchange(x.Counted_, false))
+        {}
+        ExclusiveLease& operator=(ExclusiveLease&& x) noexcept
         {
-            if (this != &x) 
+            if (this != &x)
             {
-                Reset(Gate_);
+                Reset();
                 Gate_ = std::exchange(x.Gate_, nullptr);
-                Counted_ = x.Counted_;
+                Counted_ = std::exchange(x.Counted_, false);
             }
+            return *this;
         }
 
         ~ExclusiveLease()
         {
-            Reset(Gate_);
+            Reset();
         }
 
         explicit operator bool() const noexcept 
@@ -89,11 +89,7 @@ namespace BidirectionalInMemGraph
             return Gate_ == &gate && Counted_;
         }
 
-        void Reset(FabricExecutionGate* owner) noexcept;
-        void Reset() noexcept
-        {
-            Reset(Gate_);
-        }
+        void Reset() noexcept;
     };
 
     class FabricExecutionGate final
