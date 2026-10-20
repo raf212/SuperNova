@@ -10,7 +10,7 @@ namespace BidirectionalInMemGraph
             {
                 Gate_->HotStamp_.fetch_add(1, std::memory_order_release);
             }
-            Gate_->State_.fetch_add(1, std::memory_order_release);
+            Gate_->State_.fetch_sub(1, std::memory_order_release);
         }
         Gate_ = nullptr;
     }
@@ -25,7 +25,7 @@ namespace BidirectionalInMemGraph
             }
             owner->Owner_ = nullptr;
             owner->Maintenance_ = false;
-            Gate_->State_.fetch_add(~FabricExecutionGate::WRITER, std::memory_order_release);
+            Gate_->State_.fetch_and(~FabricExecutionGate::WRITER, std::memory_order_release);
         }
         Gate_ = nullptr;
     }
