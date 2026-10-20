@@ -14,7 +14,7 @@ namespace BidirectionalInMemGraph
         }
         Gate_ = nullptr;
     }
-
+    
     void ExclusiveLease::Reset() noexcept
     {
         if (Gate_ && Counted_) 
@@ -23,8 +23,8 @@ namespace BidirectionalInMemGraph
             {
                 std::terminate();
             }
+            FabricExecutionGate::Maintenance_ = false;
             FabricExecutionGate::Owner_ = nullptr;
-            FabricExecutionGate::Owner_->Maintenance_ = false;
             Gate_->State_.fetch_and(~FabricExecutionGate::WRITER, std::memory_order_release);
         }
         Gate_ = nullptr;

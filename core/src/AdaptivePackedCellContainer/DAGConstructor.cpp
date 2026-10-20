@@ -539,7 +539,7 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
-        auto phase = ExecutionGate().TryRead();
+        auto phase = ExecutionGate().TryTransientRead();
         if (!phase) return MutationResult::RETRY;
 
         if (
@@ -751,7 +751,7 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
-        auto phase = ExecutionGate().TryRead();
+        auto phase = ExecutionGate().TryTransientRead();
         if (!phase) return MutationResult::RETRY;
 
         if (
@@ -960,7 +960,7 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
-        auto phase = ExecutionGate().TryRead();
+        auto phase = ExecutionGate().TryTransientRead();
         if (!phase) return MutationResult::RETRY;
 
         if (

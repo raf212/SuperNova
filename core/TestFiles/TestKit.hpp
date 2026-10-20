@@ -1200,6 +1200,9 @@ public:
             return false;
         }
 
+        HostSession construction_session(Fabric_.ExecutionGate());
+        if (!construction_session) return false;
+
         SD::RegionSchemaTable schemas{};
         SD::MakeDisabledSchemaTable(schemas);
         SD::RegionSchemaRecord& region =
@@ -1382,6 +1385,23 @@ class RuntimeAPCFabricBackend
 {
 public:
     using SD = SchemaDefinition;
+
+    // Benchmark workers already call Registration<Backend>. Acquiring one
+    // Fabric-wide host phase here amortizes admission without changing the
+    // benchmark's graph operations, scheduling, or retry policy.
+    inline static thread_local std::unique_ptr<HostSession> HostWork_{};
+    bool RegisterThread(std::size_t) noexcept
+    {
+        if (HostWork_) return false;
+        auto* session = new (std::nothrow) HostSession(Fabric_.ExecutionGate());
+        if (!session) return false;
+        if (!*session) { delete session; return false; }
+        HostWork_.reset(session);
+        return true;
+    }
+    void DeregisterThread(std::size_t) noexcept { HostWork_.reset(); }
+    FabricExecutionGate& HostGate() noexcept { return Fabric_.ExecutionGate(); }
+
 
     bool Initialize(
         std::size_t node_count,
@@ -3861,6 +3881,9 @@ inline bool RunScenario(const BenchmarkCase& config, std::size_t case_index)
         std::cout << "    build: FAIL\n";
         return false;
     }
+
+    HostSession timed_host_session(fabric_backend.HostGate());
+    if (!timed_host_session) return false;
 
     const GraphProof vector_proof = ProveRuntimeCombinedDAG(vector_backend, config);
     const GraphProof fabric_proof = ProveRuntimeCombinedDAG(fabric_backend, config);

@@ -170,7 +170,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        auto phase = APCCache_.FabricOwnerPtr_->ExecutionGate().TryRead(true);
+        auto phase = APCCache_.FabricOwnerPtr_->ExecutionGate().TryTransientRead(true);
         if (!phase) return false;
 
         const uint64_t raw = std::atomic_ref<const uint64_t>(*APCCache_.GenerationCellPtr_).load(std::memory_order_acquire);

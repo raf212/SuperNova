@@ -23,7 +23,7 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> generation
     ) noexcept
     {
-        auto admission = ExecutionGate().TryRead(true);
+        auto admission = ExecutionGate().TryTransientRead(true);
         AdaptivePackedCellContainer apc{};
         if (!admission || !BindExistingAPCSnapshot_(slot, apc, generation)) 
         {
@@ -45,7 +45,7 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> expected_generation 
     ) noexcept
     {
-        auto admission = ExecutionGate().TryRead(true);
+        auto admission = ExecutionGate().TryTransientRead(true);
         if (!admission) return false;
 
         if (
@@ -99,7 +99,7 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> expected_generation
     ) noexcept
     {
-        auto admission = ExecutionGate().TryRead(true);
+        auto admission = ExecutionGate().TryTransientRead(true);
         if (!admission) return false;
 
         if (!IsFabricActive() || apc_use)
@@ -706,7 +706,7 @@ namespace BidirectionalInMemGraph
         bool override_table
     ) noexcept
     {
-        auto phase = ExecutionGate().TryRead();
+        auto phase = ExecutionGate().TryTransientRead();
         if (!phase) return false;
 
         if (!IsFabricActive() || desired_apc.IsFabricBound_())
@@ -1018,7 +1018,7 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
-        auto phase = ExecutionGate().TryRead();
+        auto phase = ExecutionGate().TryTransientRead();
         if (!phase) return false;
 
         if (
