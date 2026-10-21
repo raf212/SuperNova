@@ -1,8 +1,17 @@
 #pragma once 
 #include "../headers/NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include "../headers/SuperNovaComputeManager/MemoryCheckpoint.hpp"
 
 namespace BidirectionalInMemGraph
 {
+
+    using SO = SchemaOrchestrator;
+    static_assert(sizeof(SO::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
+    static_assert(alignof(SO::RegionSchemaRecord) == alignof(std::uint64_t));
+    static_assert(std::is_trivially_copyable_v<SO::RegionSchemaRecord>);
+    static_assert(std::is_trivially_destructible_v<SO::RegionSchemaRecord>);
+
+
     using EB = EdgeBuilder;
     static_assert(std::atomic<EB::ParentIDGeneration>::is_always_lock_free == true);
     static_assert(std::atomic<EB::ParentIDGeneration>::is_always_lock_free == true);
@@ -24,5 +33,9 @@ namespace BidirectionalInMemGraph
 
     ///
     static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 8 * sizeof(uint64_t));
+
+    //
+    static_assert(sizeof(FabricMemory::NativeABI) == sizeof(std::uint64_t));
+
 
 }

@@ -66,11 +66,6 @@ namespace BidirectionalInMemGraph
             uint32_t SeqLockCounter = UNSIGNED_ZERO;
         };
         
-        static_assert(sizeof(RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
-        static_assert(alignof(RegionSchemaRecord) == alignof(std::uint64_t));
-        static_assert(std::is_trivially_copyable_v<RegionSchemaRecord>);
-        static_assert(std::is_trivially_destructible_v<RegionSchemaRecord>);
-        
         struct FabricRegionConfig final
         {
             uint16_t ActiveRegionMask = UNSIGNED_ZERO;

@@ -1,4 +1,5 @@
 #include "SuperNovaComputeManager/ComputerRuntime.hpp"
+#include "SuperNovaComputeManager/MemoryCheckpoint.hpp"
 
 namespace BidirectionalInMemGraph::ComputerDetail
 {
@@ -40,5 +41,14 @@ namespace BidirectionalInMemGraph::ComputerDetail
     #endif
     }
 
+
+
+    // bool FabricCheckpoint::ReadBytes(
+    //     uint64_t offset,
+    //     std::span<std::byte> output
+    // ) const noexcept
+    // {
+
+    // }
 
 }

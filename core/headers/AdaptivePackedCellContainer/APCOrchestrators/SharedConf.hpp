@@ -25,7 +25,7 @@
 namespace BidirectionalInMemGraph 
 {
     #define DEFAULT_MAX_TRIES 128
-    static constexpr uint8_t LEN_OF_BYTE_IN_BITS = 8u;
+    static constexpr uint8_t LEN_OF_BYTE_IN_BITS = CHAR_BIT;
     static constexpr size_t BIT_COUNT_OF_UINT64_T = LEN_OF_BYTE_IN_BITS * sizeof(uint64_t);
     static constexpr uint8_t BIT_COUNT_OF_UINT32_T = LEN_OF_BYTE_IN_BITS * sizeof(uint32_t);
     static constexpr unsigned UNSIGNED_ZERO = 0u;
