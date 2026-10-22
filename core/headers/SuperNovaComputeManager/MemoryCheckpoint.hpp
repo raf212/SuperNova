@@ -215,8 +215,7 @@ namespace BidirectionalInMemGraph
         FileHeader Header_{};
         CoreOfFabricCoordinator::FabricCache Cache{};
 
-    public:
-        bool ReadBytes(
+        bool ReadBytes_(
             uint64_t offset,
             std::span<std::byte> output
         ) const noexcept;

@@ -1,5 +1,5 @@
 #pragma once
-#include "ComputerDefAndVect.hpp"
+#include "MemoryCheckpoint.hpp"
 #include <exception>
 
 namespace BidirectionalInMemGraph::ComputerDetail
