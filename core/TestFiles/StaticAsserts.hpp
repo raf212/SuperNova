@@ -38,7 +38,6 @@ namespace BidirectionalInMemGraph
     static_assert(sizeof(FabricMemory::NativeABI) == sizeof(std::uint64_t));
 
     //
-    using CFC = CoreOfFabricCoordinator;
-    static_assert(sizeof(CFC::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
+    static_assert(sizeof(GMI::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
 
 }

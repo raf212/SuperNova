@@ -1,6 +1,7 @@
 #pragma once 
 #include <filesystem>
 #include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
+#include "../../Models/GlobalModels.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -23,31 +24,6 @@ namespace BidirectionalInMemGraph
             BORROWED = 2
         };
 
-        struct ModelInfo final
-        {
-            uint32_t Instance{};
-            PreBuildModels Model{PreBuildModels::NONE};
-            uint64_t ConfByteOffset{};
-            uint64_t ConfByteCount{};
-        private:
-            uint8_t Reserved[sizeof(uint64_t) - sizeof(PreBuildModels)] {};
-        };
-
-        struct ModelDependency final
-        {
-            uint32_t ProducerSlot{};
-            uint32_t ConsumerSlot{};
-            MacroColumnOfAPC ProducerRegion{};
-            MacroColumnOfAPC ConsumerRegion{};
-            uint16_t Interface{};
-            uint32_t Flags{};
-        };
-
-        struct NodeModelDescription final
-        {
-            uint32_t Instance{};
-            uint32_t Role{};
-        };
 
         enum class NumericalCachePolicy
         {
@@ -61,8 +37,8 @@ namespace BidirectionalInMemGraph
             const RawPackedCellAllocator* HostAlloc{};
             NumericalCachePolicy Cache{};
             uint64_t MaxCheckPointCells{uint64_t{1} << 27}; // it should be free ram * .8;-> MAX for that system based on runtime
-            std::span<const ModelInfo> Models{};
-            std::span<const ModelDependency> Dependencies{};
+            std::span<const GMI::ModelInfo> Models{};
+            std::span<const GMI::ModelDependency> Dependencies{};
             std::span<const std::byte> Dynamics{};
             uint64_t DynamicRevision{1};
         };
