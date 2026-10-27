@@ -496,7 +496,7 @@ namespace BidirectionalInMemGraph
             ++ordinal)
         {
             const EB::ParentIDGeneration handle = std::atomic_ref<const EB::ParentIDGeneration>(relations[ordinal].Parent).load(std::memory_order_relaxed);
-            if (!HAS::IsGenerationValid(handle.Generation) || !APCDataStructure::IsValid32BitAPCUnit(handle.Slot))
+            if (!HAS::IsGenerationValid(handle.Generation) || !APCDataStructure::ValidateSlotIdx(handle.Slot))
             {
                 if (scan.EmptyOrdinal == EB::RELATION_NULL)
                 {
@@ -514,7 +514,7 @@ namespace BidirectionalInMemGraph
                 scan.MatchParent = handle;
             }
             if (
-                APCDataStructure::IsValid32BitAPCUnit(handle.Slot) &&
+                APCDataStructure::ValidateSlotIdx(handle.Slot) &&
                 handle == other_parent_handle
             )
             {

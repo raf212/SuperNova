@@ -82,7 +82,7 @@ namespace BidirectionalInMemGraph
             uint64_t SegmentPoolDiskByteOffset_{UNSIGNED_ZERO};
 
         private:
-            uint64_t Reserved_[2]{};
+            uint64_t Reserved_[1]{};
         };
 
         struct DetachFabric final

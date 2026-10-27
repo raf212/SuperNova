@@ -59,7 +59,7 @@ namespace BidirectionalInMemGraph
             return static_cast<uint8_t>(std::popcount(lower));
         }
 
-        static constexpr bool IsValid32BitAPCUnit(uint64_t index) noexcept
+        static constexpr bool ValidateSlotIdx(uint64_t index) noexcept
         {
             return index < APC_INDEX_BOUND_SENTINAL;
         }
@@ -72,7 +72,7 @@ namespace BidirectionalInMemGraph
         static constexpr bool IsCapacityOfAPCValid(uint64_t capacity) noexcept
         {
             return capacity >= MINIMUM_APC_CELL_COUNT &&
-                IsValid32BitAPCUnit(capacity);
+                ValidateSlotIdx(capacity);
         }
 
         static constexpr bool IsValidEven64(uint64_t value) noexcept

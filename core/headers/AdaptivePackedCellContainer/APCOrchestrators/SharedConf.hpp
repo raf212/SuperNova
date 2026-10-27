@@ -76,6 +76,7 @@ namespace BidirectionalInMemGraph
         STRUCTRURAL_ADAPTATION = 2,
         GHGF = 3
     };
+    static constexpr PreBuildModels LAST_DEFINED_MODEL_IDX = PreBuildModels::GHGF;
     
     static  constexpr uint64_t MaskLowBitsForU64(unsigned n) noexcept
     {

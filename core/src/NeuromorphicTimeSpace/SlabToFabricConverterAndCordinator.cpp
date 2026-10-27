@@ -208,7 +208,7 @@ namespace BidirectionalInMemGraph
 
         InitializationInProgress_.store(true, std::memory_order_release);
 
-        if (slot_count == UNSIGNED_ZERO || !ADS::IsValid32BitAPCUnit(slot_count))
+        if (slot_count == UNSIGNED_ZERO || !ADS::ValidateSlotIdx(slot_count))
         {
             return false;
         }

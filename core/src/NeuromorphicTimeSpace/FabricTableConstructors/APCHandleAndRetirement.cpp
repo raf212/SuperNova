@@ -213,7 +213,7 @@ namespace BidirectionalInMemGraph
 
         const uint32_t first_free = std::atomic_ref<const uint32_t>(FabCache_->FirstFreeIdx_).load(std::memory_order_acquire);
 
-        if (!ADS::IsValid32BitAPCUnit(first_free))
+        if (!ADS::ValidateSlotIdx(first_free))
         {
             return std::nullopt;
         }

@@ -16,11 +16,12 @@ namespace BidirectionalInMemGraph::GMI
 
     struct alignas(uint64_t) ModelDependency final
     {
-        uint32_t ProducerSlot{};
-        uint32_t ConsumerSlot{};
+        static constexpr uint16_t INVALID_MODEL_IDX = UINT16_MAX;
+
+        uint16_t Producer{INVALID_MODEL_IDX};
+        uint16_t Consumer{INVALID_MODEL_IDX};
         MacroColumnOfAPC ProducerRegion{};
         MacroColumnOfAPC ConsumerRegion{};
-        uint16_t Interface{};
         uint32_t Flags{};
     };
 
@@ -35,9 +36,69 @@ namespace BidirectionalInMemGraph::GMI
         uint64_t GlobalTableBeginIdx_{UNSIGNED_ZERO};
         uint64_t LocalDirectoryBeginIdx_{UNSIGNED_ZERO};
         uint64_t LocalDirectoryCellCount_{UNSIGNED_ZERO};
-        uint32_t ModelCount_{UNSIGNED_ZERO};
+        uint16_t ModelCount_{UNSIGNED_ZERO};
         uint32_t ModelDependencyCount_{UNSIGNED_ZERO};
         uint64_t ModelDynamicsByteCount_{UNSIGNED_ZERO};
     };
 
+
+    struct ModelCatalog final
+    {
+        std::span<const ModelInfo> Models{};
+        std::span<const ModelDependency> Dependencies{};
+        std::span<std::byte> Dynamics{};
+
+        constexpr bool ValidInfo(const ModelInfo& mi) const noexcept
+        {
+            if (
+                mi.Model == PreBuildModels::NONE ||
+                mi.Model > LAST_DEFINED_MODEL_IDX ||
+                mi.ConfByteOffset > Dynamics.size() ||
+                mi.ConfByteCount > (Dynamics.size() - mi.ConfByteOffset)
+            ) 
+            {
+                return false;
+            }
+            return true;
+        }
+
+        constexpr bool ValidateDependency(const ModelDependency& md) const noexcept
+        {
+            if (
+                !ADS::ValidateSlotIdx(md.Producer) ||
+                !ADS::ValidateSlotIdx(md.Consumer) ||
+                md.Producer == Models.size() ||
+                md.Consumer == Models.size() ||
+                static_cast<uint8_t>(md.ProducerRegion) >= ADS::CountOfMacroColumn() ||
+                static_cast<uint8_t>(md.ConsumerRegion) >= ADS::CountOfMacroColumn()
+            ) 
+            {
+                return false;
+            }
+            return true;
+        }
+
+        constexpr bool Validate() const noexcept
+        {
+            if (Models.size() > ADS::APC_INDEX_BOUND_SENTINAL) 
+            {
+                return false;
+            }
+
+            for (size_t i = 0; i < Models.size(); i++) 
+            {
+                const ModelInfo& mi = Models[i];
+                if (mi.Instance != i + 1 || !ValidInfo(mi)) 
+                {
+                    return false;
+                }
+            }
+
+            for (const ModelDependency& md : Dependencies) 
+            {
+                if (!ValidateDependency(md)) return false;
+            }
+            return true;
+        }
+    };
 }

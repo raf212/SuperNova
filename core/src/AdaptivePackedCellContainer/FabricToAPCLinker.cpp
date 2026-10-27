@@ -17,7 +17,7 @@ namespace BidirectionalInMemGraph
             !raw_cells_ptr ||
             !fabric_owner ||
             !ADS::IsCapacityOfAPCValid(fabric_owner->FabCache_->PerAPCRuntimeCellCount_) ||
-            !ADS::IsValid32BitAPCUnit(fabric_slot_idx) ||
+            !ADS::ValidateSlotIdx(fabric_slot_idx) ||
             IsFabricBound_()
         )
         {

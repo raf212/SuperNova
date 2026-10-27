@@ -1125,7 +1125,7 @@ private:
         if (op.MutationOP_ == ReadOperation::FOUND)
         {
             const std::uint32_t slot = found.GetThisSlotIdx();
-            if (ADS::IsValid32BitAPCUnit(slot))
+            if (ADS::ValidateSlotIdx(slot))
             {
                 node = static_cast<std::size_t>(slot);
                 present = true;
@@ -6636,8 +6636,8 @@ inline Result Run()
         source_child.GenerationForTest();
 
     const bool source_setup =
-        ADS::IsValid32BitAPCUnit(parent_slot) &&
-        ADS::IsValid32BitAPCUnit(child_slot) &&
+        ADS::ValidateSlotIdx(parent_slot) &&
+        ADS::ValidateSlotIdx(child_slot) &&
         HandleOfAPCStatic::
             IsGenerationValid(
                 parent_generation

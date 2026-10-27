@@ -315,7 +315,7 @@ Static description of APC-local ABI and helper functions. It does not own storag
 | `RegionBit(column)` | `MacroColumnOfAPC` | `uint16_t` | Maps one macro column to its active-mask bit. | Only valid for known columns. |
 | `ValidRegionMask()` | none | `uint16_t` | Mask containing every valid region bit. | Not the active mask of a particular Fabric. |
 | `CompactRegionIndex(active_mask,column)` | active bit mask + logical column | `optional<uint8_t>` | Returns compact schema-row ordinal by popcounting lower active bits. | Do not treat logical enum ordinal as compact row ordinal when some regions are disabled. |
-| `IsValid32BitAPCUnit(index)` | `uint64_t` | `bool` | Ensures value is below `UINT32_MAX` sentinel. | Not sufficient to prove slot < `CountOfAPC_`. |
+| `ValidateSlotIdx(index)` | `uint64_t` | `bool` | Ensures value is below `UINT32_MAX` sentinel. | Not sufficient to prove slot < `CountOfAPC_`. |
 | `IsValidFabricUnit(index)` | `uint64_t` | `bool` | Ensures value is below `UINT64_MAX` Fabric sentinel. | Not a slab bounds check. |
 | `IsCapacityOfAPCValid(capacity)` | cell count | `bool` | Requires at least `MINIMUM_APC_CELL_COUNT` and 32-bit-valid cell count. | Does not validate a schema fits that capacity. |
 | `IsValidEven64(value)` | `uint64_t` | `bool` | Parity check used by lifecycle sequence invariant. | Even alone does not mean a lifecycle state is valid. |
