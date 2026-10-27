@@ -279,7 +279,7 @@ The Fabric owns storage and graph authority. An APC facade is a **runtime view/b
 | `VOLATILE_PARENT_EDGE_TABLE_V` | V-axis relation rows. |
 | `APC_HANDLE_TABLE` | Generation + active-use + closed control word per APC. |
 | `EDGE_TOPOLOGY_BITMAP` | Fast parent-occupancy masks for H and V. |
-| `DEVICE_PLANNER_TABLE` | Reserved in current snapshot; configured record length is zero. |
+| `MODEL_DESCRIPTION` | Reserved in current snapshot; configured record length is zero. |
 | `WORK_QUEUE` | Reserved in current snapshot; configured record width is zero. |
 | `SEGMENT_POOL` | Actual APC slots. |
 
@@ -559,7 +559,7 @@ Carries an optional `APCUseScope`, the relation locator, and the mutation/read o
 
 The first fixed 16×u64 worth of metadata describes the complete image. Key fields include format version, APC count/capacity, slab size, record-book and segment-pool boundaries, K parent capacity, edge row width, active region mask/count, batch geometry, alignment, table start indices, and whether a default schema exists.
 
-**Reserved/unfinished:** `RELATION_WIDTH_OF_FABRIC`, `DEVICE_PLANNER_RECORD_LEN`, and `WORK_RECORD_WIDTH_OF_FABRIC` are zero in this snapshot. Do not document the device planner/work queue as operational yet.
+**Reserved/unfinished:** `RELATION_WIDTH_OF_FABRIC`, `MODEL_DESCRIPTION_LEN`, and `WORK_RECORD_WIDTH_OF_FABRIC` are zero in this snapshot. Do not document the device planner/work queue as operational yet.
 
 | Function / type | Args | Return | Purpose / warning |
 | --- | --- | --- | --- |

@@ -6,7 +6,7 @@ namespace BidirectionalInMemGraph
 {
 
     using SO = SchemaOrchestrator;
-    static_assert(sizeof(SO::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
+    static_assert(sizeof(SO::RegionSchemaRecord) == 6u * sizeof(std::uint64_t));
     static_assert(alignof(SO::RegionSchemaRecord) == alignof(std::uint64_t));
     static_assert(std::is_trivially_copyable_v<SO::RegionSchemaRecord>);
     static_assert(std::is_trivially_destructible_v<SO::RegionSchemaRecord>);
@@ -37,5 +37,8 @@ namespace BidirectionalInMemGraph
     //
     static_assert(sizeof(FabricMemory::NativeABI) == sizeof(std::uint64_t));
 
+    //
+    using CFC = CoreOfFabricCoordinator;
+    static_assert(sizeof(CFC::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
 
 }

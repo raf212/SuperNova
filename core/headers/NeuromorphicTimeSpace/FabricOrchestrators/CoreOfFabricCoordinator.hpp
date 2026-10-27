@@ -1,21 +1,20 @@
 #pragma once 
+#include <filesystem>
 #include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
 
 namespace BidirectionalInMemGraph
 {
+    struct RawPackedCellAllocator;
 
     struct CoreOfFabricCoordinator
     {
         /// UNCHECKED
-        static constexpr size_t DEVICE_PLANNER_RECORD_LEN = 0u;
+        static constexpr size_t MODEL_DESCRIPTION_LEN = 0u;
         static constexpr size_t WORK_RECORD_WIDTH_OF_FABRIC = 0u;
         static constexpr size_t DEFAULT_FABRIC_CONTROLIO_LENGTH = 512u;
         ///--------------------------
 
-        static constexpr uint32_t FABRIC_MAGIC = 0x41504643u;
-        static constexpr uint32_t FABRIC_META_EOF = 0x41474946u;
-
-        static constexpr uint8_t FORMAT_VERSION = 2u;
+        static constexpr uint8_t FORMAT_VERSION = 3u;
 
         enum class FabricBackigOwnership : uint8_t
         {
@@ -24,7 +23,58 @@ namespace BidirectionalInMemGraph
             BORROWED = 2
         };
 
-        struct alignas(64) FabricCache 
+        struct ModelInfo final
+        {
+            uint32_t Instance{};
+            PreBuildModels Model{PreBuildModels::NONE};
+            uint64_t ConfByteOffset{};
+            uint64_t ConfByteCount{};
+        private:
+            uint8_t Reserved[sizeof(uint64_t) - sizeof(PreBuildModels)] {};
+        };
+
+        struct ModelDependency final
+        {
+            uint32_t ProducerSlot{};
+            uint32_t ConsumerSlot{};
+            MacroColumnOfAPC ProducerRegion{};
+            MacroColumnOfAPC ConsumerRegion{};
+            uint16_t Interface{};
+            uint32_t Flags{};
+        };
+
+        struct NodeModelDescription final
+        {
+            uint32_t Instance{};
+            uint32_t Role{};
+        };
+
+        enum class NumericalCachePolicy
+        {
+            ON_DEMAND = 0,
+            PRE_TOUCHED = 1
+        };
+
+        struct FabricInitConf final
+        {
+            std::filesystem::path SegmentPoolPath{};
+            const RawPackedCellAllocator* HostAlloc{};
+            NumericalCachePolicy Cache{};
+            uint64_t MaxCheckPointCells{uint64_t{1} << 27}; // it should be free ram * .8;-> MAX for that system based on runtime
+            std::span<const ModelInfo> Models{};
+            std::span<const ModelDependency> Dependencies{};
+            std::span<const std::byte> Dynamics{};
+            uint64_t DynamicRevision{1};
+        };
+
+        // Only model semantics common to the entire Fabric; no storage geometry & there is no current use
+        // Later it can be roved if unnecessery
+        struct CompoundModelDescription
+        {
+            uint64_t DynamicsRevision_{1};
+        };
+
+        struct alignas(64) FabricCache final
         {
             uint32_t FormateVersion_{UNSIGNED_ZERO};
             ///FABRIC CONSTRUCTION
@@ -55,6 +105,11 @@ namespace BidirectionalInMemGraph
             uint64_t HandleTableBeginIndex_{UNSIGNED_ZERO};
             uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
             bool HasDefaultRegionTable_{false};
+
+            // //ModelCache MDC = MODEL_DESCRIPTION
+            // uint64_t MDCBeginIdx_{UNSIGNED_ZERO};
+            // uint64_t ModelDirectoryBeginIdx_{UNSIGNED_ZERO};
+
 
         };
 

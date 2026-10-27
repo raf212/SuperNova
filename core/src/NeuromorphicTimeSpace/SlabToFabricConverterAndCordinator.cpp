@@ -280,7 +280,7 @@ namespace BidirectionalInMemGraph
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(apc_handle_table_end);
         const size_t device_planner_begain = cursor;
-        const size_t device_planner_end = device_planner_begain + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::DEVICE_PLANNER_RECORD_LEN);
+        const size_t device_planner_end = device_planner_begain + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::MODEL_DESCRIPTION_LEN);
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(device_planner_end);
         const size_t work_queue_begin = cursor;
@@ -316,7 +316,7 @@ namespace BidirectionalInMemGraph
         WriteARecordBookOfTSCEntry_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H, horizontal_edge_begin, horizontal_edge_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, vertical_edge_begin, vertical_edge_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::APC_HANDLE_TABLE, apc_handle_table_begin, apc_handle_table_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::DEVICE_PLANNER_TABLE, device_planner_begain, device_planner_end);
+        WriteARecordBookOfTSCEntry_(FabricSegments::MODEL_DESCRIPTION, device_planner_begain, device_planner_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::WORK_QUEUE, work_queue_begin, work_queue_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::MATRIX_VIEW_TABLE, matrix_view_table_begin, matrix_view_table_end);
         WriteARecordBookOfTSCEntry_(FabricSegments::SEGMENT_POOL, FabCache_->SegmentPoolBegin_, FabCache_->SlabCellCount_);
@@ -341,7 +341,7 @@ namespace BidirectionalInMemGraph
         }
         
         //IDLE UNUSED FabricSegments
-        IdleAFabricTableClassRangesMemory_(FabricSegments::DEVICE_PLANNER_TABLE);
+        IdleAFabricTableClassRangesMemory_(FabricSegments::MODEL_DESCRIPTION);
         IdleAFabricTableClassRangesMemory_(FabricSegments::WORK_QUEUE);
         //END:: IDELING
 

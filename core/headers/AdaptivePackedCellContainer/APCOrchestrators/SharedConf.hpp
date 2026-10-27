@@ -55,7 +55,7 @@ namespace BidirectionalInMemGraph
         VALUE_PARENT_EDGE_TABLE_H = 2,
         VOLATILE_PARENT_EDGE_TABLE_V = 3,
         APC_HANDLE_TABLE = 4,
-        DEVICE_PLANNER_TABLE = 5,
+        MODEL_DESCRIPTION = 5,
         WORK_QUEUE = 6,
         SEGMENT_POOL = 7
     };
