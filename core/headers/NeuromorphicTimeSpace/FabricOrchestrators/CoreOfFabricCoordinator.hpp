@@ -43,13 +43,6 @@ namespace BidirectionalInMemGraph
             uint64_t DynamicRevision{1};
         };
 
-        // Only model semantics common to the entire Fabric; no storage geometry & there is no current use
-        // Later it can be roved if unnecessery
-        struct CompoundModelDescription
-        {
-            uint64_t DynamicsRevision_{1};
-        };
-
         struct alignas(64) FabricCache final
         {
             uint32_t FormateVersion_{UNSIGNED_ZERO};
@@ -82,11 +75,14 @@ namespace BidirectionalInMemGraph
             uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
             bool HasDefaultRegionTable_{false};
 
-            // //ModelCache MDC = MODEL_DESCRIPTION
-            // uint64_t MDCBeginIdx_{UNSIGNED_ZERO};
-            // uint64_t ModelDirectoryBeginIdx_{UNSIGNED_ZERO};
+            ///Model Info
+            GMI::ModelStorageDiaphragm ModelDiaphragm_ = GMI::ModelStorageDiaphragm{};
 
+            //DISK
+            uint64_t SegmentPoolDiskByteOffset_{UNSIGNED_ZERO};
 
+        private:
+            uint64_t Reserved_[2]{};
         };
 
         struct DetachFabric final
@@ -151,7 +147,7 @@ namespace BidirectionalInMemGraph
     };
 
 
-    struct RawPackedCellAllocator
+    struct RawPackedCellAllocator final
     {
         using AllocateFunction = uint64_t* (*)(
             size_t count_of_packed_cell, size_t alignment, void* user
@@ -166,6 +162,35 @@ namespace BidirectionalInMemGraph
         FreeFunction FreePackedCellStorage{nullptr};
         void* User{nullptr};
         size_t Alignment{BIT_COUNT_OF_UINT64_T};
+
+        size_t EffectiveAllignment() const noexcept
+        {
+            return std::max<size_t>(ADS::CACELINE_SIZE_IN_BYTES, Alignment);
+        }
+
+        bool IsValid() const noexcept
+        {
+            return static_cast<bool>(AllocatePackedCellStorage) == static_cast<bool>(FreePackedCellStorage) &&
+                std::has_single_bit(EffectiveAllignment());
+        }
+
+        uint64_t* Allocate(size_t cells) const noexcept
+        {
+            if (!IsValid() || cells > (SIZE_MAX / sizeof(uint64_t)))
+            {
+                return nullptr;
+            }
+
+            const auto FN_ALLOC =  AllocatePackedCellStorage ? AllocatePackedCellStorage:DefaultAllocateAtomicCells;
+            return FN_ALLOC(cells, EffectiveAllignment(), User);
+        }
+
+        void Free(uint64_t* data, size_t cells) const noexcept
+        {
+            if (!data) return;
+            const auto FN_FREE =  FreePackedCellStorage ? FreePackedCellStorage:DefaultFreeAtomicCells;
+            FN_FREE(data, cells, EffectiveAllignment(), User);
+        }
 
         static size_t AlignBiteCount_(size_t bytes, size_t alignment) noexcept
         {
@@ -188,7 +213,20 @@ namespace BidirectionalInMemGraph
             }
 
             alignment = std::max<size_t>(alignment, alignof(uint64_t));
+            if (
+                !std::has_single_bit(alignment) ||
+                count_of_packed_cell > (SIZE_MAX / sizeof(uint64_t))
+            ) 
+            {
+                return nullptr;
+            }
+
             const size_t byte_count = sizeof(uint64_t) * count_of_packed_cell;
+            if (byte_count > (SIZE_MAX - (alignment - 1))) 
+            {
+                return nullptr;
+            }
+            
             const size_t aligned_bytes = AlignBiteCount_(byte_count, alignment);
 
 #if defined(_MSC_VER)

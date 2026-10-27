@@ -133,7 +133,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 return false;
             }
             
-            uint64_t alignment = std::max(alignof(U), uint64_t{ADS::APC_CACHELINE_SIZE});
+            uint64_t alignment = std::max(alignof(U), uint64_t{ADS::CACELINE_SIZE_IN_BYTES});
 
             if constexpr (Device::AtomicTypeSupport<U>()) 
             {

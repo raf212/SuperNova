@@ -29,7 +29,7 @@ namespace BidirectionalInMemGraph
     static_assert(sizeof(HAS::StructuralHotRow) ==  8 * sizeof(uint64_t));
     static_assert((HandleOfAPCStatic::ACTIVE_COUNT_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
     static_assert((HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
-    static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
+    static_assert(sizeof(FabricCache) == 24 * sizeof(uint64_t));
 
     ///
     static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 8 * sizeof(uint64_t));
@@ -39,5 +39,6 @@ namespace BidirectionalInMemGraph
 
     //
     static_assert(sizeof(GMI::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
+    static_assert(sizeof(GMI::ModelStorageDiaphragm) == 5 * sizeof(uint64_t));
 
 }

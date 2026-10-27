@@ -8,7 +8,7 @@ namespace BidirectionalInMemGraph
     struct SchemaOrchestrator 
     {
 
-        static constexpr uint32_t REGION_ALIGNMENT_CELLS = static_cast<uint32_t>(ADS::APC_CACHELINE_SIZE / sizeof(std::uint64_t));
+        static constexpr uint32_t REGION_ALIGNMENT_CELLS = static_cast<uint32_t>(ADS::CACELINE_SIZE_IN_BYTES / sizeof(std::uint64_t));
         static constexpr uint64_t NO_POSITION = FABRIC_CELL_SENTINAL;
 
         enum class SchemaProtocols : uint8_t

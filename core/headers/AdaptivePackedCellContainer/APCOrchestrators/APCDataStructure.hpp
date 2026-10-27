@@ -15,7 +15,7 @@ namespace BidirectionalInMemGraph
     {
         static constexpr uint32_t APC_INDEX_BOUND_SENTINAL = UINT32_MAX;
         static constexpr uint64_t MAX_SLAB_CELLS = UINT64_MAX;
-        static constexpr size_t APC_CACHELINE_SIZE = 64u;
+        static constexpr size_t CACELINE_SIZE_IN_BYTES = 64u;
         static constexpr uint8_t DEFAULT_DIRECTED_PARENT_PER_AXIS = 8u;
         //Later transfer it to GHGF side.
         static constexpr uint8_t GHGF_MAX_DIRECTED_PARENT_PER_AXIS  = 64u;        
