@@ -62,7 +62,7 @@ namespace BidirectionalInMemGraph
             
             //Unique region qualifiers
             uint32_t ModelInstance = UNSIGNED_ZERO;
-            uint32_t DependencyBehin = UNSIGNED_ZERO;
+            uint32_t DependencyBegin = UNSIGNED_ZERO;
             uint32_t DependencyCount = UNSIGNED_ZERO;
             MacroColumnOfAPC Region = MacroColumnOfAPC::FREE_SLOT;
             SchemaProtocols Protocol = SchemaProtocols::PRIVATE_REGION;

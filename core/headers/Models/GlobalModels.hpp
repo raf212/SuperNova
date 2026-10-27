@@ -41,64 +41,18 @@ namespace BidirectionalInMemGraph::GMI
         uint64_t ModelDynamicsByteCount_{UNSIGNED_ZERO};
     };
 
-
     struct ModelCatalog final
     {
         std::span<const ModelInfo> Models{};
         std::span<const ModelDependency> Dependencies{};
-        std::span<std::byte> Dynamics{};
+        std::span<const std::byte> Dynamics{};
 
-        constexpr bool ValidInfo(const ModelInfo& mi) const noexcept
-        {
-            if (
-                mi.Model == PreBuildModels::NONE ||
-                mi.Model > LAST_DEFINED_MODEL_IDX ||
-                mi.ConfByteOffset > Dynamics.size() ||
-                mi.ConfByteCount > (Dynamics.size() - mi.ConfByteOffset)
-            ) 
-            {
-                return false;
-            }
-            return true;
-        }
+        constexpr bool ValidInfo(const ModelInfo& mi) const noexcept;
 
-        constexpr bool ValidateDependency(const ModelDependency& md) const noexcept
-        {
-            if (
-                !ADS::ValidateSlotIdx(md.Producer) ||
-                !ADS::ValidateSlotIdx(md.Consumer) ||
-                md.Producer == Models.size() ||
-                md.Consumer == Models.size() ||
-                static_cast<uint8_t>(md.ProducerRegion) >= ADS::CountOfMacroColumn() ||
-                static_cast<uint8_t>(md.ConsumerRegion) >= ADS::CountOfMacroColumn()
-            ) 
-            {
-                return false;
-            }
-            return true;
-        }
+        constexpr bool ValidateDependency(const ModelDependency& md) const noexcept;
 
-        constexpr bool Validate() const noexcept
-        {
-            if (Models.size() > ADS::APC_INDEX_BOUND_SENTINAL) 
-            {
-                return false;
-            }
+        constexpr bool Validate() const noexcept;
 
-            for (size_t i = 0; i < Models.size(); i++) 
-            {
-                const ModelInfo& mi = Models[i];
-                if (mi.Instance != i + 1 || !ValidInfo(mi)) 
-                {
-                    return false;
-                }
-            }
-
-            for (const ModelDependency& md : Dependencies) 
-            {
-                if (!ValidateDependency(md)) return false;
-            }
-            return true;
-        }
+        constexpr bool Accept(const SchemaDefinition::RegionSchemaRecord& region) noexcept;
     };
 }
