@@ -34,8 +34,6 @@ namespace BidirectionalInMemGraph
 
     static constexpr uint8_t EDGE_COUNT = 2u;
 
-
-
     enum class MacroColumnOfAPC : uint8_t
     {
         BOTTOM_UP_SLOT  = 0,
@@ -69,6 +67,14 @@ namespace BidirectionalInMemGraph
         LIVE = 2,
         RETIRED = 3,
         HAULTED = 4
+    };
+
+    enum class PreBuildModels : uint8_t
+    {
+        NONE = 0,
+        TRANSFORMER = 1,
+        STRUCTRURAL_ADAPTATION = 2,
+        GHGF = 3
     };
     
     static  constexpr uint64_t MaskLowBitsForU64(unsigned n) noexcept
