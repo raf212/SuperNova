@@ -1,5 +1,6 @@
 #pragma once 
 #include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 
@@ -190,9 +191,11 @@ namespace BidirectionalInMemGraph
     ///RAW DATA END
 
     #if defined (_WIN32)
-        bool CreateWinMap_(uint64_t count) noexcept;
-        
-        bool CreateLinMap_(uint64_t count) noexcept;
+        ///@brief Before using  must fill valid Data_ and Bytes_
+        bool CreateWinMap_() noexcept;
+    // #else
+        ///@brief Before using  must fill valid Data_ and Bytes_
+        bool CreateLinMap_(uint64_t cells) noexcept;
     #endif
         void Swap_(NumericalBacking& other) noexcept;
     public:
@@ -214,7 +217,15 @@ namespace BidirectionalInMemGraph
 
         bool Create(const std::filesystem::path& path, uint64_t cells) noexcept;
 
-    
+        void CommitCreation() noexcept {PendingPath_.clear();}
+
+        uint64_t* DataPtr() noexcept {return Data_;}
+
+        bool Flush() noexcept;
+
+        bool Prefetch(uint64_t first_cell, uint64_t cells) noexcept;
+
+        void WarmAll() noexcept;
     };
 
 }
