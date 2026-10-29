@@ -853,8 +853,7 @@ namespace BidirectionalInMemGraph
                 slot,
                 generation_cell,
                 control_values.Generation
-            ) ||
-            !desired_apc.InitiateAPCMetaHeader()
+            )
         )
         {
             AbortCreation___();

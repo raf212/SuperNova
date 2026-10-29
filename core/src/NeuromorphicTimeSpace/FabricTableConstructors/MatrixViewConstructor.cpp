@@ -63,7 +63,7 @@ namespace BidirectionalInMemGraph
         SD::RegionSchemaTable prepared{};
         uint16_t observed_mask = UNSIGNED_ZERO;
         uint8_t prepared_count = UNSIGNED_ZERO;
-        uint32_t cursor = SD::AlignRegionCells(ADS::META_CELL_COUNT);
+        uint32_t cursor = UNSIGNED_ZERO;
 
         for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
         {

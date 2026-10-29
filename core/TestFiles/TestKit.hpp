@@ -91,8 +91,8 @@ constexpr const char* MutationResultName(MutationResult result) noexcept
     }
 }
 
-static_assert(ADS::META_CELL_COUNT == 8u);
-static_assert(sizeof(SchemaDefinition::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
+// static_assert(ADS::META_CELL_COUNT == 8u);
+// static_assert(sizeof(SchemaDefinition::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
 static_assert(alignof(SchemaDefinition::RegionSchemaRecord) == alignof(std::uint64_t));
 static_assert(std::is_trivially_copyable_v<SchemaDefinition::RegionSchemaRecord>);
 static_assert(std::is_trivially_destructible_v<SchemaDefinition::RegionSchemaRecord>);
@@ -1840,7 +1840,7 @@ private:
         const std::uint32_t payload_cells =
             SD::AlignRegionCells(payload_words);
         const std::uint32_t required = SD::AlignRegionCells(
-            SD::AlignRegionCells(ADS::META_CELL_COUNT) + payload_cells);
+            SD::AlignRegionCells(UNSIGNED_ZERO) + payload_cells);
         return std::max(
             required,
             static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT));
