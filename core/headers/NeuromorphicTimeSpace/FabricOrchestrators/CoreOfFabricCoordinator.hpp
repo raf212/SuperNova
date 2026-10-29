@@ -63,7 +63,7 @@ namespace BidirectionalInMemGraph
             ///MATRIX CONSTRUCTION
             uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
             uint16_t ActiveRegionMask_{UNSIGNED_ZERO};
-            uint16_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
+            uint32_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
             uint32_t MatrixBatchCapacity_{UNSIGNED_ZERO};
             uint64_t RegionAlignmentCellCount_{UNSIGNED_ZERO};
 
@@ -128,6 +128,15 @@ namespace BidirectionalInMemGraph
             return entry;        
         }
 
+        static constexpr uint8_t RECORD_BOOK_INTERNAL_SEGMENT_COUNT = static_cast<uint8_t>(FabricSegments::SEGMENT_POOL) + 1;
+
+        struct FabricSegmentBounds
+        {
+            uint64_t BeginIndex = UNSIGNED_ZERO;
+            uint64_t EndIndex = UNSIGNED_ZERO;
+            FabricSegments OwnerTableOfTheBounds{};
+            bool IsValid = false;  
+        };
     };
 
     namespace GMI
@@ -160,18 +169,5 @@ namespace BidirectionalInMemGraph
         }
     }
 
-    struct RecordBookConf
-    {
-        static constexpr uint8_t RECORD_BOOK_INTERNAL_SEGMENT_COUNT = static_cast<uint8_t>(FabricSegments::SEGMENT_POOL) + 1;
-
-        struct FabricSegmentBounds
-        {
-            uint64_t BeginIndex = UNSIGNED_ZERO;
-            uint64_t EndIndex = UNSIGNED_ZERO;
-            FabricSegments OwnerTableOfTheBounds{};
-            bool IsValid = false;  
-        };
-
-    };
 
 }

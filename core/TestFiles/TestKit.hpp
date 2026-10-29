@@ -4893,7 +4893,7 @@ public:
 
     std::optional<ADS::RangeOfAPC> TableRange(FabricSegments table) noexcept
     {
-        RecordBookConf::FabricSegmentBounds bounds{};
+        CoreOfFabricCoordinator::FabricSegmentBounds bounds{};
         if (!GetRecordMapCarrierRanges_(table, bounds) || !bounds.IsValid)
         {
             return std::nullopt;
@@ -4972,7 +4972,7 @@ inline bool SchemaABIAndGeometry() noexcept
         return false;
     }
 
-    ordinary.CellOffset = ADS::META_CELL_COUNT;
+    ordinary.CellOffset = UNSIGNED_ZERO;
     const auto ordinary_bytes = SD::MatrixByteCount(ordinary);
     const auto ordinary_cells = SD::MatrixCellCount(ordinary);
     const auto ordinary_stride = SD::RecordStrideCells(ordinary);
@@ -4996,7 +4996,7 @@ inline bool SchemaABIAndGeometry() noexcept
         double_buffer,
         2u
     );
-    double_buffer.CellOffset = ADS::META_CELL_COUNT;
+    double_buffer.CellOffset = UNSIGNED_ZERO;
 
     SD::RegionSchemaRecord queue{};
     queue = ordinary;
@@ -5007,7 +5007,7 @@ inline bool SchemaABIAndGeometry() noexcept
         queue,
         4u
     );
-    queue.CellOffset = ADS::META_CELL_COUNT;
+    queue.CellOffset = UNSIGNED_ZERO;
 
     SD::RegionSchemaRecord invalid{};
     SD::RegionSchemaRecord invalid_1{};
@@ -5563,7 +5563,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     };
 
     bool row_ok = row.size() == active_count;
-    std::uint32_t expected_offset = ADS::META_CELL_COUNT;
+    std::uint32_t expected_offset = UNSIGNED_ZERO;
     for (std::size_t i = 0u; row_ok && i < row.size(); ++i)
     {
         expected_offset = SD::AlignRegionCells(expected_offset);
@@ -5587,8 +5587,8 @@ inline bool DeviceViewAndProtocolStorage() noexcept
             static_cast<std::uintptr_t>(row_cells) * sizeof(std::uint64_t) &&
         row[0u].MatrixHeight == 3u &&
         second_row[0u].MatrixHeight == 5u &&
-        row[0u].CellOffset == ADS::META_CELL_COUNT &&
-        second_row[0u].CellOffset == ADS::META_CELL_COUNT;
+        row[0u].CellOffset == UNSIGNED_ZERO &&
+        second_row[0u].CellOffset == UNSIGNED_ZERO;
 
     const bool header_ok =
         fabric.ReadAPCLocalCell(

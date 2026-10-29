@@ -181,7 +181,7 @@ namespace BidirectionalInMemGraph
             Data_ ||
             !PendingPath_.empty() ||
             !cells ||
-            cells > MAX_CELL_COUNT
+            cells > LIMIT_OF_CELL_COUNT
         ) 
         {
             return false;

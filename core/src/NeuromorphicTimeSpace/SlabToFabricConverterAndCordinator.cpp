@@ -259,7 +259,7 @@ namespace BidirectionalInMemGraph
 
         size_t cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(CoreOfFabricCoordinator::FABRIC_UNIT_COUNT);
         const size_t record_book_begin = cursor;
-        const size_t record_book_end = record_book_begin + static_cast<size_t>(RecordBookConf::RECORD_BOOK_INTERNAL_SEGMENT_COUNT) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
+        const size_t record_book_end = record_book_begin + static_cast<size_t>(CoreOfFabricCoordinator::RECORD_BOOK_INTERNAL_SEGMENT_COUNT) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
 
         cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(record_book_end);
         const size_t horizontal_edge_begin = cursor;
@@ -463,7 +463,7 @@ namespace BidirectionalInMemGraph
             sizeof(cache)
         );
 
-        if (!APCRelocationDef::ValidateFabricCache(cache, cell_count))
+        if (!StorageAllocationDef::ValidateFabricCache(cache, cell_count))
         {
             return false;
         }

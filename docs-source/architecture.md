@@ -164,9 +164,9 @@ table constructors + lifecycle + edge/handle primitives
 | `APCOrchestrators/SchemaOrchestratorForRegion.hpp` | Region schema ABI, dtype/protocol flags and validation. | `SchemaOrchestrator`, `SchemaValidator`, `SchemaDefinition` |
 | `APCOrchestrators/SharedConf.hpp` | Shared enums, sentinels, limits. | `MacroColumnOfAPC`, `FabricSegments`, `StateOfAPC` |
 | `APCOrchestrators/ViewOrchestrator.hpp` | Typed non-owning region views held by an APC use token. | `ResolveRegionBiteView`, `APCStorageGeometry`, `RegionView<T>` |
-| `FabricOrchestrators/CoreOfFabricCoordinator.hpp` | Global Fabric metadata, record-book geometry, raw allocator. | `CoreOfFabricCoordinator`, `RecordBookConf`, `RawPackedCellAllocator` |
+| `FabricOrchestrators/CoreOfFabricCoordinator.hpp` | Global Fabric metadata, record-book geometry, raw allocator. | `CoreOfFabricCoordinator`, `CoreOfFabricCoordinator`, `RawPackedCellAllocator` |
 | `FabricOrchestrators/EdgeTableConf.hpp` | Packed relation/header layout and DAG legality helpers. | `EdgeBuilder` |
-| `FabricOrchestrators/HandleAndRetirement.hpp` | Generation/active-count control cell and relocation cache validation. | `HandleOfAPCStatic`, `APCRelocationDef` |
+| `FabricOrchestrators/HandleAndRetirement.hpp` | Generation/active-count control cell and relocation cache validation. | `HandleOfAPCStatic`, `StorageAllocationDef` |
 | `FabricTableConstructors/FabricConstructor.h` | Lowest slab read/write/atomic primitives; schema/handle table base classes. | `FabricConstructor`, `MatrixViewConstructor`, `APCHandleAndRetirement` |
 | `FabricTableConstructors/CompleteFabric.h` | Record book, APC lifecycle, edge table, compiled DAG masks. | `RecordBookConstructor`, `APCLifeCycle`, `EdgeTableConstructor`, `CompiledDAGTableConstructor` |
 | `SlabToFabricConverterAndCordinator.h` | Full slab layout, ownership, relocation, transaction structures. | `SlabToFabricConverterAndCordinator`, `DAGMutationConf`, `ConstructDAGOnEachAxis` |
@@ -684,7 +684,7 @@ bit      63 : Closed
 | `IsOpenGeneration(raw,expected)` | control + expected gen | bool | Exact generation match and `Closed==false`. |
 | `CellOffset(slot)` | slot | size_t | Handle-table row offset for one-cell-per-slot table. |
 
-### `APCRelocationDef::ValidateFabricCache`
+### `StorageAllocationDef::ValidateFabricCache`
 
 Validates a copied/borrowed image before attachment: format version, supplied slab size, APC/slot bounds, 24-bit relation-slot capacity, K, edge row width, active schema mask/count, batch, matrix-row geometry, record-book bounds, segment-pool arithmetic, and exact slab end. **This is format/layout validation, not cryptographic integrity or crash-consistency validation.**
 
