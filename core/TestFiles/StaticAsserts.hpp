@@ -39,6 +39,6 @@ namespace BidirectionalInMemGraph
 
     //
     static_assert(sizeof(GMI::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
-    static_assert(sizeof(GMI::ModelStorageDiaphragm) == 5 * sizeof(uint64_t));
+    static_assert(sizeof(GMI::ModelStorageDiaphragm) == 6 * sizeof(uint64_t));
 
 }

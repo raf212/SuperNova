@@ -80,6 +80,7 @@ namespace BidirectionalInMemGraph
 
         using RegionSchemaTable = std::array<RegionSchemaRecord, ADS::CountOfMacroColumn()>;
         using RSSpan = std::span<RegionSchemaRecord>;
+        using ConstRSSpan = std::span<const RegionSchemaRecord>;
 
     };
     
