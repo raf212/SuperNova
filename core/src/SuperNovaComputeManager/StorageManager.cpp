@@ -121,9 +121,9 @@ namespace BidirectionalInMemGraph
         };
         return function && function(GetCurrentProcess(), 1, &range, 0);
     }
-#endif
 
-#if !defined (_WIN32)
+#else
+
     bool NumericalBacking::CreateLinMap_(uint64_t cells) noexcept
     {
         File_ = ::open(PendingPath_.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
@@ -157,6 +157,20 @@ namespace BidirectionalInMemGraph
         {
             Data_ = static_cast<uint64_t*>(address);
         }
+    }
+
+    bool NumericalBacking::LinPrefetch_(uint64_t first_cell, uint64_t cells) noexcept
+    {
+        const size_t page_size = ::sysconf(_SC_PAGE_SIZE);
+        if (page_size < UNSIGNED_ZERO) return false;
+
+        const size_t begin = static_cast<size_t>((first_cell * sizeof(uint64_t)) / page_size) * page_size;
+        const size_t end = static_cast<size_t>((first_cell + cells) * sizeof(uint64_t));
+        return ::madvise(
+            reinterpret_cast<std::byte*>(Data_) + begin,
+            end - begin,
+            MADV_WILLNEED
+        ) == UNSIGNED_ZERO;
     }
 
 #endif
@@ -215,7 +229,34 @@ namespace BidirectionalInMemGraph
 
         if (!cells) return false;
         
+    #if defined (_WIN32)
+        return WinPrefetch_(first_cell, cells);
+    #else
+        return LinPrefetch_(first_cell, cells);
+    #endif
     }
+
+    void NumericalBacking::WarmAll() noexcept
+    {
+        if (!Data_) return;
+    #if defined (_WIN32)
+        SYSTEM_INFO info;
+        GetSystemInfo(&info);
+        const size_t page = info.dwPageSize;
+    #else
+        const long size = ::sysconf(_SC_PAGESIZE);
+        const size_t page = size > UNSIGNED_ZERO ? static_cast<size_t>(size) : 4096;
+    #endif
+        Data_ = nullptr;
+        Bytes_ = UNSIGNED_ZERO;
+        if (!PendingPath_.empty()) 
+        {
+            std::error_code ignored;
+            std::filesystem::remove(PendingPath_, ignored);
+            PendingPath_.clear();
+        }
+    }
+
 
 
 

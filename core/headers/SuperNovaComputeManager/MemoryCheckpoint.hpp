@@ -157,7 +157,7 @@ namespace BidirectionalInMemGraph
             return hash;
         }
 
-        static constexpr bool WriteWord(std::ostream& out, uint64_t value) noexcept
+        static bool WriteWord(std::ostream& out, uint64_t value) noexcept
         {
             for (uint64_t i = 0; i < BYTES_PER_WORD; i++) 
             {
