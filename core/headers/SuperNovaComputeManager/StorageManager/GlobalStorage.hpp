@@ -1,5 +1,19 @@
 #pragma once 
 #include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
+#include <filesystem>
+#include <limits>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace BidirectionalInMemGraph
 {
@@ -117,7 +131,6 @@ namespace BidirectionalInMemGraph
         }
     };
 
-
     class PackedCellStorage final
     {
         uint64_t* Data_{};
@@ -159,6 +172,49 @@ namespace BidirectionalInMemGraph
         uint64_t* Data() const noexcept {return Data_;}
 
         uint64_t* Relese() noexcept {return std::exchange(Data_, nullptr);}
+    };
+
+    class NumericalBacking final
+    {
+    private:
+        uint64_t* Data_{};
+        size_t Bytes_{};
+        std::filesystem::path PendingPath_{};
+
+    #if defined (_WIN32)
+        HANDLE File_{INVALID_HANDLE_VALUE};
+        HANDLE Mapping_{};
+    #else
+        int File_{-1};
+    #endif
+    ///RAW DATA END
+
+    #if defined (_WIN32)
+        bool CreateWinMap_(uint64_t count) noexcept;
+        
+        bool CreateLinMap_(uint64_t count) noexcept;
+    #endif
+        void Swap_(NumericalBacking& other) noexcept;
+    public:
+        NumericalBacking() = default;
+        NumericalBacking(const NumericalBacking&) = delete;
+        NumericalBacking& operator = (const NumericalBacking&) = delete;
+        NumericalBacking(NumericalBacking&& other) noexcept
+        {
+            Swap_(other);
+        }
+        NumericalBacking& operator = (NumericalBacking&& other) noexcept
+        {
+            if (this != &other) {Close(); Swap_(other);}
+            return *this;
+        }
+        ~NumericalBacking() {Close();}
+
+        void Close() noexcept;
+
+        bool Create(const std::filesystem::path& path, uint64_t cells) noexcept;
+
+    
     };
 
 }
