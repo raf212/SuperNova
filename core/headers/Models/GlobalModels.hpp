@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph::GMI
     {
         uint64_t GlobalTableBeginIdx_{UNSIGNED_ZERO};
         uint64_t LocalDirectoryBeginIdx_{UNSIGNED_ZERO};
-        uint64_t LocalDirectoryCellCount_{UNSIGNED_ZERO};
+        uint64_t DirectoryCellCount_{UNSIGNED_ZERO};
         uint16_t ModelCount_{ModelDependency::INVALID_MODEL_IDX};
         uint32_t ModelDependencyCount_{UNSIGNED_ZERO};
         uint64_t ModelDynamicsByteCount_{UNSIGNED_ZERO};
