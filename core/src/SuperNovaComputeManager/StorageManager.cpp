@@ -101,6 +101,26 @@ namespace BidirectionalInMemGraph
         if (!Data_) {Close(); return false;}
         return true;
     }
+
+    bool NumericalBacking::WinPrefetch_(uint64_t first_cell, uint64_t cells) noexcept
+    {
+        struct RangePF__
+        {
+            void* VirtualAddress;
+            SIZE_T NumberOfBytes;
+        };
+
+        using FN__ = BOOL (WINAPI*) (HANDLE, ULONG_PTR, RangePF__*, ULONG);
+        auto function = reinterpret_cast<FN__>(GetProcAddress(
+            GetModuleHandleW(L"kernel32.dll"),
+            "PrefetchVirtualMemory"
+        ));
+        RangePF__ range{
+            Data_ + first_cell,
+            static_cast<SIZE_T>(cells * sizeof(uint64_t))
+        };
+        return function && function(GetCurrentProcess(), 1, &range, 0);
+    }
 #endif
 
 #if !defined (_WIN32)
@@ -147,8 +167,7 @@ namespace BidirectionalInMemGraph
             Data_ ||
             !PendingPath_.empty() ||
             !cells ||
-            cells > SIZE_MAX / sizeof(uint64_t) ||
-            cells > uint64_t{INT64_MAX} / sizeof(uint64_t)
+            cells > MAX_CELL_COUNT
         ) 
         {
             return false;
@@ -170,6 +189,36 @@ namespace BidirectionalInMemGraph
         return CreateLinMap_(cells);
     #endif
     }
+
+    bool NumericalBacking::Flush() noexcept
+    {
+        if (!Data_) return false;
+
+    #if defined (_WIN32)
+        return FlushViewOfFile(Data_, Bytes_) &&
+            FlushFileBuffers(File_);
+    #else
+        return ::msync(Data_, Bytes_, MS_SYNC) == UNSIGNED_ZERO && 
+            ::fsync(File_);
+    #endif
+    }
+
+    bool NumericalBacking::Prefetch(uint64_t first_cell, uint64_t cells) noexcept
+    {
+        if (
+            !Data_ || first_cell > Bytes_ / sizeof(uint64_t) || 
+            cells > (Bytes_ / sizeof(uint64_t)) - first_cell
+        ) 
+        {
+            return false;
+        }
+
+        if (!cells) return false;
+        
+    }
+
+
+
 
 
 

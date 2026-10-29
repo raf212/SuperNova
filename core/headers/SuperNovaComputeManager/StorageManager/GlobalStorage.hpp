@@ -193,9 +193,13 @@ namespace BidirectionalInMemGraph
     #if defined (_WIN32)
         ///@brief Before using  must fill valid Data_ and Bytes_
         bool CreateWinMap_() noexcept;
+
+        bool WinPrefetch_(uint64_t first_cell, uint64_t cells) noexcept;
     // #else
         ///@brief Before using  must fill valid Data_ and Bytes_
         bool CreateLinMap_(uint64_t cells) noexcept;
+
+        bool LinPrefetch_(uint64_t first_cell, uint64_t cells) noexcept;
     #endif
         void Swap_(NumericalBacking& other) noexcept;
     public:

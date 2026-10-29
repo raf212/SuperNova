@@ -34,6 +34,8 @@ namespace BidirectionalInMemGraph
 
     static constexpr uint8_t EDGE_COUNT = 2u;
 
+    static constexpr uint64_t MAX_CELL_COUNT = INT64_MAX / sizeof(uint64_t); //8 exabytes-limited by os
+
     enum class MacroColumnOfAPC : uint8_t
     {
         BOTTOM_UP_SLOT  = 0,
