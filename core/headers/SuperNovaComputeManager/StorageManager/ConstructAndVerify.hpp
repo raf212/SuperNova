@@ -10,21 +10,23 @@ struct StorageAllocationDef
     using SD = SchemaDefinition;
     using EB = EdgeBuilder;
 
-    inline static std::array<CFC::FabricSegmentBounds, CFC::RECORD_BOOK_INTERNAL_SEGMENT_COUNT> __DefaultSegments__{};
+    using SegmentBounds = std::array<CFC::FabricSegmentBounds, CFC::RECORD_BOOK_INTERNAL_SEGMENT_COUNT>;
+    SegmentBounds DefaultSegments__{};
 
     static constexpr bool FabCacheValid(CFC::FabricCache& cache) noexcept
     {
         if (
-            cache.CountOfAPC_ > UNSIGNED_ZERO ||
+            cache.CountOfAPC_ == UNSIGNED_ZERO ||
+            !ADS::ValidateSlotIdx(cache.CountOfAPC_) ||
             !ADS::IsCapacityOfAPCValid(cache.PerAPCRuntimeCellCount_) ||
-            cache.PerAPCRuntimeCellCount_ % SD::RegionSchemaCellCount() != UNSIGNED_ZERO ||
+            cache.PerAPCRuntimeCellCount_ % SD::REGION_ALIGNMENT_CELLS != UNSIGNED_ZERO ||
             !EB::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_) ||
-            !EB::IsBoundedRelationLocatorSize(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_);
+            !EB::IsBoundedRelationLocatorSize(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_) ||
             cache.ActiveRegionMask_ == UNSIGNED_ZERO ||
             (cache.ActiveRegionMask_ & ~ADS::ValidRegionMask()) ||
             cache.MatrixBatchCapacity_ == UNSIGNED_ZERO ||
             cache.ModelDiaphragm_.ModelCount_ == GMI::ModelDependency::INVALID_MODEL_IDX ||
-            cache.ModelDiaphragm_.DirectoryCellCount_ > GMI::ModelDependency::INVALID_MODEL_IDX
+            cache.ModelDiaphragm_.DynamicsRevision_ == UNSIGNED_ZERO
         ) 
         {
             return false;
@@ -37,7 +39,7 @@ private :
     static constexpr std::optional<uint64_t> __LocalRecords__(CFC::FabricCache& cache) noexcept
     {
         uint64_t local_records = cache.ModelDiaphragm_.ModelCount_ * (sizeof(GMI::ModelInfo) / sizeof(uint64_t)) +
-            cache.ModelDiaphragm_.DirectoryCellCount_ * (sizeof(GMI::ModelDependency) / sizeof(uint64_t));
+            cache.ModelDiaphragm_.ModelDependencyCount_ * (sizeof(GMI::ModelDependency) / sizeof(uint64_t));
         return local_records > LIMIT_OF_CELL_COUNT ? std::nullopt : std::optional<uint64_t>{local_records};
     }
 
@@ -48,12 +50,12 @@ private :
         return dynamics > LIMIT_OF_CELL_COUNT ? std::nullopt : std::optional<uint64_t>{dynamics};
     }
 
-    static constexpr uint64_t __SegmentBegin__(FabricSegments segment) noexcept
+    static constexpr uint64_t __SegmentBegin__(const SegmentBounds& segments, FabricSegments segment) noexcept
     {
-        return __DefaultSegments__[static_cast<size_t>(segment)].BeginIndex;
+        return segments[static_cast<size_t>(segment)].BeginIndex;
     }
 
-    static constexpr bool __InitModelDescription__(CFC::FabricCache& cache, uint64_t& cursor) noexcept
+    static constexpr bool __InitModelDescription__(CFC::FabricCache& cache, SegmentBounds& segments, uint64_t& cursor) noexcept
     {
         using FS = FabricSegments;
         std::optional<uint64_t> lrm = __LocalRecords__(cache);
@@ -61,7 +63,7 @@ private :
 
         if (
             !lrm.has_value() || !drm.has_value() || 
-            lrm.value() + drm.value() > LIMIT_OF_CELL_COUNT
+            lrm.value() > LIMIT_OF_CELL_COUNT - drm.value()
         ) 
         {
             return false;
@@ -69,36 +71,47 @@ private :
 
         cache.ModelDiaphragm_.DirectoryCellCount_ = lrm.value() + drm.value();
 
-        CFC::FabricSegmentBounds& model_bounds = __DefaultSegments__[static_cast<size_t>(FS::MODEL_DESCRIPTION)];
+        const uint64_t per_slot_cells = sizeof(GMI::NodeModelDescription) / sizeof(uint64_t);
+        const uint64_t node_cells = static_cast<uint64_t>(cache.CountOfAPC_) * per_slot_cells;
+        if (node_cells > LIMIT_OF_CELL_COUNT - cursor) return false;
+        const uint64_t directory_begin = CFC::DefaultFabricAlignment16Cell(cursor + node_cells);
+        if (
+            directory_begin > LIMIT_OF_CELL_COUNT ||
+            cache.ModelDiaphragm_.DirectoryCellCount_ > LIMIT_OF_CELL_COUNT - directory_begin
+        )
+        {
+            return false;
+        }
+        CFC::FabricSegmentBounds& model_bounds = segments[static_cast<size_t>(FS::MODEL_DESCRIPTION)];
         model_bounds = {
-            cursor, 
-            cursor + (cursor * sizeof(GMI::NodeModelDescription)) + cache.ModelDiaphragm_.DirectoryCellCount_,
+            cursor,
+            directory_begin + cache.ModelDiaphragm_.DirectoryCellCount_,
             FS::MODEL_DESCRIPTION,
             true
         };
-        cache.ModelDiaphragm_.GlobalTableBeginIdx_ = __SegmentBegin__(FS::MODEL_DESCRIPTION);
-        cache.ModelDiaphragm_.LocalDirectoryBeginIdx_ = cursor;
+        cache.ModelDiaphragm_.GlobalTableBeginIdx_ = __SegmentBegin__(segments, FS::MODEL_DESCRIPTION);
+        cache.ModelDiaphragm_.LocalDirectoryBeginIdx_ = directory_begin;
         cursor = CFC::DefaultFabricAlignment16Cell(model_bounds.EndIndex);
         return cursor > LIMIT_OF_CELL_COUNT ? false : true;
     }
 
-    static constexpr void __InitHotCache__(CFC::FabricCache& cache) noexcept
+    static constexpr void __InitHotCache__(CFC::FabricCache& cache, const SegmentBounds& segments) noexcept
     {
         using FS = FabricSegments;
-        cache.RecordBookBeginIndex_ = __SegmentBegin__(FS::SLAB_RECORD_MAP);
-        cache.RecordBookEndIndex_=__DefaultSegments__[static_cast<size_t>(FabricSegments::SLAB_RECORD_MAP)].EndIndex;
-        cache.MatrixViewTableBeginIndex_ = __SegmentBegin__(FS::MATRIX_VIEW_TABLE);
-        cache.HorizontalEdgeBeginIdx_ = __SegmentBegin__(FS::VALUE_PARENT_EDGE_TABLE_H);
-        cache.VerticalEdgeBeginIdx_ = __SegmentBegin__(FS::VOLATILE_PARENT_EDGE_TABLE_V);
-        cache.HandleTableBeginIndex_ = __SegmentBegin__(FS::APC_HANDLE_TABLE);
-        cache.SegmentPoolBegin_ = __SegmentBegin__(FS::SEGMENT_POOL);
-        cache.SlabCellCount_=__DefaultSegments__[static_cast<size_t>(FabricSegments::SEGMENT_POOL)].EndIndex;
+        cache.RecordBookBeginIndex_ = __SegmentBegin__(segments, FS::SLAB_RECORD_MAP);
+        cache.RecordBookEndIndex_=segments[static_cast<size_t>(FabricSegments::SLAB_RECORD_MAP)].EndIndex;
+        cache.MatrixViewTableBeginIndex_ = __SegmentBegin__(segments, FS::MATRIX_VIEW_TABLE);
+        cache.HorizontalEdgeBeginIdx_ = __SegmentBegin__(segments, FS::VALUE_PARENT_EDGE_TABLE_H);
+        cache.VerticalEdgeBeginIdx_ = __SegmentBegin__(segments, FS::VOLATILE_PARENT_EDGE_TABLE_V);
+        cache.HandleTableBeginIndex_ = __SegmentBegin__(segments, FS::APC_HANDLE_TABLE);
+        cache.SegmentPoolBegin_ = __SegmentBegin__(segments, FS::SEGMENT_POOL);
+        cache.SlabCellCount_= segments[static_cast<size_t>(FabricSegments::SEGMENT_POOL)].EndIndex;
 
     }
 
 public :
 
-    static constexpr bool BuildStorage(CFC::FabricCache& cache)
+    constexpr bool BuildStorage(CFC::FabricCache& cache) noexcept
     {
         using FS = FabricSegments;
 
@@ -113,6 +126,8 @@ public :
         cache.EdgeTableRecordWidth_ = EB::EdgeTableRecordWidth(cache.MaxDirectParentsPerAxis_);
         cache.RegionAlignmentCellCount_ = SD::REGION_ALIGNMENT_CELLS;
 
+        auto& segments = DefaultSegments__;
+        segments = {};
         uint64_t cursor = CFC::DefaultFabricAlignment16Cell(CFC::FABRIC_UNIT_COUNT);
 
         const auto Place___ = [&](FS segment, uint64_t count, uint64_t width) noexcept -> bool
@@ -124,64 +139,71 @@ public :
             {
                 return false;
             }
-            CFC::FabricSegmentBounds& bounds = __DefaultSegments__[static_cast<size_t>(segment)];
+            CFC::FabricSegmentBounds& bounds = segments[static_cast<size_t>(segment)];
             bounds = {
                 cursor, 
-                cursor + (cursor * width),
+                cursor + (count * width),
                 segment,
                 true
             };
             cursor = CFC::DefaultFabricAlignment16Cell(bounds.EndIndex);
-            return cursor < LIMIT_OF_CELL_COUNT;
+            return cursor <= LIMIT_OF_CELL_COUNT;
         };
 
+        if (!Place___(FS::SLAB_RECORD_MAP, CFC::RECORD_BOOK_INTERNAL_SEGMENT_COUNT, CFC::RECORD_BOOK_WIDTH)) return false;
+        // Preserve established structural cache-line placement after the record-book shrink.
+        cursor = std::max<uint64_t>(cursor, 512u / sizeof(uint64_t));
         if (
-            !Place___(FS::SLAB_RECORD_MAP, CFC::RECORD_BOOK_INTERNAL_SEGMENT_COUNT, CFC::RECORD_BOOK_WIDTH) ||
-            !Place___(FS::MATRIX_VIEW_TABLE, cache.CountOfAPC_, cache.MatrixViewRowCellCount_) ||
             !Place___(FS::VALUE_PARENT_EDGE_TABLE_H, cache.CountOfAPC_, cache.EdgeTableRecordWidth_) ||
+            !Place___(FS::MATRIX_VIEW_TABLE, cache.CountOfAPC_, cache.MatrixViewRowCellCount_) ||
             !Place___(FS::VOLATILE_PARENT_EDGE_TABLE_V, cache.CountOfAPC_, cache.EdgeTableRecordWidth_) ||
             !Place___(FS::APC_HANDLE_TABLE, cache.CountOfAPC_, HandleOfAPCStatic::HANDLE_TABLE_WIDTH) ||
-            !Place___(FS::APC_HANDLE_TABLE, cache.CountOfAPC_, CFC::WORK_RECORD_WIDTH_OF_FABRIC) ||
-            !__InitModelDescription__(cache, cursor) ||
-            !Place___(FS::SEGMENT_POOL, cache.CountOfAPC_, cache.PerAPCRuntimeCellCount_)
+            !Place___(FS::WORK_QUEUE, cache.CountOfAPC_, CFC::WORK_RECORD_WIDTH_OF_FABRIC) ||
+            !__InitModelDescription__(cache, segments, cursor)
         ) 
         {
             return false;
         }
-        __InitHotCache__(cache);
+        cursor = std::max<uint64_t>(cursor, CFC::DEFAULT_FABRIC_CONTROLIO_LENGTH);
+        if (!Place___(FS::SEGMENT_POOL, cache.CountOfAPC_, cache.PerAPCRuntimeCellCount_)) return false;
+        __InitHotCache__(cache, segments);
         return true;
+    }
+
+    static constexpr bool MatchesLayout(const CFC::FabricCache& actual, const CFC::FabricCache& expected) noexcept
+    {
+        return
+            actual.RecordBookBeginIndex_ == expected.RecordBookBeginIndex_ &&
+            actual.RecordBookEndIndex_ == expected.RecordBookEndIndex_ &&
+            actual.MatrixViewTableBeginIndex_ == expected.MatrixViewTableBeginIndex_ &&
+            actual.HorizontalEdgeBeginIdx_ == expected.HorizontalEdgeBeginIdx_ &&
+            actual.VerticalEdgeBeginIdx_ == expected.VerticalEdgeBeginIdx_ &&
+            actual.HandleTableBeginIndex_ == expected.HandleTableBeginIndex_ &&
+            actual.ModelDiaphragm_.GlobalTableBeginIdx_ == expected.ModelDiaphragm_.GlobalTableBeginIdx_ &&
+            actual.ModelDiaphragm_.LocalDirectoryBeginIdx_ == expected.ModelDiaphragm_.LocalDirectoryBeginIdx_ &&
+            actual.ModelDiaphragm_.DirectoryCellCount_ == expected.ModelDiaphragm_.DirectoryCellCount_ &&
+            actual.SegmentPoolBegin_ == expected.SegmentPoolBegin_ &&
+            actual.SlabCellCount_ == expected.SlabCellCount_ &&
+            actual.EdgeTableRecordWidth_ == expected.EdgeTableRecordWidth_ &&
+            actual.MatrixViewRowCellCount_ == expected.MatrixViewRowCellCount_ &&
+            actual.ActiveRegionCount_ == expected.ActiveRegionCount_ &&
+            actual.RegionAlignmentCellCount_ == expected.RegionAlignmentCellCount_;
     }
 
     static constexpr bool ValidateFabricCache(const CFC::FabricCache& cache, uint64_t supplied_cell_count) noexcept
     {
         if (
             cache.FormateVersion_ != CFC::FORMAT_VERSION ||
-            cache.SlabCellCount_ != supplied_cell_count ||
-            cache.SlabCellCount_ <  CFC::FABRIC_UNIT_COUNT ||
-            cache.SlabCellCount_ >= FABRIC_CELL_SENTINAL ||
-            cache.CountOfAPC_ == UNSIGNED_ZERO ||
-            cache.CountOfAPC_ > UINT32_MAX ||
-            cache.PerAPCRuntimeCellCount_ > UINT32_MAX ||
-            !ADS::IsCapacityOfAPCValid(cache.PerAPCRuntimeCellCount_) ||
-            !EdgeBuilder::IsValidConfigurableParentCapacity(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_)||
-            !EdgeBuilder::IsBoundedRelationLocatorSize(cache.MaxDirectParentsPerAxis_, cache.CountOfAPC_) ||
-            cache.EdgeTableRecordWidth_ != EdgeBuilder::EdgeTableRecordWidth(cache.MaxDirectParentsPerAxis_) ||
-            cache.ActiveRegionMask_ == UNSIGNED_ZERO ||
-            (cache.ActiveRegionMask_ & ~ADS::ValidRegionMask()) != UNSIGNED_ZERO ||
-            cache.ActiveRegionCount_ != std::popcount(cache.ActiveRegionMask_) ||
-            cache.ActiveRegionCount_ == UNSIGNED_ZERO ||
-            cache.MatrixBatchCapacity_ == UNSIGNED_ZERO ||
-            cache.MatrixViewRowCellCount_ != cache.ActiveRegionCount_ * SchemaDefinition::RegionSchemaCellCount() ||
-            cache.RecordBookBeginIndex_ >=  cache.RecordBookEndIndex_ ||
-            cache.RecordBookEndIndex_ > cache.SlabCellCount_ ||
-            cache.SegmentPoolBegin_ >= cache.SlabCellCount_ ||
-            cache.CountOfAPC_ > ((UINT64_MAX - cache.SegmentPoolBegin_) / cache.PerAPCRuntimeCellCount_) 
-        )
+            cache.SegmentPoolDiskByteOffset_ != UNSIGNED_ZERO ||
+            cache.ModelDiaphragm_.DynamicsRevision_ == UNSIGNED_ZERO ||
+            cache.SlabCellCount_ != supplied_cell_count
+        ) 
         {
             return false;
         }
-        return 
-            (cache.SegmentPoolBegin_ + (cache.CountOfAPC_ * cache.PerAPCRuntimeCellCount_)) == cache.SlabCellCount_;
+        auto expected = cache;
+        StorageAllocationDef planner;
+        return planner.BuildStorage(expected) && MatchesLayout(cache, expected);
     }
 
 };

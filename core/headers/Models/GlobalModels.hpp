@@ -1,5 +1,5 @@
 #pragma once 
-#include "../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
+#include "../AdaptivePackedCellContainer/APCOrchestrators/SchemaOrchestratorForRegion.hpp"
 
 ///GMI - Refers to (global model information)
 namespace BidirectionalInMemGraph::GMI
@@ -39,7 +39,7 @@ namespace BidirectionalInMemGraph::GMI
         uint16_t ModelCount_{UNSIGNED_ZERO};
         uint32_t ModelDependencyCount_{UNSIGNED_ZERO};
         uint64_t ModelDynamicsByteCount_{UNSIGNED_ZERO};
-        uint64_t DynamicRevision_{UNSIGNED_ZERO};
+        uint64_t DynamicsRevision_{1};
     };
 
     struct ModelCatalog final
@@ -67,8 +67,8 @@ namespace BidirectionalInMemGraph::GMI
             if (
                 !ADS::ValidateSlotIdx(md.Producer) ||
                 !ADS::ValidateSlotIdx(md.Consumer) ||
-                md.Producer == Models.size() ||
-                md.Consumer == Models.size() ||
+                (md.Producer == 0 || md.Producer > Models.size()) ||
+                (md.Consumer == 0 || md.Consumer > Models.size()) ||
                 static_cast<uint8_t>(md.ProducerRegion) >= ADS::CountOfMacroColumn() ||
                 static_cast<uint8_t>(md.ConsumerRegion) >= ADS::CountOfMacroColumn()
             ) 
@@ -80,7 +80,10 @@ namespace BidirectionalInMemGraph::GMI
 
         constexpr bool Validate() const noexcept
         {
-            if (Models.size() > ADS::APC_INDEX_BOUND_SENTINAL) 
+            if (
+                Models.size() > ModelDependency::INVALID_MODEL_IDX ||
+                Dependencies.size() > ADS::APC_INDEX_BOUND_SENTINAL
+            ) 
             {
                 return false;
             }
