@@ -1,5 +1,5 @@
 #pragma once 
-#include "FabricTableConstructors/CompleteFabric.h"
+#include "CompleteFabric.h"
 
 namespace BidirectionalInMemGraph
 {
