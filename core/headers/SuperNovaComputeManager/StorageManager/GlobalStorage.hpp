@@ -237,7 +237,7 @@ namespace BidirectionalInMemGraph
 
         RawPackedCellAllocator AllocatorOfFabric_{};
 
-        uint64_t* NumericalBase_() noexcept {StorageBasePtr_;}
+        uint64_t* NumericalBase_() noexcept { return StorageBasePtr_; }
     };
 
 }

@@ -32,7 +32,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        std::span<SchemaDefinition::RegionSchemaRecord> region_row = fabric_owner->MetrixViewRow_(
+        SchemaOrchestrator::ConstRSSpan region_row = fabric_owner->MetrixViewRow_(
             static_cast<uint32_t>(fabric_slot_idx)
         );
 

@@ -102,7 +102,7 @@ namespace BidirectionalInMemGraph
 
         struct alignas(uint64_t) NativeABI
         {
-            uint16_t FabCacheSize = sizeof(FabricCache);
+            uint16_t FabCacheSize = sizeof(CoreOfFabricCoordinator::FabricCache);
             uint16_t RegionSchemaSize = sizeof(SchemaOrchestrator::RegionSchemaRecord);
             uint16_t Version = CoreOfFabricCoordinator::FORMAT_VERSION;
             Endianess Endian = Endianess::LITTLE;
