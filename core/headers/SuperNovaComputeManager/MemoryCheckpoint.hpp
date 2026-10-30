@@ -24,7 +24,7 @@ namespace BidirectionalInMemGraph
             {
                 return High || Low;
             }
-            static FabricId New() noexcept
+            static FabricId New()
             {
                 std::random_device random;
                 FabricId id{(uint64_t{random()}<<32)^random(), (uint64_t{random()}<<32)^random()};
@@ -96,16 +96,16 @@ namespace BidirectionalInMemGraph
 
         enum class Endianess : uint16_t
         {
-            LITTLE_ENDIAN = 0,
-            BIG_ENDIAN = 1
+            LITTLE = 0,
+            BIG = 1
         };
 
         struct alignas(uint64_t) NativeABI
         {
             uint16_t FabCacheSize = sizeof(FabricCache);
             uint16_t RegionSchemaSize = sizeof(SchemaOrchestrator::RegionSchemaRecord);
-            uint16_t Version = 1u;
-            Endianess Endian = Endianess::LITTLE_ENDIAN;
+            uint16_t Version = CoreOfFabricCoordinator::FORMAT_VERSION;
+            Endianess Endian = Endianess::LITTLE;
         };
 
 
@@ -166,7 +166,7 @@ namespace BidirectionalInMemGraph
             return static_cast<bool>(out);
         }
 
-        static constexpr bool ReadWord(std::istream& input, uint64_t value) noexcept
+        static bool ReadWord(std::istream& input, uint64_t value) noexcept
         {
             value = UNSIGNED_ZERO;
             for (uint64_t i = 0; i < BYTES_PER_WORD; i++) 
@@ -174,8 +174,10 @@ namespace BidirectionalInMemGraph
                 const int encoded = input.get();
                 if (encoded == std::char_traits<char>::eof()) 
                 {
-                    value |= uint64_t{static_cast<unsigned char>(encoded)} << (i * LEN_OF_BYTE_IN_BITS);
+                    return false;
                 }
+                
+                value |= uint64_t{static_cast<unsigned char>(encoded)} << (i * LEN_OF_BYTE_IN_BITS);
             }
             return true;
         }

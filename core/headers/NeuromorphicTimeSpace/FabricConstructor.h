@@ -1,14 +1,12 @@
 #pragma once 
 #include <span>
 #include "FabricOrchestrators/HandleAndRetirement.hpp"
-#include "../SuperNovaComputeManager/StorageManager/ConstructAndVerify.hpp"
+#include "../SuperNovaComputeManager/StorageManager/GlobalStorage.hpp"
 
 namespace BidirectionalInMemGraph
 {
 
-    using FabricCache = CoreOfFabricCoordinator::FabricCache;
-
-    class FabricConstructor
+    class FabricConstructor : protected StoragePointers
     {
         friend class AdaptivePackedCellContainer;
     public:
@@ -17,19 +15,22 @@ namespace BidirectionalInMemGraph
         FabricExecutionGate ExecutionGate_{};
         
     protected:
+        using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
+        using DSA = DescriptionOfAPC;
+
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
-
-        uint64_t* SlabBasePtr_{nullptr};
-
-        FabricCache* FabCache_{nullptr};
 
         CoreOfFabricCoordinator::FabricBackigOwnership BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         std::atomic<bool> FabricInitialized_{false};
         std::atomic<bool> InitializationInProgress_{false};
-        RawPackedCellAllocator AllocatorOfFabric_{};
-        using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
 
-        using DSA = DescriptionOfAPC;
+        void RefreshNumericalBase_() noexcept;
+
+        uint64_t* ResolveCell(uint64_t index) noexcept;
+
+        GMI::NodeModelDescription* NodeModel_(uint32_t slot) noexcept;
+
+        constexpr bool IsCellStorageHot_(uint64_t index) noexcept;
 
         ADS::RangeOfAPC GetSegmentPoolRange(uint64_t single_description_index) noexcept;
 
@@ -104,11 +105,22 @@ namespace BidirectionalInMemGraph
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
             const uintptr_t slab = reinterpret_cast<uintptr_t>(SlabBasePtr_);
             const size_t bytes = count * sizeof(T);
-            const size_t slab_bytes = FabCache_->SlabCellCount_ * sizeof(uint64_t);
 
-            return begin >= slab
-                ? begin - slab < slab_bytes
-                : slab - begin < bytes;
+            auto OverLaps___ = [&](const void* mem, uint64_t cells) noexcept -> bool
+            {
+                const auto base = reinterpret_cast<uintptr_t>(mem);
+                return begin >= base ? (begin - base < cells * sizeof(uint64_t)) : 
+                    (base - begin < bytes);
+            };
+
+            return OverLaps___(
+                SlabBasePtr_, 
+                NumericalBackingPtr_->DataPtr() ? FabCache_->SegmentPoolBegin_ : FabCache_->SlabCellCount_
+            ) ||
+            (
+                NumericalBackingPtr_->DataPtr() &&
+                OverLaps___(NumericalBackingPtr_->DataPtr(), FabCache_->SlabCellCount_ - FabCache_->SegmentPoolBegin_)
+            );
         }
         
     };
@@ -117,10 +129,13 @@ namespace BidirectionalInMemGraph
     {
         friend class FabricToAPCLinker;
         friend class AdaptivePackedCellContainer;
-    protected:
+    public:
         using SD = SchemaDefinition;
+    private:
+        SD::ConstRSSpan MutableMatrixViewRow_(uint32_t apc_slot) noexcept;
+    protected:
 
-        SD::RSSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
+        SD::ConstRSSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
 
         bool ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept;
 

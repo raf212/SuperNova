@@ -145,4 +145,50 @@ namespace BidirectionalInMemGraph
     }
 
 
+    void FabricConstructor::RefreshNumericalBase_() noexcept
+    {
+        StorageBasePtr_ = NumericalBackingPtr_->DataPtr() ? 
+            NumericalBackingPtr_->DataPtr() :
+            (SlabBasePtr_ && FabCache_ ? (SlabBasePtr_ + FabCache_->SegmentPoolBegin_) : nullptr);
+    }
+
+    uint64_t* FabricConstructor::ResolveCell(uint64_t index) noexcept
+    {
+        if (
+            !FabCache_ ||
+            index > FabCache_->SlabCellCount_
+        )
+        {
+            return nullptr;
+        }
+
+        return index < FabCache_->SegmentPoolBegin_ ? (SlabBasePtr_ + index) :
+            NumericalBase_() + (index - FabCache_->SegmentPoolBegin_);
+    }
+
+    GMI::NodeModelDescription* FabricConstructor::NodeModel_(uint32_t slot) noexcept
+    {
+        return FabCache_ && slot < FabCache_->CountOfAPC_ ?
+            reinterpret_cast<GMI::NodeModelDescription*>(
+                SlabBasePtr_ + FabCache_->ModelDiaphragm_.GlobalTableBeginIdx_ + slot
+            ) : nullptr;
+    }
+
+    constexpr bool FabricConstructor::IsCellStorageHot_(uint64_t index) noexcept
+    {
+        if (
+            FabCache_ &&
+            SlabBasePtr_ &&
+            index < FabCache_->SegmentPoolBegin_
+        ) 
+        {
+            return true;
+        }
+        return false;
+    }
+
+
+
+
+
 }

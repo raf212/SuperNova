@@ -1,20 +1,5 @@
 #pragma once 
-#include "../../NeuromorphicTimeSpace/FabricOrchestrators/HandleAndRetirement.hpp"
-#include <cstdint>
-#include <filesystem>
-#include <limits>
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#endif
+#include "ConstructAndVerify.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -152,7 +137,7 @@ namespace BidirectionalInMemGraph
         PackedCellStorage(const PackedCellStorage&) = delete;
         PackedCellStorage& operator = (const PackedCellStorage&) = delete;
         PackedCellStorage(PackedCellStorage&& other) noexcept :
-            Data_(other.Data_), Count_(other.Count_),
+            Data_(other.Relese()), Count_(other.Count_),
             Alloc_(other.Alloc_), Owned_(other.Owned_)
         {}
         ~PackedCellStorage()
@@ -165,6 +150,11 @@ namespace BidirectionalInMemGraph
             if (Data_) return false;
             Alloc_ = allocator;
             Data_ = Alloc_.Allocate(count);
+            if (Data_) 
+            {
+                Count_ = count;
+                Owned_ = true;
+            }
             return Data_ != nullptr;
         }
 
@@ -224,13 +214,30 @@ namespace BidirectionalInMemGraph
 
         void CommitCreation() noexcept {PendingPath_.clear();}
 
-        uint64_t* DataPtr() noexcept {return Data_;}
+        uint64_t* DataPtr() const noexcept {return Data_;}
 
         bool Flush() noexcept;
 
         bool Prefetch(uint64_t first_cell, uint64_t cells) noexcept;
 
         void WarmAll() noexcept;
+    };
+
+
+    struct StoragePointers
+    {
+    protected:
+        using FabricCache = CoreOfFabricCoordinator::FabricCache;
+        NumericalBacking* NumericalBackingPtr_{};
+        uint64_t* StorageBasePtr_{nullptr};
+
+        uint64_t* SlabBasePtr_{nullptr};
+        FabricCache* FabCache_{nullptr};
+        uint64_t HotCellCount_{UNSIGNED_ZERO};
+
+        RawPackedCellAllocator AllocatorOfFabric_{};
+
+        uint64_t* NumericalBase_() noexcept {StorageBasePtr_;}
     };
 
 }
