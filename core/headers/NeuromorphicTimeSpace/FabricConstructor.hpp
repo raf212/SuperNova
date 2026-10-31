@@ -132,7 +132,7 @@ namespace BidirectionalInMemGraph
     public:
         using SD = SchemaDefinition;
     private:
-        SD::ConstRSSpan MutableMatrixViewRow_(uint32_t apc_slot) noexcept;
+        SD::RSSpan MutableMatrixViewRow_(uint32_t apc_slot) noexcept;
     protected:
 
         SD::ConstRSSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
