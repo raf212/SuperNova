@@ -1,5 +1,5 @@
 #pragma once 
-#include "SlabToFabricConverterAndCordinator.hpp"
+#include "NeuromorphicBiDAG.hpp"
 
 namespace BidirectionalInMemGraph
 {
