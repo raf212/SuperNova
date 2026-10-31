@@ -239,5 +239,32 @@ namespace BidirectionalInMemGraph
 
         uint64_t* NumericalBase_() noexcept { return StorageBasePtr_; }
     };
+}
 
+namespace BidirectionalInMemGraph::Numerics 
+{
+    using CFC = CoreOfFabricCoordinator;
+    class Replacement final
+    {
+    private:
+        SlabToFabricConverterAndCordinator& Self_;
+        PackedCellStorage Previous_;
+        NumericalBacking Numbers_;
+        CFC::FabricCache Cache_;
+        CFC::FabricBackigOwnership Ownership_;
+        RawPackedCellAllocator Allocator_;
+        SchemaDefinition::RegionSchemaTable Schemas_;
+        bool Active_;
+        bool Track_;
+        uint64_t Revision_;
+        bool Complete_{false};
+    public:
+        explicit Replacement(SlabToFabricConverterAndCordinator&) noexcept;
+        Replacement(const Replacement&) = delete;
+        Replacement& operator = (const Replacement&) = delete;
+        ~Replacement();
+
+        uint64_t Revision() const noexcept {return Revision_;}
+        void Commit() noexcept {Complete_ = true;}
+    };
 }

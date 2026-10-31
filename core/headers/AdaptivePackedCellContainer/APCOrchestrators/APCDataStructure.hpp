@@ -10,6 +10,7 @@ namespace BidirectionalInMemGraph
     class APCFinilizer;
     class AdaptivePackedCellContainer;
     class Computer;
+    class SlabToFabricConverterAndCordinator;
 
     struct APCDataStructure 
     {
