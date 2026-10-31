@@ -228,7 +228,7 @@ namespace BidirectionalInMemGraph
     {
     protected:
         using FabricCache = CoreOfFabricCoordinator::FabricCache;
-        NumericalBacking* NumericalBackingPtr_{};
+        NumericalBacking __NumericalBacking__{}; // __NumericalBacking__
         uint64_t* StorageBasePtr_{nullptr};
 
         uint64_t* SlabBasePtr_{nullptr};
@@ -247,7 +247,7 @@ namespace BidirectionalInMemGraph::Numerics
     class Replacement final
     {
     private:
-        SlabToFabricConverterAndCordinator& Self_;
+        APCFinilizer& Self_;
         PackedCellStorage Previous_;
         NumericalBacking Numbers_;
         CFC::FabricCache Cache_;
@@ -259,7 +259,7 @@ namespace BidirectionalInMemGraph::Numerics
         uint64_t Revision_;
         bool Complete_{false};
     public:
-        explicit Replacement(SlabToFabricConverterAndCordinator&) noexcept;
+        explicit Replacement(APCFinilizer&) noexcept;
         Replacement(const Replacement&) = delete;
         Replacement& operator = (const Replacement&) = delete;
         ~Replacement();

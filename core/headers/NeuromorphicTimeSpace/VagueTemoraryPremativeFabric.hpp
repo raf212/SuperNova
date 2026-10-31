@@ -8,6 +8,7 @@ class APCFinilizer : public ConstructDAGOnEachAxis
 {
     friend class AdaptivePackedCellContainer;
     friend class FabricToAPCLinker;
+    friend class Numerics::Replacement;
 private:
     bool RetireAPC_(
         uint32_t slot,

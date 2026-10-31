@@ -72,7 +72,7 @@ namespace BidirectionalInMemGraph
         ExclusiveLease phase = ExecutionGate().TryMaintenance();
         return phase &&
             !ExecutionGate_.IsPoisoned() &&
-            NumericalBackingPtr_->Flush();
+            __NumericalBacking__.Flush();
     }
 
     bool RelocatableSlabStorage::PrefetchNumerical(
@@ -94,7 +94,7 @@ namespace BidirectionalInMemGraph
         }
 
         return !IsDiskPaged() ||
-            NumericalBackingPtr_->Prefetch(
+            __NumericalBacking__.Prefetch(
                 static_cast<uint64_t>(slot) * FabCache_->PerAPCRuntimeCellCount_ + cell_offset, 
                 cells
             );
@@ -184,5 +184,17 @@ namespace BidirectionalInMemGraph
         return true;
         
     }
+
+}
+
+namespace BidirectionalInMemGraph::Numerics 
+{
+    Replacement::Replacement(APCFinilizer& self) noexcept :
+        Self_(self),
+        Previous_(
+            self.SlabBasePtr_, self.HotCellCount_, self.AllocatorOfFabric_,
+            self.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
+        ),
+        Numbers_(std::move(self.__NumericalBacking__)),
 
 }

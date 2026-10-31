@@ -24,6 +24,7 @@ namespace BidirectionalInMemGraph
         std::atomic<bool> FabricInitialized_{false};
         std::atomic<bool> InitializationInProgress_{false};
 
+
         void RefreshNumericalBase_() noexcept;
 
         uint64_t* ResolveCell(uint64_t index) noexcept;
@@ -115,11 +116,11 @@ namespace BidirectionalInMemGraph
 
             return OverLaps___(
                 SlabBasePtr_, 
-                NumericalBackingPtr_->DataPtr() ? FabCache_->SegmentPoolBegin_ : FabCache_->SlabCellCount_
+                __NumericalBacking__.DataPtr() ? FabCache_->SegmentPoolBegin_ : FabCache_->SlabCellCount_
             ) ||
             (
-                NumericalBackingPtr_->DataPtr() &&
-                OverLaps___(NumericalBackingPtr_->DataPtr(), FabCache_->SlabCellCount_ - FabCache_->SegmentPoolBegin_)
+                __NumericalBacking__.DataPtr() &&
+                OverLaps___(__NumericalBacking__.DataPtr(), FabCache_->SlabCellCount_ - FabCache_->SegmentPoolBegin_)
             );
         }
         

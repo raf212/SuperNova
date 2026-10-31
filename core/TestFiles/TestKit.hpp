@@ -5590,17 +5590,6 @@ inline bool DeviceViewAndProtocolStorage() noexcept
         row[0u].CellOffset == UNSIGNED_ZERO &&
         second_row[0u].CellOffset == UNSIGNED_ZERO;
 
-    const bool header_ok =
-        fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::MAGIC_ID)
-        ) == ADS::BRANCH_MAGIC &&
-        fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::APC_SLOT_IDX)
-        ) == slot &&
-        fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::EOF_APC_HEADER)
-        ) == ADS::EOF_HEADER;
-
     bool queue_storage_ok = row_ok;
     if (queue_storage_ok)
     {

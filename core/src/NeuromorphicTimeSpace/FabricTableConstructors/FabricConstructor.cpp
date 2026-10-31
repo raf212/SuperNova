@@ -147,8 +147,8 @@ namespace BidirectionalInMemGraph
 
     void FabricConstructor::RefreshNumericalBase_() noexcept
     {
-        StorageBasePtr_ = NumericalBackingPtr_->DataPtr() ? 
-            NumericalBackingPtr_->DataPtr() :
+        StorageBasePtr_ = __NumericalBacking__.DataPtr() ? 
+            __NumericalBacking__.DataPtr() :
             (SlabBasePtr_ && FabCache_ ? (SlabBasePtr_ + FabCache_->SegmentPoolBegin_) : nullptr);
     }
 

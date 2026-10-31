@@ -23,13 +23,14 @@ namespace BidirectionalInMemGraph
 
     ////
     using HAS = HandleOfAPCStatic;
+    using CFC = CoreOfFabricCoordinator;
     static_assert(std::atomic<HAS::LifeCycleControl>::is_always_lock_free == true);
     static_assert(std::atomic<HAS::ParentRowControl>::is_always_lock_free == true);
     static_assert(std::atomic<HAS::ChildListControl>::is_always_lock_free == true);
     static_assert(sizeof(HAS::StructuralHotRow) ==  8 * sizeof(uint64_t));
     static_assert((HandleOfAPCStatic::ACTIVE_COUNT_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
     static_assert((HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
-    static_assert(sizeof(FabricCache) == 24 * sizeof(uint64_t));
+    static_assert(sizeof(CFC::FabricCache) == 24 * sizeof(uint64_t));
 
     ///
     static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 8 * sizeof(uint64_t));

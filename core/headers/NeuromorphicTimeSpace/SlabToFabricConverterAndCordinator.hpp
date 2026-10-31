@@ -93,7 +93,7 @@ namespace BidirectionalInMemGraph
 
         bool IsDiskPaged() const noexcept
         {
-            return NumericalBackingPtr_->DataPtr() != nullptr;
+            return __NumericalBacking__.DataPtr() != nullptr;
         }
 
         std::span<uint64_t> NumericalStorage() noexcept
