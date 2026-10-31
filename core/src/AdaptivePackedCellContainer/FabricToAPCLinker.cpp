@@ -113,5 +113,35 @@ namespace BidirectionalInMemGraph
         return HandleOfAPCStatic::IsOpenGeneration(raw, APCCache_.CurrentGeneration_);
     }
 
+    bool FabricToAPCLinker::InitializeNodeModelDescription_() noexcept
+    {
+        if (!IsFabricBound_()) return false;
+        HAS::LifeCycleControl current_state{};
+        if (
+            APCCache_.FabricOwnerPtr_->ReadAPCStateAtomically_(
+                APCCache_.APCSlotIdx_, current_state
+            ) != SeqLockedOperation::FOUND ||
+            current_state.State != StateOfAPC::RESERVED
+        ) 
+        {
+            return false;
+        }
+
+        GMI::NodeModelDescription* model_record = APCCache_.FabricOwnerPtr_->NodeModel_(APCCache_.APCSlotIdx_);
+        if (!model_record) return false;
+        *model_record = {};
+        return true;
+    }
+
+    bool FabricToAPCLinker::IsFabricBound_() const noexcept
+    {
+        return APCCache_.FabricOwnerPtr_ != nullptr &&
+            APCCache_.RawAPCBasePtr_ != nullptr && 
+            APCCache_.GenerationCellPtr_ != nullptr &&
+            ADS::ValidateSlotIdx(APCCache_.APCSlotIdx_) &&
+            HandleOfAPCStatic::IsGenerationValid(APCCache_.CurrentGeneration_);
+    }
+
+
 
 }

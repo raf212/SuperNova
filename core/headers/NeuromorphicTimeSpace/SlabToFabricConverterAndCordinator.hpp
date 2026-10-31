@@ -66,7 +66,7 @@ namespace BidirectionalInMemGraph
         template<typename T>
         T* RegionT_(uint32_t slot, uint32_t cell_offset) noexcept
         {
-            return reinterpret_cast<T*>(SlabBasePtr_ + SlotBegin_(slot) + cell_offset);
+            return reinterpret_cast<T*>(ResolveCell(SlotBegin_(slot) + cell_offset));
         }
 
     public:
