@@ -3,10 +3,11 @@
 
 namespace BidirectionalInMemGraph
 {
-    
+    class RelocatableSlabStorage;
     class SlabToFabricConverterAndCordinator : public CompiledDAGTableConstructor
     {
         friend class AdaptivePackedCellContainer;
+        friend class RelocatableSlabStorage;
     private:
         uint64_t* AllocatePackedCellRaw_(size_t count_of_cells) noexcept;
         bool ValidateAttachedFabricLayout_() noexcept;
@@ -20,12 +21,6 @@ namespace BidirectionalInMemGraph
 
         void FreeRawPackedCells_(uint64_t*packed_cell_memory_ptr, size_t packed_cell_count) noexcept;
         void ResetScalarsofTheFabric_() noexcept;
-
-        template<typename T>
-        T* RegionT_(uint32_t slot, uint32_t cell_offset) noexcept
-        {
-            return reinterpret_cast<T*>(SlabBasePtr_ + SlotBegin_(slot) + cell_offset);
-        }
 
     public:
         using CFC = CoreOfFabricCoordinator;
@@ -63,18 +58,29 @@ namespace BidirectionalInMemGraph
             const CFC::FabricInitConf&  storage = {}
         ) noexcept;
 
-        bool SaveFabric(std::span<uint64_t> destination) noexcept;
-
         bool AttachFabric(
             uint64_t* raw_cells,
             uint64_t cell_count,
             CFC::FabricBackigOwnership ownership = CFC::FabricBackigOwnership::BORROWED
         ) noexcept;
 
-        CFC::DetachFabric DetachFabric() noexcept;
-        
     };
 
+    class RelocatableSlabStorage : public SlabToFabricConverterAndCordinator
+    {
+    protected:
+        template<typename T>
+        T* RegionT_(uint32_t slot, uint32_t cell_offset) noexcept
+        {
+            return reinterpret_cast<T*>(SlabBasePtr_ + SlotBegin_(slot) + cell_offset);
+        }
+
+    public:
+        CFC::DetachFabric DetachFabric() noexcept;
+
+        bool SaveFabric(std::span<uint64_t> destination) noexcept;
+
+    };
 
 
 

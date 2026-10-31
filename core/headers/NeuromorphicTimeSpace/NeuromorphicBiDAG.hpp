@@ -2,7 +2,7 @@
 
 namespace BidirectionalInMemGraph 
 {
-    class DAGMutationConf : public SlabToFabricConverterAndCordinator
+    class DAGMutationConf : public RelocatableSlabStorage
     {
     protected:
         static constexpr uint8_t DAG_MAX_ROW_PARTICIPANTS = 3u;
