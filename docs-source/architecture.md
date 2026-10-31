@@ -169,7 +169,7 @@ table constructors + lifecycle + edge/handle primitives
 | `FabricOrchestrators/HandleAndRetirement.hpp` | Generation/active-count control cell and relocation cache validation. | `HandleOfAPCStatic`, `StorageAllocationDef` |
 | `FabricTableConstructors/FabricConstructor.h` | Lowest slab read/write/atomic primitives; schema/handle table base classes. | `FabricConstructor`, `MatrixViewConstructor`, `APCHandleAndRetirement` |
 | `FabricTableConstructors/CompleteFabric.h` | Record book, APC lifecycle, edge table, compiled DAG masks. | `RecordBookConstructor`, `APCLifeCycle`, `EdgeTableConstructor`, `CompiledDAGTableConstructor` |
-| `SlabToFabricConverterAndCordinator.h` | Full slab layout, ownership, relocation, transaction structures. | `SlabToFabricConverterAndCordinator`, `DAGMutationConf`, `ConstructDAGOnEachAxis` |
+| `SlabToFabricConverterAndCordinator.hpp` | Full slab layout, ownership, relocation, transaction structures. | `SlabToFabricConverterAndCordinator`, `DAGMutationConf`, `ConstructDAGOnEachAxis` |
 | `VagueTemoraryPremativeFabric.hpp` | Final generic Fabric/APC facade constructor and resolver. | `APCFinilizer` |
 | `Models/GHGF/GHGFLayer.hpp` | GHGF mathematical storage schema, roles, message/state indices, structural mutation structs. | `GHGFLayerModel`, `GHGFLearningConfig`, `StructuralLearningGHGF` |
 | `Models/GHGF/GHGFNode.hpp` | One GHGF node layered over an APC. | `GHGFNode` |

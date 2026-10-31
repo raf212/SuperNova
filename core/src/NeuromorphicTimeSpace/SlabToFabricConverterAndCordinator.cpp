@@ -1,7 +1,4 @@
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
-#include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "NeuromorphicTimeSpace/SlabToFabricConverterAndCordinator.h"
-
+#include <SuperNova>
 namespace BidirectionalInMemGraph
 {
 

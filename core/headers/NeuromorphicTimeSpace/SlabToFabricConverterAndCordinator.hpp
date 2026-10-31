@@ -1,5 +1,5 @@
 #pragma once 
-#include "CompleteFabric.h"
+#include "CompleteFabric.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -8,7 +8,6 @@ namespace BidirectionalInMemGraph
     {
         friend class AdaptivePackedCellContainer;
     private:
-
         uint64_t* AllocatePackedCellRaw_(size_t count_of_cells) noexcept;
         bool ValidateAttachedFabricLayout_() noexcept;
         bool QuiesceFabric_() noexcept;
@@ -60,7 +59,8 @@ namespace BidirectionalInMemGraph
             uint32_t slot_count,
             uint32_t slot_cell_count,
             const SchemaDefinition::FabricRegionConfig& region_conf,
-            uint32_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS
+            uint32_t max_direct_parent_per_axis = ADS::DEFAULT_DIRECTED_PARENT_PER_AXIS,
+            const CFC::FabricInitConf&  storage = {}
         ) noexcept;
 
         bool SaveFabric(std::span<uint64_t> destination) noexcept;
