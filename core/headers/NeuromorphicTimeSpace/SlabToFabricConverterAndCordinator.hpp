@@ -58,12 +58,6 @@ namespace BidirectionalInMemGraph
             const CFC::FabricInitConf&  storage = {}
         ) noexcept;
 
-        bool AttachFabric(
-            uint64_t* raw_cells,
-            uint64_t cell_count,
-            CFC::FabricBackigOwnership ownership = CFC::FabricBackigOwnership::BORROWED
-        ) noexcept;
-
     };
 
     class RelocatableSlabStorage : public SlabToFabricConverterAndCordinator
@@ -76,9 +70,55 @@ namespace BidirectionalInMemGraph
         }
 
     public:
+        bool AttachFabric(
+            uint64_t* raw_cells,
+            uint64_t cell_count,
+            CFC::FabricBackigOwnership ownership = CFC::FabricBackigOwnership::BORROWED,
+            const CFC::FabricInitConf& storage = {}
+        ) noexcept;
+
         CFC::DetachFabric DetachFabric() noexcept;
 
         bool SaveFabric(std::span<uint64_t> destination) noexcept;
+
+        bool SaveHotSubFabric(std::span<uint64_t> destination) noexcept;
+
+        bool FlushNumericalBacking() noexcept;
+
+        bool PrefetchNumerical(
+            uint32_t slot,
+            uint32_t cell_offset,
+            uint32_t cells
+        ) noexcept;
+
+        bool IsDiskPaged() const noexcept
+        {
+            return NumericalBackingPtr_->DataPtr() != nullptr;
+        }
+
+        std::span<uint64_t> NumericalStorage() noexcept
+        {
+            return FabCache_ ? 
+                std::span<uint64_t>{
+                    NumericalBase_(), 
+                    FabCache_->SlabCellCount_ - FabCache_->SegmentPoolBegin_
+                } :
+                std::span<uint64_t>{};
+        }
+
+        std::span<uint64_t> HotStorageDramUSM() noexcept
+        {
+            return FabCache_ ?
+                std::span<uint64_t>{SlabBasePtr_, FabCache_->SegmentPoolBegin_} :
+                std::span<uint64_t>{};
+        }
+
+        std::span<uint64_t> ContiguousStorage() noexcept
+        {
+            return FabCache_  && !IsDiskPaged() ? 
+                std::span<uint64_t>{SlabBasePtr_, FabCache_->SlabCellCount_} :
+                std::span<uint64_t>{};
+        }
 
     };
 
