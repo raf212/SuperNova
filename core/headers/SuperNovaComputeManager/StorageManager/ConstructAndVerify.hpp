@@ -1,3 +1,4 @@
+#pragma once
 #include "../../NeuromorphicTimeSpace/FabricOrchestrators/HandleAndRetirement.hpp"
 #include <cstdint>
 #include <filesystem>

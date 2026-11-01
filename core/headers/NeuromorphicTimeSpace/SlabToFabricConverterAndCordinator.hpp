@@ -16,9 +16,16 @@ namespace BidirectionalInMemGraph
         bool ValidateAttachedFabricLayout_() noexcept;
         bool QuiesceFabric_() noexcept;
         bool ReopenLiveAPCGenerations_() noexcept;
+
         bool __InitSlabAndCache__(const CFC::FabricInitConf& storage, CFC::FabricCache& cache) noexcept;
-        
-        
+        void __InitModelStorage__(
+            const GMI::ModelCatalog& catalog, 
+            std::byte* directory,
+            uint64_t count_of_apc
+        ) noexcept;
+
+        bool __InitMatrixRegionTable__(const StorageAllocationDef& layout) noexcept;
+
         struct InitFlagReset;
     protected :
         std::atomic<bool> TrackDAGRevision_{false};
@@ -39,6 +46,12 @@ namespace BidirectionalInMemGraph
             // retained APC scope still refers to it.
             if (SlabBasePtr_) std::terminate();
         }
+
+        bool IsDiskPaged() const noexcept
+        {
+            return __NumericalBacking__.DataPtr() != nullptr;
+        }
+
 
         SlabToFabricConverterAndCordinator(const SlabToFabricConverterAndCordinator&) = delete;
         SlabToFabricConverterAndCordinator& operator = (const SlabToFabricConverterAndCordinator&) = delete;
@@ -95,11 +108,6 @@ namespace BidirectionalInMemGraph
             uint32_t cell_offset,
             uint32_t cells
         ) noexcept;
-
-        bool IsDiskPaged() const noexcept
-        {
-            return __NumericalBacking__.DataPtr() != nullptr;
-        }
 
         std::span<uint64_t> NumericalStorage() noexcept
         {

@@ -155,6 +155,80 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
+    void SlabToFabricConverterAndCordinator::__InitModelStorage__(
+        const GMI::ModelCatalog& catalog, 
+        std::byte* directory,
+        uint64_t count_of_apc
+    ) noexcept
+    {
+        if (!catalog.Models.empty()) 
+        {
+            std::memcpy(directory, catalog.Models.data(), catalog.Models.size_bytes());
+        }
+        if (!catalog.Dependencies.empty()) 
+        {
+            std::memcpy(
+                directory + catalog.Models.size_bytes(), 
+                catalog.Dependencies.data(), 
+                catalog.Dependencies.size_bytes()
+            );
+        }
+        if (!catalog.Dynamics.empty()) 
+        {
+            std::memcpy(
+                directory + catalog.Models.size_bytes() + catalog.Dependencies.size_bytes(),
+                catalog.Dynamics.data(),
+                catalog.Dynamics.size()
+            );
+        }
+
+        for (uint32_t s = 0; s < count_of_apc; s++) 
+        {
+            std::construct_at(NodeModel_(s));
+        }
+    }
+
+
+    bool SlabToFabricConverterAndCordinator::__InitMatrixRegionTable__(const StorageAllocationDef& layout) noexcept
+    {
+        for (const CFC::FabricSegmentBounds& range : layout.DefaultSegments__) 
+        {
+            WriteARecordBookOfTSCEntry_(
+                range.OwnerTableOfTheBounds, 
+                range.BeginIndex, 
+                range.EndIndex
+            );
+        }
+
+        const CFC::FabricSegmentBounds& matrix_table_bounds = layout.DefaultSegments__[
+            static_cast<uint8_t>(FabricSegments::MATRIX_VIEW_TABLE)
+        ];
+
+        if (!ConstructMatrixViewRecords_(matrix_table_bounds.BeginIndex, matrix_table_bounds.EndIndex)) 
+        {
+            return false;
+        }
+
+        if (FabCache_->HasDefaultRegionTable_) 
+        {
+            for (uint32_t s = 0; s < FabCache_->CountOfAPC_; s++) 
+            {
+                if (
+                    !PrepareMatrixViewRow_(s, DefaultRegionTable_) ||
+                    (
+                        !IsDiskPaged() &&
+                        !InitializeRegionProtocolStorage_(s)
+                    )
+                ) 
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    
+
     bool SlabToFabricConverterAndCordinator::InitializeFabric(
         uint32_t slot_count,
         uint32_t slot_cell_count,
@@ -163,6 +237,8 @@ namespace BidirectionalInMemGraph
         const CFC::FabricInitConf& storage
     ) noexcept
     {
+        using SAD = StorageAllocationDef;
+
         ExclusiveLease exc_phase = ExecutionGate_.TryMaintenance();
         if (!exc_phase) return false;
         bool expected = false;
@@ -205,13 +281,23 @@ namespace BidirectionalInMemGraph
             cache.ModelDiaphragm_.ModelDynamicsByteCount_ = storage.Dynamics.size();
         }
 
-        StorageAllocationDef layout;
+        SAD layout;
         if (!layout.BuildStorage(cache)) return false;
         Numerics::Replacement replacement{*this};
         AllocatorOfFabric_ = allocator;
 
         if (!__InitSlabAndCache__(storage, cache)) return false;
 
+        __InitModelStorage__(
+            catalog,
+            reinterpret_cast<std::byte*>(SlabBasePtr_ + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_),
+            cache.CountOfAPC_
+        );
+
+        if (!__InitMatrixRegionTable__(layout)) return false;
+        
+        //IDELS
+        
     }
 
     void SlabToFabricConverterAndCordinator::ShutDownFabric() noexcept
