@@ -1,9 +1,10 @@
 #pragma once
-#include "AdaptivePackedCellContainer/APCOrchestrators/SharedConf.hpp"
 #include "SuperNova"
 #include <cstdint>
 #include <limits>
-#include <sys/types.h>
+#if !defined (_WIN32)
+    #include <sys/types.h>
+#endif
 
 namespace BidirectionalInMemGraph
 {
@@ -26,17 +27,18 @@ namespace BidirectionalInMemGraph
         if (Mapping_) CloseHandle(Mapping_);
 
         if (File_ != INVALID_HANDLE_VALUE) CloseHandle(File_);
-
+        File_ = INVALID_HANDLE_VALUE;
+        Mapping_ = nullptr;
     #else
         if (Data_) 
         {
             ::munmap(Data_, Bytes_);
         }
-        if (File_ >= UNSIGNED_ZERO) 
+        if (File_ >= 0) 
         {
             ::close(File_);
         }
-        File_ = -1 
+        File_ = -1;
     #endif
         Data_ = nullptr;
         Bytes_ = UNSIGNED_ZERO;
@@ -136,7 +138,7 @@ namespace BidirectionalInMemGraph
 
         if (
             cells > static_cast<uint64_t>(std::numeric_limits<off_t>::max() / sizeof(uint64_t)) ||
-            ::ftruncate(File_, static_cast<off_t>(Bytes_) != UNSIGNED_ZERO
+            ::ftruncate(File_, static_cast<off_t>(Bytes_) != 0
         )
         ) 
         {
@@ -147,22 +149,24 @@ namespace BidirectionalInMemGraph
         void* address = ::mmap(
             nullptr, 
             Bytes_, 
-            PORT_READ | PORT_WRITE, 
+            PROT_READ | PROT_WRITE,
             MAP_SHARED, 
-            FILE, 
-            UNSIGNED_ZERO
+            File_, 
+            0
         );
 
         if (address != MAP_FAILED) 
         {
-            Data_ = static_cast<uint64_t*>(address);
+            return false;
         }
+        Data_ = static_cast<uint64_t*>(address);
+        return true;
     }
 
     bool NumericalBacking::LinPrefetch_(uint64_t first_cell, uint64_t cells) noexcept
     {
-        const size_t page_size = ::sysconf(_SC_PAGE_SIZE);
-        if (page_size < UNSIGNED_ZERO) return false;
+        const long long page_size = ::sysconf(_SC_PAGE_SIZE);
+        if (page_size <= UNSIGNED_ZERO) return false;
 
         const size_t begin = static_cast<size_t>((first_cell * sizeof(uint64_t)) / page_size) * page_size;
         const size_t end = static_cast<size_t>((first_cell + cells) * sizeof(uint64_t));
@@ -212,8 +216,8 @@ namespace BidirectionalInMemGraph
         return FlushViewOfFile(Data_, Bytes_) &&
             FlushFileBuffers(File_);
     #else
-        return ::msync(Data_, Bytes_, MS_SYNC) == UNSIGNED_ZERO && 
-            ::fsync(File_);
+        return ::msync(Data_, Bytes_, MS_SYNC) == 0 && 
+            ::fsync(File_) == 0;
     #endif
     }
 
@@ -247,20 +251,10 @@ namespace BidirectionalInMemGraph
         const long size = ::sysconf(_SC_PAGESIZE);
         const size_t page = size > UNSIGNED_ZERO ? static_cast<size_t>(size) : 4096;
     #endif
-        Data_ = nullptr;
-        Bytes_ = UNSIGNED_ZERO;
-        if (!PendingPath_.empty()) 
+        const volatile std::byte* bytes = reinterpret_cast<const volatile std::byte*>(Data_);
+        for (size_t offset = 0; offset < Bytes_; offset += page) 
         {
-            std::error_code ignored;
-            std::filesystem::remove(PendingPath_, ignored);
-            PendingPath_.clear();
+            (void)bytes[offset];
         }
     }
-
-
-
-
-
-
-
 }
