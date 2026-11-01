@@ -90,7 +90,7 @@ namespace BidirectionalInMemGraph
         std::memcpy(
             destination.data(),
             SlabBasePtr_,
-            FabCache_->SlabCellCount_ * sizeof(uint64_t)
+            FabCache_->SegmentPoolBegin_ * sizeof(uint64_t)
         );
         std::memcpy(
             destination.data() + FabCache_->SegmentPoolBegin_,
@@ -172,8 +172,9 @@ namespace BidirectionalInMemGraph
         std::memcpy(&cache, raw_cells, sizeof(cache));
 
         const bool hot_only = !storage.SegmentPoolPath.empty() && cell_count == cache.SegmentPoolBegin_;
+        const uint64_t varified_cell_count = hot_only ? cache.SegmentPoolBegin_ : cache.SlabCellCount_;
         if (
-            (hot_only && cell_count != cache.SlabCellCount_) ||
+            cell_count != varified_cell_count ||
             !StorageAllocationDef::ValidateFabricCache(cache)
         ) 
         {
@@ -195,7 +196,7 @@ namespace BidirectionalInMemGraph
         FabCache_ = cache.Construct(raw_cells);
 
         RefreshNumericalBase_();
-        BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        BackingOwnership_ = CFC::FabricBackigOwnership::BORROWED;
         DefaultRegionTable_ = SD::RegionSchemaTable{};
 
         if (!ValidateAttachedFabricLayout_())
@@ -283,7 +284,14 @@ namespace BidirectionalInMemGraph::Numerics
     Replacement::~Replacement()
     {
         if (Complete_) return;
-        Self_.ShutDownFabric();
+        Self_.__NumericalBacking__.Close();
+        if (
+            Self_.SlabBasePtr_ &&
+            Self_.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
+        ) 
+        {
+            Self_.AllocatorOfFabric_.Free(Self_.SlabBasePtr_, Self_.HotCellCount_);
+        }
         Self_.SlabBasePtr_ = Previous_.Relese();
         Self_.HotCellCount_ = Previous_.Count();
         Self_.FabCache_ = Cache_;
