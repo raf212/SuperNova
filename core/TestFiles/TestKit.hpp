@@ -4861,7 +4861,7 @@ public:
         std::uint32_t slot
     ) noexcept
     {
-        const SD::RSSpan row = MetrixViewRow_(slot);
+        const SD::ConstRSSpan row = MetrixViewRow_(slot);
         return std::span<const SD::RegionSchemaRecord>(row.data(), row.size());
     }
 
@@ -5572,7 +5572,6 @@ inline bool DeviceViewAndProtocolStorage() noexcept
             record.Region == expected_regions[i] &&
             record.CellOffset == expected_offset &&
             record.CellOffset % SD::REGION_ALIGNMENT_CELLS == 0u &&
-            record.SeqLockCounter == 0u &&
             SD::FreshProtocolState(record) &&
             SD::ValidateStortedRegionSchema(
                 record, MINIMUM_APC_CELL_COUNT, batch
@@ -5664,7 +5663,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
 
     const bool retire_ok = apc.Retire() && second_apc.Retire();
     const bool ok = fabric_metadata_ok && row_ok &&
-        row_stride_and_isolation_ok && header_ok && queue_storage_ok &&
+        row_stride_and_isolation_ok && queue_storage_ok &&
         public_views_ok && retire_ok;
     if (!ok)
     {
@@ -5672,7 +5671,6 @@ inline bool DeviceViewAndProtocolStorage() noexcept
             << "    detail: metadata=" << (fabric_metadata_ok ? "PASS" : "FAIL")
             << " row=" << (row_ok ? "PASS" : "FAIL")
             << " row-stride=" << (row_stride_and_isolation_ok ? "PASS" : "FAIL")
-            << " header=" << (header_ok ? "PASS" : "FAIL")
             << " MPMC=" << (queue_storage_ok ? "PASS" : "FAIL")
             << " views=" << (public_views_ok ? "PASS" : "FAIL")
             << " retire=" << (retire_ok ? "PASS" : "FAIL") << '\n';

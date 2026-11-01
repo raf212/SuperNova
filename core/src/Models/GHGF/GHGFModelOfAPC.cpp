@@ -92,7 +92,7 @@ namespace BidirectionalInMemGraph
                     record.Protocol != expected.Protocol ||
                     record.MatrixHeight != expected.MatrixHeight ||
                     record.MatrixWidth != expected.MatrixWidth ||
-                    record.Flags != expected.Flags ||
+                    SD::SealedFlags(record.Flags) != expected.Flags ||
                     record.CellOffset != offset
                 )
                 {

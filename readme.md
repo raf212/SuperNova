@@ -119,7 +119,7 @@ CPU execution does not require a GPU SDK.
 Windows:
 
 ```powershell
-.\build-windows.ps1 -CpuOnly
+powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -CpuOnly
 .\build-windows.ps1 -BuildPython
 .\build-windows.ps1 -RebuildAdaptiveCpp
 ```
