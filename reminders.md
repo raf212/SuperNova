@@ -1,6 +1,8 @@
 > Before Going to Proper Disk management and vectorization :: address Fabric initialization it should be very simple seperate <br>
 FabricCache -> which are initialization time based on use ae we can create a very easy starting intarface even with vectorization and disk layout `CODE:: INITCACHE_FIX_PRIO_01`
 
+> Jusrtify or remove CODE:: FAIL_SAFE_ForceNxLenMemCopy
+
 > Remove unnecesseru friend class dependencies wher public facing classes can expose unnecessey privete functions to each others
 
 > Current tests in `core\TestFiles` should be removed except `StaticAsserts.hpp` and those tests should be shifted with `SuperNova` Into <br>

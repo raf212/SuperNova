@@ -37,7 +37,7 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
-        return_value = SlabBasePtr_[slab_index];
+        return_value = *ResolveCell_(slab_index);
         return true;
     }
 
@@ -50,7 +50,7 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
-        std::atomic_ref<const uint64_t> fab_u64_ref(SlabBasePtr_[slab_index]);
+        std::atomic_ref<const uint64_t> fab_u64_ref(*ResolveCell_(slab_index));
         uint64_t desired_cell_raw = fab_u64_ref.load(std::memory_order_acquire);
         return_value = desired_cell_raw;
         return true;
@@ -62,7 +62,7 @@ namespace BidirectionalInMemGraph
         {
             return;
         }
-        SlabBasePtr_[slab_index] = fabric_unit;
+        *ResolveCell_(slab_index) = fabric_unit;
     }
 
     void FabricConstructor::AtomicallyStoreU64Fab(
@@ -74,7 +74,7 @@ namespace BidirectionalInMemGraph
         {
             return;
         }
-        std::atomic_ref<uint64_t> fab_u64_ref(SlabBasePtr_[slab_index]);
+        std::atomic_ref<uint64_t> fab_u64_ref(*ResolveCell_(slab_index));
         fab_u64_ref.store(fabric_unit, mem_order);
     }
 
@@ -90,7 +90,7 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
-        std::atomic_ref<uint64_t> fab_u64_ref(SlabBasePtr_[slab_index]);
+        std::atomic_ref<uint64_t> fab_u64_ref(*ResolveCell_(slab_index));
         return fab_u64_ref.compare_exchange_strong(expected_packed_cell, desired_packed_cell, mem_order_success, mem_order_failure);
     }
 
@@ -106,7 +106,7 @@ namespace BidirectionalInMemGraph
         {
             return false;
         }
-        std::atomic_ref<uint64_t> fab_u64_ref(SlabBasePtr_[slab_index]);
+        std::atomic_ref<uint64_t> fab_u64_ref(*ResolveCell_(slab_index));
         return fab_u64_ref.compare_exchange_weak(expected_packed_cell, desired_packed_cell, mem_order_success, mem_order_failure);
     }
 
@@ -117,15 +117,17 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         if (
-            !IsDesiredIndexValidInSLab(slab_starting_idx + number_of_cells - 1) ||
+            !FabCache_ ||
             !desired_units ||
             number_of_cells == UNSIGNED_ZERO ||
-            number_of_cells > FabCache_->SlabCellCount_ - slab_starting_idx
+            number_of_cells > (FabCache_->SlabCellCount_ - slab_starting_idx) ||
+            slab_starting_idx > (FabCache_->SlabCellCount_ - slab_starting_idx)
         )
         {
             return false;
         }
 
+        // fail safe CODE:: FAIL_SAFE_ForceNxLenMemCopy
         try
         {
             uint64_t value_of_last_idx = desired_units[number_of_cells - 1];
@@ -136,11 +138,28 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        std::memcpy(
-            &SlabBasePtr_[slab_starting_idx],
-            desired_units,
-            number_of_cells * sizeof(uint64_t)
-        );
+        const size_t hot_end = FabCache_->SegmentPoolBegin_;
+        const size_t hot_cells = slab_starting_idx < hot_end ?
+            std::min(number_of_cells, (hot_end - slab_starting_idx)) : UNSIGNED_ZERO;
+        
+        if (hot_cells > UNSIGNED_ZERO) 
+        {
+            std::memcpy(
+                (SlabBasePtr_ + slab_starting_idx),
+                desired_units,
+                hot_cells * sizeof(uint64_t)
+            );
+        }
+
+        if (hot_cells < number_of_cells) 
+        {
+            const size_t numerical_index = slab_starting_idx + hot_cells;
+            std::memcpy(
+                (NumericalBase_() + (numerical_index - hot_end)),
+                (desired_units + hot_cells),
+                ((number_of_cells - hot_cells) * sizeof(uint64_t))
+            );
+        }
         return true;
     }
 
@@ -156,7 +175,9 @@ namespace BidirectionalInMemGraph
     {
         if (
             !FabCache_ ||
-            index > FabCache_->SlabCellCount_
+            !SlabBasePtr_ ||
+            !NumericalBase_() ||
+            index >= FabCache_->SlabCellCount_
         )
         {
             return nullptr;

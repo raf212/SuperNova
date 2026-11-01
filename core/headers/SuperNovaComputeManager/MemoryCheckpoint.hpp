@@ -166,7 +166,7 @@ namespace BidirectionalInMemGraph
             return static_cast<bool>(out);
         }
 
-        static bool ReadWord(std::istream& input, uint64_t value) noexcept
+        static bool ReadWord(std::istream& input, uint64_t& value) noexcept
         {
             value = UNSIGNED_ZERO;
             for (uint64_t i = 0; i < BYTES_PER_WORD; i++) 
