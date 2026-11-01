@@ -223,7 +223,7 @@ namespace BidirectionalInMemGraph
         void WarmAll() noexcept;
     };
 
-
+    //Start of the Fabric
     struct StoragePointers
     {
     protected:
@@ -250,7 +250,7 @@ namespace BidirectionalInMemGraph::Numerics
         APCFinilizer& Self_;
         PackedCellStorage Previous_;
         NumericalBacking Numbers_;
-        CFC::FabricCache Cache_;
+        CFC::FabricCache* Cache_;
         CFC::FabricBackigOwnership Ownership_;
         RawPackedCellAllocator Allocator_;
         SchemaDefinition::RegionSchemaTable Schemas_;

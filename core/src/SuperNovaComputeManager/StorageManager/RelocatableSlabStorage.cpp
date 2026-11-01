@@ -196,5 +196,37 @@ namespace BidirectionalInMemGraph::Numerics
             self.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
         ),
         Numbers_(std::move(self.__NumericalBacking__)),
+        Cache_(self.FabCache_),
+        Ownership_(self.BackingOwnership_),
+        Allocator_(self.AllocatorOfFabric_),
+        Schemas_(self.DefaultRegionTable_),
+        Active_(self.FabricInitialized_.load(std::memory_order_acquire)),
+        Track_(self.TrackDAGRevision_.load(std::memory_order_acquire)),
+        Revision_(self.SealedDAGRevision_.load(std::memory_order_acquire))
+    {
+        self.SlabBasePtr_ = nullptr;
+        self.StorageBasePtr_ = nullptr;
+        self.HotCellCount_ = UNSIGNED_ZERO;
+        self.FabCache_ = nullptr;
+        self.BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        self.FabricInitialized_.store(false, std::memory_order_release);
+        self.TrackDAGRevision_.store(false, std::memory_order_release);
+    }
 
+    Replacement::~Replacement()
+    {
+        if (Complete_) return;
+        Self_.ShutDownFabric();
+        Self_.SlabBasePtr_ = Previous_.Relese();
+        Self_.HotCellCount_ = Previous_.Count();
+        Self_.FabCache_ = Cache_;
+        Self_.__NumericalBacking__ = std::move(Numbers_);
+        Self_.RefreshNumericalBase_();
+        Self_.BackingOwnership_ = Ownership_;
+        Self_.AllocatorOfFabric_ = Allocator_;
+        Self_.DefaultRegionTable_ = Schemas_;
+        Self_.TrackDAGRevision_.store(Track_, std::memory_order_release);
+        Self_.SealedDAGRevision_.store(Revision_, std::memory_order_release);
+        Self_.FabricInitialized_.store(Active_, std::memory_order_release);
+    }
 }
