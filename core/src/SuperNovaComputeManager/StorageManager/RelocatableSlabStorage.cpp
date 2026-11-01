@@ -13,22 +13,55 @@ namespace BidirectionalInMemGraph
         if (
             !IsFabricActive() ||
             !FabCache_ ||
+            IsDiskPaged() ||
             !QuiesceFabric_()
         )
         {
             return detached;
         }
+        
+        FabricInitialized_.store(false, std::memory_order_release);
+        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
 
         detached.Slab_ = SlabBasePtr_;
         detached.CellCount_ = FabCache_->SlabCellCount_;
         detached.Ownership_ = BackingOwnership_;
 
+        __NumericalBacking__.Close();
         SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
+        HotCellCount_ = UNSIGNED_ZERO;
         BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
-        FabricInitialized_.store(false, std::memory_order_release);
-        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         return detached;
+    }
+
+    bool RelocatableSlabStorage::SaveHotSubFabric(std::span<uint64_t> destination) noexcept
+    {
+        if (ExecutionGate().IsPoisoned()) return false;
+
+        ExclusiveLease ex_phase = ExecutionGate().TryMaintenance();
+        if (
+            !ex_phase ||
+            !IsFabricActive() ||
+            !destination.data() ||
+            destination.size() < FabCache_->SegmentPoolBegin_ ||
+            IsInternalBuffer(destination.data(), destination.size())
+        ) 
+        {
+            return false;
+        }
+
+        if (!QuiesceFabric_()) return false;
+
+        std::memcpy(
+            destination.data(), 
+            SlabBasePtr_, 
+            FabCache_->SegmentPoolBegin_ * sizeof(uint64_t)
+        );
+
+        const bool reopened = ReopenLiveAPCGenerations_();
+        FabricInitialized_.store(reopened, std::memory_order_release);
+        return reopened;
     }
 
     bool RelocatableSlabStorage::SaveFabric(std::span<uint64_t> destination) noexcept
@@ -58,6 +91,11 @@ namespace BidirectionalInMemGraph
             destination.data(),
             SlabBasePtr_,
             FabCache_->SlabCellCount_ * sizeof(uint64_t)
+        );
+        std::memcpy(
+            destination.data() + FabCache_->SegmentPoolBegin_,
+            NumericalBase_(),
+            (FabCache_->SlabCellCount_ - FabCache_->SegmentPoolBegin_) * sizeof(uint64_t)
         );
 
         bool reopened = ReopenLiveAPCGenerations_();
@@ -122,27 +160,41 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        FabricCache cache{};
-        std::memcpy(
-            &cache,
-            raw_cells,
-            sizeof(cache)
-        );
-
-        if (!StorageAllocationDef::ValidateFabricCache(cache, cell_count))
+        if (
+            storage.HostAlloc &&
+            !storage.HostAlloc->IsValid()
+        )
         {
             return false;
         }
 
-        ShutDownFabric();
+        FabricCache cache{};
+        std::memcpy(&cache, raw_cells, sizeof(cache));
+
+        const bool hot_only = !storage.SegmentPoolPath.empty() && cell_count == cache.SegmentPoolBegin_;
+        if (
+            (hot_only && cell_count != cache.SlabCellCount_) ||
+            !StorageAllocationDef::ValidateFabricCache(cache, cache.SlabCellCount_)
+        ) 
+        {
+            return false;
+        }
+
+        Numerics::Replacement replacement{*this};
+        AllocatorOfFabric_ = storage.HostAlloc ? *storage.HostAlloc : RawPackedCellAllocator{};
+        if (
+            !storage.SegmentPoolPath.empty() &&
+            !__NumericalBacking__.Create(storage.SegmentPoolPath, (cache.SlabCellCount_ - cache.SegmentPoolBegin_))
+        ) 
+        {
+            return false;
+        }
 
         SlabBasePtr_ = raw_cells;
-        FabCache_ = reinterpret_cast<FabricCache*>(std::memcpy(
-            raw_cells,
-            &cache,
-            sizeof(cache)
-        ));
+        HotCellCount_ = cell_count;
+        FabCache_ = cache.Construct(raw_cells);
 
+        RefreshNumericalBase_();
         BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
         DefaultRegionTable_ = SD::RegionSchemaTable{};
 
@@ -176,11 +228,26 @@ namespace BidirectionalInMemGraph
             return false;
         }
         
+        if (IsDiskPaged() && !hot_only) 
+        {
+            std::copy_n(
+                raw_cells + cache.SegmentPoolBegin_,
+                cache.SlabCellCount_ - cache.SegmentPoolBegin_,
+                NumericalBase_()
+            );
+        }
+
+        if (IsDiskPaged() && storage.Cache == CFC::NumericalCachePolicy::PRE_TOUCHED) 
+        {
+            __NumericalBacking__.WarmAll();
+        }
+        __NumericalBacking__.CommitCreation();
         BackingOwnership_ = ownership;
-        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
+        SealedDAGRevision_.fetch_add(replacement.Revision() + 1, std::memory_order_release);
         FabricInitialized_.store(true, std::memory_order_release);
         (void)ExecutionGate().ConfirmedRestored();
 
+        replacement.Commit();
         return true;
         
     }

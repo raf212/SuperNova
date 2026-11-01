@@ -6,6 +6,7 @@
 namespace BidirectionalInMemGraph
 {
     struct RawPackedCellAllocator;
+    class RelocatableSlabStorage;
 
     struct CoreOfFabricCoordinator
     {
@@ -45,6 +46,7 @@ namespace BidirectionalInMemGraph
         struct alignas(64) FabricCache final
         {
             friend class SlabToFabricConverterAndCordinator;
+            friend class RelocatableSlabStorage;
         public:
             uint32_t FormateVersion_{UNSIGNED_ZERO};
             ///FABRIC CONSTRUCTION

@@ -337,7 +337,7 @@ namespace BidirectionalInMemGraph
         }
 
         uint64_t* old_ptr = SlabBasePtr_;
-        const size_t old_count = FabCache_ ? FabCache_->SlabCellCount_ : UNSIGNED_ZERO;
+        const size_t old_count = HotCellCount_;
         const CFC::FabricBackigOwnership old_ownership = BackingOwnership_;
         if (
             old_ptr &&
@@ -349,6 +349,7 @@ namespace BidirectionalInMemGraph
         }
         SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
+        HotCellCount_ = UNSIGNED_ZERO;
         BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
         FabricInitialized_.store(false, std::memory_order_release);
 

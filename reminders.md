@@ -1,3 +1,7 @@
-> Before Going to Proper Disk management and vectorization :: address Fabric initialization it should be very simple seperate FabricCache -> which are initialization time based on use ae we can create a very easy starting intarface even with vectorization and disk layout `CODE:: INITCACHE_FIX_PRIO_01`
+> Before Going to Proper Disk management and vectorization :: address Fabric initialization it should be very simple seperate <br>
+FabricCache -> which are initialization time based on use ae we can create a very easy starting intarface even with vectorization and disk layout `CODE:: INITCACHE_FIX_PRIO_01`
 
 > Remove unnecesseru friend class dependencies wher public facing classes can expose unnecessey privete functions to each others
+
+> Current tests in `core\TestFiles` should be removed except `StaticAsserts.hpp` and those tests should be shifted with `SuperNova` Into <br>
+git repo [ExternalTestSuperNova](https://github.com/raf212/ExternalTestSuperNova.git) inside a fresh branch maintainaing relation with always current beranch and add function and class specific tests.
