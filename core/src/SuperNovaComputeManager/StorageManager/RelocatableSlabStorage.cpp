@@ -174,7 +174,7 @@ namespace BidirectionalInMemGraph
         const bool hot_only = !storage.SegmentPoolPath.empty() && cell_count == cache.SegmentPoolBegin_;
         if (
             (hot_only && cell_count != cache.SlabCellCount_) ||
-            !StorageAllocationDef::ValidateFabricCache(cache, cache.SlabCellCount_)
+            !StorageAllocationDef::ValidateFabricCache(cache)
         ) 
         {
             return false;

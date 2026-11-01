@@ -138,7 +138,8 @@ namespace BidirectionalInMemGraph
         
         std::fill_n(SlabBasePtr_, physical_cells, uint64_t{UNSIGNED_ZERO});
 
-        FabCache_->Construct(SlabBasePtr_);
+        FabCache_ = cache.Construct(SlabBasePtr_);
+        HotCellCount_ = physical_cells;
         BackingOwnership_ = CFC::FabricBackigOwnership::OWNED;
         if (
             !storage.SegmentPoolPath.empty() &&
@@ -308,7 +309,7 @@ namespace BidirectionalInMemGraph
         }
 
         if (
-            !IsDiskPaged() &&
+            IsDiskPaged() &&
             storage.Cache == CFC::NumericalCachePolicy::PRE_TOUCHED
         ) 
         {
@@ -360,6 +361,86 @@ namespace BidirectionalInMemGraph
 
         SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         ResetScalarsofTheFabric_();
+    }
+
+    bool SlabToFabricConverterAndCordinator::ValidateAttachedFabricLayout_() noexcept
+    {
+        if (
+            !FabCache_ || !SlabBasePtr_ ||
+            !StorageAllocationDef::ValidateFabricCache(*FabCache_)
+        ) 
+        {
+            return false;
+        }
+
+        const GMI::ModelCatalog catalog = GMI::GetModelCatalog(*FabCache_, SlabBasePtr_);
+        if (!catalog.ValidCatalog()) return false;
+
+        StorageAllocationDef layout{};
+        CFC::FabricCache& expected = *FabCache_;
+        if (!layout.BuildStorage(expected)) return false;
+        for (const CFC::FabricSegmentBounds& range : layout.DefaultSegments__) 
+        {
+            if (
+                range.BeginIndex != range.EndIndex &&
+                !CheckRecordBookRange_(range.OwnerTableOfTheBounds, range.BeginIndex, range.EndIndex)
+            ) 
+            {
+                return false;
+            }
+        }
+
+        for (uint32_t s = 0; s < FabCache_->CountOfAPC_; s++) 
+        {
+            const SD::ConstRSSpan row = MetrixViewRow_(s);
+            if (row.size() != FabCache_->ActiveRegionCount_) 
+            {
+                return false;
+            }
+            uint16_t mask = UNSIGNED_ZERO;
+            uint64_t previous_end = UNSIGNED_ZERO;
+            for (const SD::RegionSchemaRecord& schema : row) 
+            {
+                if (SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED)) 
+                {
+                    continue;
+                }
+
+                if (
+                    static_cast<uint8_t>(schema.Region) > ADS::CountOfMacroColumn() ||
+                    (mask & ADS::RegionBit(schema.Region)) ||
+                    schema.CellOffset < previous_end ||
+                    !SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::SEALED) ||
+                    !SD::ValidateStortedRegionSchema(
+                        schema, 
+                        FabCache_->PerAPCRuntimeCellCount_, 
+                        FabCache_->MatrixViewRowCellCount_
+                    ) ||
+                    !catalog.Accept(schema)
+                ) 
+                {
+                    return false;
+                }
+
+                mask = static_cast<uint16_t>(mask | ADS::RegionBit(schema.Region));
+                previous_end = uint64_t{schema.CellOffset} * schema.CellCount;
+            }
+
+            if ((mask && mask) != FabCache_->ActiveRegionMask_) 
+            {
+                return false;
+            }
+
+            const GMI::NodeModelDescription* description = NodeModel_(s);
+            if (
+                !description ||
+                (description->Instance) >  catalog.Models.size()
+            ) 
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
 }

@@ -205,8 +205,9 @@ public :
             actual.RegionAlignmentCellCount_ == expected.RegionAlignmentCellCount_;
     }
 
-    static constexpr bool ValidateFabricCache(const CFC::FabricCache& cache, uint64_t supplied_cell_count) noexcept
+    static constexpr bool ValidateFabricCache(const CFC::FabricCache& cache) noexcept
     {
+        const uint64_t supplied_cell_count = cache.SlabCellCount_;
         if (
             cache.FormateVersion_ != CFC::FORMAT_VERSION ||
             cache.SegmentPoolDiskByteOffset_ != UNSIGNED_ZERO ||
