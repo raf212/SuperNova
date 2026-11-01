@@ -189,7 +189,7 @@ namespace BidirectionalInMemGraph
 
 namespace BidirectionalInMemGraph::Numerics 
 {
-    Replacement::Replacement(APCFinilizer& self) noexcept :
+    Replacement::Replacement(SlabToFabricConverterAndCordinator& self) noexcept :
         Self_(self),
         Previous_(
             self.SlabBasePtr_, self.HotCellCount_, self.AllocatorOfFabric_,

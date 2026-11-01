@@ -78,7 +78,7 @@ namespace BidirectionalInMemGraph::GMI
             return true;
         }
 
-        constexpr bool Validate() const noexcept
+        constexpr bool ValidCatalog() const noexcept
         {
             if (
                 Models.size() > ModelDependency::INVALID_MODEL_IDX ||

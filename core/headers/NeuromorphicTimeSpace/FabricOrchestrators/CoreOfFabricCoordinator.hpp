@@ -44,6 +44,8 @@ namespace BidirectionalInMemGraph
 
         struct alignas(64) FabricCache final
         {
+            friend class SlabToFabricConverterAndCordinator;
+        public:
             uint32_t FormateVersion_{UNSIGNED_ZERO};
             ///FABRIC CONSTRUCTION
             uint32_t PerAPCRuntimeCellCount_{UNSIGNED_ZERO};
@@ -82,6 +84,12 @@ namespace BidirectionalInMemGraph
 
         private:
             uint64_t Reserved_[1]{};
+            FabricCache* Construct(uint64_t* data) noexcept
+            {
+                return std::construct_at(
+                    reinterpret_cast<FabricCache*>(data), *this
+                );
+            }
         };
 
         struct DetachFabric final

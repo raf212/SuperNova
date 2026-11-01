@@ -8,12 +8,18 @@ namespace BidirectionalInMemGraph
     {
         friend class AdaptivePackedCellContainer;
         friend class RelocatableSlabStorage;
+        friend class Numerics::Replacement;
+    protected:
+        using CFC = CoreOfFabricCoordinator;
     private:
         uint64_t* AllocatePackedCellRaw_(size_t count_of_cells) noexcept;
         bool ValidateAttachedFabricLayout_() noexcept;
         bool QuiesceFabric_() noexcept;
         bool ReopenLiveAPCGenerations_() noexcept;
-
+        bool __InitSlabAndCache__(const CFC::FabricInitConf& storage, CFC::FabricCache& cache) noexcept;
+        
+        
+        struct InitFlagReset;
     protected :
         std::atomic<bool> TrackDAGRevision_{false};
 
@@ -23,7 +29,6 @@ namespace BidirectionalInMemGraph
         void ResetScalarsofTheFabric_() noexcept;
 
     public:
-        using CFC = CoreOfFabricCoordinator;
 
         SlabToFabricConverterAndCordinator(/* args */) noexcept = default;
 

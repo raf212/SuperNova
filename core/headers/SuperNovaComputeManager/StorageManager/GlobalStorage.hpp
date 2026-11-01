@@ -247,7 +247,7 @@ namespace BidirectionalInMemGraph::Numerics
     class Replacement final
     {
     private:
-        APCFinilizer& Self_;
+        SlabToFabricConverterAndCordinator& Self_;
         PackedCellStorage Previous_;
         NumericalBacking Numbers_;
         CFC::FabricCache* Cache_;
@@ -259,7 +259,7 @@ namespace BidirectionalInMemGraph::Numerics
         uint64_t Revision_;
         bool Complete_{false};
     public:
-        explicit Replacement(APCFinilizer&) noexcept;
+        explicit Replacement(SlabToFabricConverterAndCordinator&) noexcept;
         Replacement(const Replacement&) = delete;
         Replacement& operator = (const Replacement&) = delete;
         ~Replacement();

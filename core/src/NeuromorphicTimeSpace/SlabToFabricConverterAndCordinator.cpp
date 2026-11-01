@@ -4,72 +4,27 @@ namespace BidirectionalInMemGraph
 
     uint64_t* SlabToFabricConverterAndCordinator::AllocatePackedCellRaw_(size_t count_of_cells) noexcept
     {
-        auto allocation_function = AllocatorOfFabric_.AllocatePackedCellStorage ? 
-            AllocatorOfFabric_.AllocatePackedCellStorage : &RawPackedCellAllocator::DefaultAllocateAtomicCells;
-        
-        size_t alignment = AllocatorOfFabric_.Alignment ? AllocatorOfFabric_.Alignment : BIT_COUNT_OF_UINT64_T;
-        alignment = std::max<size_t>(alignment, alignof(uint64_t));
-        alignment = std::max<size_t>(alignment, BIT_COUNT_OF_UINT64_T);
-
-        return allocation_function(count_of_cells, alignment, AllocatorOfFabric_.User);
-
+        return AllocatorOfFabric_.Allocate(count_of_cells);
     }
 
-    void SlabToFabricConverterAndCordinator::FreeRawPackedCells_(uint64_t* packed_cell_memory_ptr, size_t packed_cell_count) noexcept
+    void SlabToFabricConverterAndCordinator::FreeRawPackedCells_(uint64_t* data, size_t cell_count) noexcept
     {
-        RawPackedCellAllocator::FreeFunction free_function = AllocatorOfFabric_.FreePackedCellStorage ?
-                            AllocatorOfFabric_.FreePackedCellStorage : &RawPackedCellAllocator::DefaultFreeAtomicCells;
-        size_t alignment = AllocatorOfFabric_.Alignment ? AllocatorOfFabric_.Alignment : BIT_COUNT_OF_UINT64_T;
-        alignment = std::max<size_t>(alignment, alignof(uint64_t));
-        alignment = std::max<size_t>(alignment, BIT_COUNT_OF_UINT64_T);
-
-        free_function(packed_cell_memory_ptr, packed_cell_count, alignment, AllocatorOfFabric_.User);
+        AllocatorOfFabric_.Free(data, cell_count);
     }
 
     void SlabToFabricConverterAndCordinator::ResetScalarsofTheFabric_() noexcept
     {
         TrackDAGRevision_.store(false, std::memory_order_release);
+        FabricInitialized_.store(false, std::memory_order_release);
+        InitializationInProgress_.store(false, std::memory_order_release);
+
+        __NumericalBacking__.Close();
         BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
-        FabricInitialized_.store(false, std::memory_order_release);
-        InitializationInProgress_.store(false, std::memory_order_release);
+        StorageBasePtr_ = nullptr;
+        HotCellCount_ = UNSIGNED_ZERO;
     }
-
-    bool SlabToFabricConverterAndCordinator::ValidateAttachedFabricLayout_() noexcept
-    {
-        if (!FabCache_ || !SlabBasePtr_)
-        {
-            return false;
-        }
-
-        const uint64_t count = FabCache_->CountOfAPC_;
-        const uint64_t matrix_end = FabCache_->MatrixViewTableBeginIndex_ + count * FabCache_->MatrixViewRowCellCount_;
-        const uint64_t value_edge_end = FabCache_->HorizontalEdgeBeginIdx_ + count * FabCache_->EdgeTableRecordWidth_;
-        const uint64_t volatile_edge_end = FabCache_->VerticalEdgeBeginIdx_ + count * FabCache_->EdgeTableRecordWidth_;
-        const uint64_t handle_end = FabCache_->HandleTableBeginIndex_ + count * HandleOfAPCStatic::HANDLE_TABLE_WIDTH;
-        const uint64_t segment_end = FabCache_->SegmentPoolBegin_ + count * FabCache_->PerAPCRuntimeCellCount_;
-
-        if (
-            value_edge_end > FabCache_->SlabCellCount_ ||
-            matrix_end > FabCache_->SlabCellCount_ ||
-            volatile_edge_end > FabCache_->SlabCellCount_ ||
-            handle_end > FabCache_->SlabCellCount_ ||
-            segment_end > FabCache_->SlabCellCount_
-        )
-        {
-            return false;
-        }
-        
-        return
-            CheckRecordBookRange_(FabricSegments::SLAB_RECORD_MAP, FabCache_->RecordBookBeginIndex_, FabCache_->RecordBookEndIndex_) &&
-            CheckRecordBookRange_(FabricSegments::MATRIX_VIEW_TABLE, FabCache_->MatrixViewTableBeginIndex_, matrix_end) &&
-            CheckRecordBookRange_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H, FabCache_->HorizontalEdgeBeginIdx_, value_edge_end) &&
-            CheckRecordBookRange_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, FabCache_->VerticalEdgeBeginIdx_, volatile_edge_end) &&
-            CheckRecordBookRange_(FabricSegments::APC_HANDLE_TABLE, FabCache_->HandleTableBeginIndex_, handle_end) &&
-            CheckRecordBookRange_(FabricSegments::SEGMENT_POOL, FabCache_->SegmentPoolBegin_, segment_end);
-    }
-
 
     bool SlabToFabricConverterAndCordinator::QuiesceFabric_() noexcept
     {
@@ -164,201 +119,101 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
+    struct SlabToFabricConverterAndCordinator::InitFlagReset
+    {
+        std::atomic<bool>& Flag;
+        ~InitFlagReset()
+        {
+            Flag.store(false, std::memory_order_release);
+        }
+    };
+
+    bool SlabToFabricConverterAndCordinator::__InitSlabAndCache__(const CFC::FabricInitConf& storage, CFC::FabricCache& cache) noexcept
+    {
+        const size_t  physical_cells = storage.SegmentPoolPath.empty() ?
+            cache.SlabCellCount_ : cache.SegmentPoolBegin_;
+
+        SlabBasePtr_ = AllocatePackedCellRaw_(physical_cells);
+        if (!SlabBasePtr_) return false;
+        
+        std::fill_n(SlabBasePtr_, physical_cells, uint64_t{UNSIGNED_ZERO});
+
+        FabCache_->Construct(SlabBasePtr_);
+        BackingOwnership_ = CFC::FabricBackigOwnership::OWNED;
+        if (
+            !storage.SegmentPoolPath.empty() &&
+            !__NumericalBacking__.Create(
+                storage.SegmentPoolPath,
+                (cache.SlabCellCount_ - cache.SegmentPoolBegin_)
+            )
+        ) 
+        {
+            return false;
+        }
+        RefreshNumericalBase_();
+        FabCache_->ModelDiaphragm_.DynamicsRevision_ = storage.DynamicRevision;
+        return true;
+    }
 
     bool SlabToFabricConverterAndCordinator::InitializeFabric(
         uint32_t slot_count,
         uint32_t slot_cell_count,
         const SchemaDefinition::FabricRegionConfig& region_conf,
-        uint32_t max_direct_parent_per_axis
+        uint32_t max_direct_parent_per_axis,
+        const CFC::FabricInitConf& storage
     ) noexcept
     {
-        auto phase = ExecutionGate().TryMaintenance();
-        if (!phase) return false;
-
+        ExclusiveLease exc_phase = ExecutionGate_.TryMaintenance();
+        if (!exc_phase) return false;
         bool expected = false;
-        if (!InitializationInProgress_.compare_exchange_strong(expected, true, std::memory_order_acq_rel, std::memory_order_acquire))
+        if (
+            !InitializationInProgress_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)
+        ) 
         {
             return false;
         }
 
-        struct InitGuardSTFC
-        {
-            SlabToFabricConverterAndCordinator* SelfPtr{};
-            bool SuccesInit{false};
-
-
-            ~InitGuardSTFC()
-            {
-                if (!SuccesInit && SelfPtr)
-                {
-                    SelfPtr->FabricInitialized_.store(false, std::memory_order_release);
-                }
-                
-                if (SelfPtr)
-                {
-                    SelfPtr->InitializationInProgress_.store(false, std::memory_order_release);
-                }
-            }
-        } internal_init_guard{this, false};
-        
-        ShutDownFabric();
-
-        InitializationInProgress_.store(true, std::memory_order_release);
-
-        if (slot_count == UNSIGNED_ZERO || !ADS::ValidateSlotIdx(slot_count))
-        {
-            return false;
-        }
-        
-        if (!ADS::IsCapacityOfAPCValid(slot_cell_count))
-        {
-            return false;
-        }
-
-        const uint16_t active_mask = region_conf.ActiveRegionMask;
-        const uint8_t active_count = static_cast<uint8_t>(std::popcount(active_mask));
+        InitFlagReset flag{InitializationInProgress_};
+        const RawPackedCellAllocator allocator =  storage.HostAlloc ? *storage.HostAlloc : RawPackedCellAllocator{};
+        const GMI::ModelCatalog catalog{
+            storage.Models,
+            storage.Dependencies,
+            storage.Dynamics                                                                                                                          
+        };
 
         if (
-            active_mask == UNSIGNED_ZERO ||
-            (active_mask & static_cast<uint16_t>(~ADS::ValidRegionMask())) != UNSIGNED_ZERO ||
-            active_count == UNSIGNED_ZERO ||
-            region_conf.BatchCapacity == UNSIGNED_ZERO ||
-            slot_cell_count % SD::REGION_ALIGNMENT_CELLS != UNSIGNED_ZERO
-        )
+            !allocator.IsValid() ||
+            !storage.DynamicRevision ||
+            !catalog.ValidCatalog()
+        ) 
         {
             return false;
         }
 
-        if (
-            !EB::IsValidConfigurableParentCapacity(max_direct_parent_per_axis, slot_count) ||
-            !EB::IsBoundedRelationLocatorSize(max_direct_parent_per_axis, slot_count)
-        )
+        //CODE:: INITCACHE_FIX_PRIO_01
+        CFC::FabricCache cache{};
         {
-            return false;
+            cache.FormateVersion_ = CFC::FORMAT_VERSION;
+            cache.CountOfAPC_ = slot_count;
+            cache.PerAPCRuntimeCellCount_ = slot_cell_count;
+            cache.MaxDirectParentsPerAxis_ = max_direct_parent_per_axis;
+            cache.ActiveRegionMask_ = region_conf.ActiveRegionMask;
+            cache.MatrixBatchCapacity_ = region_conf.BatchCapacity;
+            cache.HasDefaultRegionTable_ = region_conf.IsDefault;
+            cache.ModelDiaphragm_.ModelCount_ = static_cast<uint16_t>(storage.Models.size());
+            cache.ModelDiaphragm_.ModelDependencyCount_ = static_cast<uint32_t>(storage.Dependencies.size());
+            cache.ModelDiaphragm_.ModelDynamicsByteCount_ = storage.Dynamics.size();
         }
 
-        FabricCache cache{};
+        StorageAllocationDef layout;
+        if (!layout.BuildStorage(cache)) return false;
+        Numerics::Replacement replacement{*this};
+        AllocatorOfFabric_ = allocator;
 
-        cache.FormateVersion_ = CoreOfFabricCoordinator::FORMAT_VERSION;
-        cache.CountOfAPC_ = slot_count;
-        cache.PerAPCRuntimeCellCount_ = slot_cell_count;
-        cache.MaxDirectParentsPerAxis_ = max_direct_parent_per_axis;
-        cache.EdgeTableRecordWidth_ = EdgeBuilder::EdgeTableRecordWidth(max_direct_parent_per_axis);
-        cache.ActiveRegionMask_ = active_mask;
-        cache.ActiveRegionCount_ = active_count;
-        cache.MatrixBatchCapacity_ = region_conf.BatchCapacity;
-        cache.MatrixViewRowCellCount_ = static_cast<uint16_t>(
-            static_cast<uint16_t>(active_count) *
-            SD::RegionSchemaCellCount()
-        );
-        cache.RegionAlignmentCellCount_ = SD::REGION_ALIGNMENT_CELLS;
-        cache.FirstFreeIdx_ = UNSIGNED_ZERO;
+        if (!__InitSlabAndCache__(storage, cache)) return false;
 
-        size_t cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(CoreOfFabricCoordinator::FABRIC_UNIT_COUNT);
-        const size_t record_book_begin = cursor;
-        const size_t record_book_end = record_book_begin + static_cast<size_t>(CoreOfFabricCoordinator::RECORD_BOOK_INTERNAL_SEGMENT_COUNT) * CoreOfFabricCoordinator::RECORD_BOOK_WIDTH;
-
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(record_book_end);
-        const size_t horizontal_edge_begin = cursor;
-        const size_t horizontal_edge_end = horizontal_edge_begin + static_cast<size_t>(cache.CountOfAPC_) * cache.EdgeTableRecordWidth_;
-
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(horizontal_edge_end);
-        const size_t matrix_view_table_begin = cursor;
-        const size_t matrix_view_table_end = matrix_view_table_begin + static_cast<size_t>(cache.CountOfAPC_ * cache.MatrixViewRowCellCount_);
-        
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(matrix_view_table_end);
-        const size_t vertical_edge_begin = cursor;
-        const size_t vertical_edge_end = vertical_edge_begin + 
-                static_cast<size_t>(cache.CountOfAPC_) * cache.EdgeTableRecordWidth_;
-
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(vertical_edge_end);
-        const size_t apc_handle_table_begin = cursor;
-        const size_t apc_handle_table_end = apc_handle_table_begin + static_cast<size_t>(cache.CountOfAPC_ * HandleOfAPCStatic::HANDLE_TABLE_WIDTH);
-
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(apc_handle_table_end);
-        const size_t device_planner_begain = cursor;
-        const size_t device_planner_end = device_planner_begain + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::MODEL_DESCRIPTION_LEN);
-
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(device_planner_end);
-        const size_t work_queue_begin = cursor;
-        const size_t work_queue_end = work_queue_begin + static_cast<size_t>(cache.CountOfAPC_ * CoreOfFabricCoordinator::WORK_RECORD_WIDTH_OF_FABRIC);
-
-        cursor = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(work_queue_end);
-        cache.RecordBookBeginIndex_ = record_book_begin;
-        cache.RecordBookEndIndex_ = record_book_end;
-        cache.SegmentPoolBegin_ = CoreOfFabricCoordinator::DefaultFabricAlignment16Cell(std::max<size_t>(cursor, CoreOfFabricCoordinator::DEFAULT_FABRIC_CONTROLIO_LENGTH));
-        cache.SlabCellCount_ = cache.SegmentPoolBegin_ + static_cast<size_t>(cache.CountOfAPC_ * cache.PerAPCRuntimeCellCount_);
-        cache.HorizontalEdgeBeginIdx_ = horizontal_edge_begin;
-        cache.VerticalEdgeBeginIdx_ = vertical_edge_begin;
-        cache.HandleTableBeginIndex_ = apc_handle_table_begin;
-        cache.MatrixViewTableBeginIndex_ = matrix_view_table_begin;
-        cache.HasDefaultRegionTable_ = region_conf.IsDefault;
-        if (cache.SlabCellCount_ == UNSIGNED_ZERO || cache.SlabCellCount_ >= FABRIC_CELL_SENTINAL)
-        {
-            return false;
-        }
-        SlabBasePtr_ = AllocatePackedCellRaw_(cache.SlabCellCount_);
-        if (!SlabBasePtr_)
-        {
-            return false;
-        }
-
-        std::fill_n(SlabBasePtr_, static_cast<size_t>(cache.SlabCellCount_), uint64_t{UNSIGNED_ZERO});
-
-        FabCache_ = std::construct_at(reinterpret_cast<FabricCache*>(SlabBasePtr_), cache);
-        BackingOwnership_ = CFC::FabricBackigOwnership::OWNED;
-
-        //RECORD_BOOK_OF_TABLE_SEGMENT_CLASS - ENTRIES
-        WriteARecordBookOfTSCEntry_(FabricSegments::SLAB_RECORD_MAP, record_book_begin, record_book_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H, horizontal_edge_begin, horizontal_edge_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V, vertical_edge_begin, vertical_edge_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::APC_HANDLE_TABLE, apc_handle_table_begin, apc_handle_table_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::MODEL_DESCRIPTION, device_planner_begain, device_planner_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::WORK_QUEUE, work_queue_begin, work_queue_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::MATRIX_VIEW_TABLE, matrix_view_table_begin, matrix_view_table_end);
-        WriteARecordBookOfTSCEntry_(FabricSegments::SEGMENT_POOL, FabCache_->SegmentPoolBegin_, FabCache_->SlabCellCount_);
-
-        if (!ConstructMatrixViewRecords_(matrix_view_table_begin, matrix_view_table_end))
-        {
-            return false;
-        }
-
-        if (FabCache_->HasDefaultRegionTable_)
-        {
-            for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
-            {
-                if (
-                    !PrepareMatrixViewRow_(i, DefaultRegionTable_) ||
-                    !InitializeRegionProtocolStorage_(i)
-                )
-                {
-                    return false;
-                }
-            }
-        }
-        
-        //IDLE UNUSED FabricSegments
-        IdleAFabricTableClassRangesMemory_(FabricSegments::MODEL_DESCRIPTION);
-        IdleAFabricTableClassRangesMemory_(FabricSegments::WORK_QUEUE);
-        //END:: IDELING
-
-        //INIT: EDGE TABLES
-        if (
-            !InitializeStructHotRowApcHandleTable_() ||
-            !InitializeEdgeTable_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H) ||
-            !InitializeEdgeTable_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V) 
-        )
-        {
-            return false;
-        }
-        //CONFERMATION
-        FabricInitialized_.store(true, std::memory_order_release);
-        (void)ExecutionGate().ConfirmedRestored();
-        internal_init_guard.SuccesInit = true;
-        return true;
-        
     }
-    
+
     void SlabToFabricConverterAndCordinator::ShutDownFabric() noexcept
     {
         // Preserve the original blocking/draining shutdown contract.
