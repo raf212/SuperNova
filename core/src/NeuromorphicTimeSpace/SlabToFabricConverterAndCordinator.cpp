@@ -228,7 +228,6 @@ namespace BidirectionalInMemGraph
         return true;
     }
     
-
     bool SlabToFabricConverterAndCordinator::InitializeFabric(
         uint32_t slot_count,
         uint32_t slot_cell_count,
@@ -297,7 +296,31 @@ namespace BidirectionalInMemGraph
         if (!__InitMatrixRegionTable__(layout)) return false;
         
         //IDELS
-        
+        IdleAFabricTableClassRangesMemory_(FabricSegments::WORK_QUEUE);
+
+        if (
+            !InitializeStructHotRowApcHandleTable_() ||
+            !InitializeEdgeTable_(FabricSegments::VALUE_PARENT_EDGE_TABLE_H) ||
+            !InitializeEdgeTable_(FabricSegments::VOLATILE_PARENT_EDGE_TABLE_V)
+        ) 
+        {
+            return false;
+        }
+
+        if (
+            !IsDiskPaged() &&
+            storage.Cache == CFC::NumericalCachePolicy::PRE_TOUCHED
+        ) 
+        {
+            __NumericalBacking__.WarmAll();
+        }
+
+        __NumericalBacking__.CommitCreation();
+        SealedDAGRevision_.store(replacement.Revision() + 1, std::memory_order_release);
+        FabricInitialized_.store(true, std::memory_order_release);
+        (void) ExecutionGate().ConfirmedRestored();
+        replacement.Commit();
+        return true;
     }
 
     void SlabToFabricConverterAndCordinator::ShutDownFabric() noexcept
