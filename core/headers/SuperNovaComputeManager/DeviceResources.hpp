@@ -107,7 +107,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             try 
             {
                 Data_ = sycl::aligned_alloc_device<DT>(
-                    std::max<size_t>(alignof(DT), ADS::APC_CACHELINE_SIZE),
+                    std::max<size_t>(alignof(DT), ADS::CACELINE_SIZE_IN_BYTES),
                     count,
                     Runtime_->ComputeQueue
                 );
@@ -253,7 +253,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                         {
                             ::operator delete(
                                 Stage_[i],
-                                std::align_val_t{std::max(alignof(Record), size_t{ADS::APC_CACHELINE_SIZE})}
+                                std::align_val_t{std::max(alignof(Record), size_t{ADS::CACELINE_SIZE_IN_BYTES})}
                             );
                         }
                     }
@@ -289,7 +289,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 return false;
             }
 
-            const size_t alignment = std::max<size_t>(alignof(Record), ADS::APC_CACHELINE_SIZE);
+            const size_t alignment = std::max<size_t>(alignof(Record), ADS::CACELINE_SIZE_IN_BYTES);
             try 
             {
                 const bool host_usm = Runtime_->Gpu.has(sycl::aspect::usm_host_allocations);

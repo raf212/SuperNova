@@ -1,7 +1,4 @@
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
-#include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "NeuromorphicTimeSpace/SlabToFabricConverterAndCordinator.h"
-
+#include <SuperNova>
 namespace BidirectionalInMemGraph
 {
     void APCFinilizer::NotifyExternalStructuralCommits(uint64_t count) noexcept
@@ -80,9 +77,7 @@ namespace BidirectionalInMemGraph
         
         apc.APCCache_.FabricOwnerPtr_ = this;
         apc.APCCache_.RawAPCBasePtr_ = reinterpret_cast<std::byte*>(
-            SlabBasePtr_ +
-            FabCache_->SegmentPoolBegin_ +
-            static_cast<size_t>(slot) * FabCache_->PerAPCRuntimeCellCount_
+            NumericalBase_() + static_cast<size_t>(slot) * FabCache_->PerAPCRuntimeCellCount_
         );
         apc.APCCache_.APCSlotIdx_ = slot;
         apc.APCCache_.GenerationCellPtr_ = generation_cell;
@@ -822,6 +817,7 @@ namespace BidirectionalInMemGraph
         }
 
         if (
+            __NumericalBacking__.DataPtr() ||
             !FabCache_->HasDefaultRegionTable_ ||
             override_table ||
             control_values.Generation != HandleOfAPCStatic::FIRST_GENERATION
@@ -848,13 +844,13 @@ namespace BidirectionalInMemGraph
         if (
             !range.IsValid ||
             !desired_apc.BindExternalRawFabricBacking_(
-                &SlabBasePtr_[range.BeginIndex],
+                ResolveCell_(range.BeginIndex),
                 this,
                 slot,
                 generation_cell,
                 control_values.Generation
             ) ||
-            !desired_apc.InitiateAPCMetaHeader()
+            !desired_apc.InitializeNodeModelDescription_()
         )
         {
             AbortCreation___();
@@ -1366,10 +1362,11 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        for (size_t idx = range.BeginIndex; idx < range.EndIndex; ++idx)
-        {
-            DirectlyStoreFabricUnit64(idx, 0u);
-        }
+        std::fill_n(
+            ResolveCell_(range.BeginIndex),
+            range.EndIndex - range.BeginIndex,
+            UNSIGNED_ZERO
+        );
 
         return HandleOfAPCStatic::IsGenerationValid(new_generation);
     }
@@ -1400,7 +1397,7 @@ namespace BidirectionalInMemGraph
 
             if (expected_disabled)
             {
-                if (supplied.Flags != expected.Flags)
+                if (SD::SealedFlags(supplied.Flags) != SD::SealedFlags(expected.Flags))
                 {
                     return false;
                 }
@@ -1412,7 +1409,8 @@ namespace BidirectionalInMemGraph
                 supplied.MatrixHeight != expected.MatrixHeight ||
                 supplied.MatrixWidth != expected.MatrixWidth ||
                 supplied.CellCount != expected.CellCount ||
-                supplied.Flags != expected.Flags
+                supplied.Flags != expected.Flags ||
+                SD::SealedFlags(supplied.Flags) != SD::SealedFlags(expected.Flags)
             )
             {
                 return false;

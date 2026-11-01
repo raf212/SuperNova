@@ -8,7 +8,7 @@ namespace BidirectionalInMemGraph
     struct SchemaOrchestrator 
     {
 
-        static constexpr uint32_t REGION_ALIGNMENT_CELLS = static_cast<uint32_t>(ADS::APC_CACHELINE_SIZE / sizeof(std::uint64_t));
+        static constexpr uint32_t REGION_ALIGNMENT_CELLS = static_cast<uint32_t>(ADS::CACELINE_SIZE_IN_BYTES / sizeof(std::uint64_t));
         static constexpr uint64_t NO_POSITION = FABRIC_CELL_SENTINAL;
 
         enum class SchemaProtocols : uint8_t
@@ -46,6 +46,7 @@ namespace BidirectionalInMemGraph
             HAS_PER_SLOT_SEQUENSE = 1u << 3u,
             REGION_DISABLED = 1u << 4u,
             BATCHED_LAST_DIM = 1u << 5u,
+            SEALED  = 1u << 6u,
             UNASSIGNED_UNUSED_NANNULL = UINT8_MAX
         };
 
@@ -59,11 +60,14 @@ namespace BidirectionalInMemGraph
             uint64_t EnqueuePosition = FABRIC_CELL_SENTINAL;
             uint64_t DequeuePosition = FABRIC_CELL_SENTINAL;
             
+            //Unique region qualifiers
+            uint32_t ModelInstance = UNSIGNED_ZERO;
+            uint32_t DependencyBegin = UNSIGNED_ZERO;
+            uint32_t DependencyCount = UNSIGNED_ZERO;
             MacroColumnOfAPC Region = MacroColumnOfAPC::FREE_SLOT;
             SchemaProtocols Protocol = SchemaProtocols::PRIVATE_REGION;
             DataTypeOfMacroColumn Dtype = DataTypeOfMacroColumn::UINT64_T;
             SchemaFlags Flags = SchemaFlags::REGION_DISABLED;   
-            uint32_t SeqLockCounter = UNSIGNED_ZERO;
         };
         
         struct FabricRegionConfig final
@@ -76,12 +80,12 @@ namespace BidirectionalInMemGraph
 
         using RegionSchemaTable = std::array<RegionSchemaRecord, ADS::CountOfMacroColumn()>;
         using RSSpan = std::span<RegionSchemaRecord>;
+        using ConstRSSpan = std::span<const RegionSchemaRecord>;
 
     };
     
     struct SchemaValidator : public SchemaOrchestrator
     {
-
         static constexpr size_t RegionSchemaCellCount() noexcept
         {
             return sizeof(RegionSchemaRecord) / sizeof(uint64_t);
@@ -99,6 +103,10 @@ namespace BidirectionalInMemGraph
             ) != UNSIGNED_ZERO;
         }
 
+        static constexpr SchemaFlags SealedFlags(SchemaFlags flags) noexcept
+        {
+            return static_cast<SchemaFlags>(static_cast<uint8_t>(flags) & ~static_cast<uint8_t>(SchemaFlags::SEALED));
+        }
 
         static constexpr bool IsKnownSchemaFlags(SchemaFlags flags) noexcept
         {
@@ -108,7 +116,8 @@ namespace BidirectionalInMemGraph
                 static_cast<uint8_t>(SchemaFlags::ALLOW_TRAILING_PADDING) |
                 static_cast<uint8_t>(SchemaFlags::HAS_PER_SLOT_SEQUENSE) |
                 static_cast<uint8_t>(SchemaFlags::BATCHED_LAST_DIM) |
-                static_cast<uint8_t>(SchemaFlags::REGION_DISABLED);
+                static_cast<uint8_t>(SchemaFlags::REGION_DISABLED) |
+                static_cast<uint8_t>(SchemaFlags::SEALED);
             
             const uint8_t raw = static_cast<uint8_t>(flags);
 
@@ -314,7 +323,6 @@ namespace BidirectionalInMemGraph
             if (
                 !IsKnownSchemaFlags(schema.Flags) ||
                 HasSchemaFlag(schema.Flags, SchemaFlags::REGION_DISABLED) ||
-                schema.CellOffset < ADS::META_CELL_COUNT ||
                 schema.CellOffset % REGION_ALIGNMENT_CELLS != UNSIGNED_ZERO ||
                 schema.CellCount == UNSIGNED_ZERO ||
                 schema.CellOffset > apc_cell_count ||
@@ -425,7 +433,7 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint32_t RequiredCellsForSchemaTable_(const RegionSchemaTable& table) noexcept
         {
-            uint32_t cursor = AlignRegionCells(ADS::META_CELL_COUNT);
+            uint32_t cursor = AlignRegionCells(UNSIGNED_ZERO);
             for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
             {
                 const RegionSchemaRecord& schema = table[i];

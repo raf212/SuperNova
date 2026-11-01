@@ -91,8 +91,8 @@ constexpr const char* MutationResultName(MutationResult result) noexcept
     }
 }
 
-static_assert(ADS::META_CELL_COUNT == 8u);
-static_assert(sizeof(SchemaDefinition::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
+// static_assert(ADS::META_CELL_COUNT == 8u);
+// static_assert(sizeof(SchemaDefinition::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
 static_assert(alignof(SchemaDefinition::RegionSchemaRecord) == alignof(std::uint64_t));
 static_assert(std::is_trivially_copyable_v<SchemaDefinition::RegionSchemaRecord>);
 static_assert(std::is_trivially_destructible_v<SchemaDefinition::RegionSchemaRecord>);
@@ -1125,7 +1125,7 @@ private:
         if (op.MutationOP_ == ReadOperation::FOUND)
         {
             const std::uint32_t slot = found.GetThisSlotIdx();
-            if (ADS::IsValid32BitAPCUnit(slot))
+            if (ADS::ValidateSlotIdx(slot))
             {
                 node = static_cast<std::size_t>(slot);
                 present = true;
@@ -1840,7 +1840,7 @@ private:
         const std::uint32_t payload_cells =
             SD::AlignRegionCells(payload_words);
         const std::uint32_t required = SD::AlignRegionCells(
-            SD::AlignRegionCells(ADS::META_CELL_COUNT) + payload_cells);
+            SD::AlignRegionCells(UNSIGNED_ZERO) + payload_cells);
         return std::max(
             required,
             static_cast<std::uint32_t>(MINIMUM_APC_CELL_COUNT));
@@ -4861,7 +4861,7 @@ public:
         std::uint32_t slot
     ) noexcept
     {
-        const SD::RSSpan row = MetrixViewRow_(slot);
+        const SD::ConstRSSpan row = MetrixViewRow_(slot);
         return std::span<const SD::RegionSchemaRecord>(row.data(), row.size());
     }
 
@@ -4893,7 +4893,7 @@ public:
 
     std::optional<ADS::RangeOfAPC> TableRange(FabricSegments table) noexcept
     {
-        RecordBookConf::FabricSegmentBounds bounds{};
+        CoreOfFabricCoordinator::FabricSegmentBounds bounds{};
         if (!GetRecordMapCarrierRanges_(table, bounds) || !bounds.IsValid)
         {
             return std::nullopt;
@@ -4972,7 +4972,7 @@ inline bool SchemaABIAndGeometry() noexcept
         return false;
     }
 
-    ordinary.CellOffset = ADS::META_CELL_COUNT;
+    ordinary.CellOffset = UNSIGNED_ZERO;
     const auto ordinary_bytes = SD::MatrixByteCount(ordinary);
     const auto ordinary_cells = SD::MatrixCellCount(ordinary);
     const auto ordinary_stride = SD::RecordStrideCells(ordinary);
@@ -4996,7 +4996,7 @@ inline bool SchemaABIAndGeometry() noexcept
         double_buffer,
         2u
     );
-    double_buffer.CellOffset = ADS::META_CELL_COUNT;
+    double_buffer.CellOffset = UNSIGNED_ZERO;
 
     SD::RegionSchemaRecord queue{};
     queue = ordinary;
@@ -5007,7 +5007,7 @@ inline bool SchemaABIAndGeometry() noexcept
         queue,
         4u
     );
-    queue.CellOffset = ADS::META_CELL_COUNT;
+    queue.CellOffset = UNSIGNED_ZERO;
 
     SD::RegionSchemaRecord invalid{};
     SD::RegionSchemaRecord invalid_1{};
@@ -5563,7 +5563,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
     };
 
     bool row_ok = row.size() == active_count;
-    std::uint32_t expected_offset = ADS::META_CELL_COUNT;
+    std::uint32_t expected_offset = UNSIGNED_ZERO;
     for (std::size_t i = 0u; row_ok && i < row.size(); ++i)
     {
         expected_offset = SD::AlignRegionCells(expected_offset);
@@ -5572,7 +5572,6 @@ inline bool DeviceViewAndProtocolStorage() noexcept
             record.Region == expected_regions[i] &&
             record.CellOffset == expected_offset &&
             record.CellOffset % SD::REGION_ALIGNMENT_CELLS == 0u &&
-            record.SeqLockCounter == 0u &&
             SD::FreshProtocolState(record) &&
             SD::ValidateStortedRegionSchema(
                 record, MINIMUM_APC_CELL_COUNT, batch
@@ -5587,19 +5586,8 @@ inline bool DeviceViewAndProtocolStorage() noexcept
             static_cast<std::uintptr_t>(row_cells) * sizeof(std::uint64_t) &&
         row[0u].MatrixHeight == 3u &&
         second_row[0u].MatrixHeight == 5u &&
-        row[0u].CellOffset == ADS::META_CELL_COUNT &&
-        second_row[0u].CellOffset == ADS::META_CELL_COUNT;
-
-    const bool header_ok =
-        fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::MAGIC_ID)
-        ) == ADS::BRANCH_MAGIC &&
-        fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::APC_SLOT_IDX)
-        ) == slot &&
-        fabric.ReadAPCLocalCell(
-            slot, static_cast<std::uint32_t>(ADS::HeaderIdentifierOfAPC::EOF_APC_HEADER)
-        ) == ADS::EOF_HEADER;
+        row[0u].CellOffset == UNSIGNED_ZERO &&
+        second_row[0u].CellOffset == UNSIGNED_ZERO;
 
     bool queue_storage_ok = row_ok;
     if (queue_storage_ok)
@@ -5675,7 +5663,7 @@ inline bool DeviceViewAndProtocolStorage() noexcept
 
     const bool retire_ok = apc.Retire() && second_apc.Retire();
     const bool ok = fabric_metadata_ok && row_ok &&
-        row_stride_and_isolation_ok && header_ok && queue_storage_ok &&
+        row_stride_and_isolation_ok && queue_storage_ok &&
         public_views_ok && retire_ok;
     if (!ok)
     {
@@ -5683,7 +5671,6 @@ inline bool DeviceViewAndProtocolStorage() noexcept
             << "    detail: metadata=" << (fabric_metadata_ok ? "PASS" : "FAIL")
             << " row=" << (row_ok ? "PASS" : "FAIL")
             << " row-stride=" << (row_stride_and_isolation_ok ? "PASS" : "FAIL")
-            << " header=" << (header_ok ? "PASS" : "FAIL")
             << " MPMC=" << (queue_storage_ok ? "PASS" : "FAIL")
             << " views=" << (public_views_ok ? "PASS" : "FAIL")
             << " retire=" << (retire_ok ? "PASS" : "FAIL") << '\n';
@@ -6636,8 +6623,8 @@ inline Result Run()
         source_child.GenerationForTest();
 
     const bool source_setup =
-        ADS::IsValid32BitAPCUnit(parent_slot) &&
-        ADS::IsValid32BitAPCUnit(child_slot) &&
+        ADS::ValidateSlotIdx(parent_slot) &&
+        ADS::ValidateSlotIdx(child_slot) &&
         HandleOfAPCStatic::
             IsGenerationValid(
                 parent_generation

@@ -52,13 +52,7 @@ namespace BidirectionalInMemGraph
             uint32_t expected_generation
         ) noexcept;
 
-        bool InitiateAPCMetaHeader() noexcept;
-
-        bool ReadAPCMetaUnit(
-            ADS::HeaderIdentifierOfAPC meta_idx,
-            uint64_t& return_value
-        ) noexcept;
-
+        bool InitializeNodeModelDescription_() noexcept;
     };
         
     

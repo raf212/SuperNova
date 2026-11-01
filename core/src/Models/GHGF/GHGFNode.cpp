@@ -90,6 +90,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         using GMC = GM::StorageConst;
+        using SD = SchemaDefinition;
 
         if (
             !GHGFFabric_ ||
@@ -191,10 +192,18 @@ namespace BidirectionalInMemGraph
             (weight.value())[value_index] = GMC::INITIAL_VALUE_COUPLING;
             (weight.value())[volatile_index] = GMC::INITIAL_VOLATILITY_COUPLING;
         }
-        
-        GHGFFabric_->AtomicallyStoreU64Fab(
-            GHGFFabric_->SlotBegin_(APCCache_.APCSlotIdx_) + static_cast<size_t>(ADS::HeaderIdentifierOfAPC::GHGF_ROLE_CELL),
-            static_cast<uint64_t>(role)
+
+        GMI::NodeModelDescription* model_desc = GHGFFabric_->NodeModel_(APCCache_.APCSlotIdx_);
+        if (!model_desc) return false;
+
+        const SD::ConstRSSpan schemas = GHGFFabric_->MetrixViewRow_(APCCache_.APCSlotIdx_);
+        if (!schemas.empty())
+        {
+            model_desc->Instance = schemas.front().ModelInstance;
+        }
+        std::atomic_ref<uint32_t>(model_desc->Role).store(
+            static_cast<uint32_t>(role),
+            std::memory_order_release
         );
 
         GHGFFabric_->InvalidateGHGFModel_();
@@ -240,9 +249,11 @@ namespace BidirectionalInMemGraph
 
     std::optional<GHGFLayerModel::GHGFNodeRole> GHGFNode::GHGFRole_() noexcept
     {
-        uint64_t value{};
+        if (!IsActiveAPC()) return std::nullopt;
+        GMI::NodeModelDescription* model_desc = GHGFFabric_->NodeModel_(APCCache_.APCSlotIdx_);
+        if (!model_desc) return std::nullopt;
+        const uint32_t value = std::atomic_ref<uint32_t>(model_desc->Role).load(std::memory_order_acquire);
         if (
-            !ReadAPCMetaUnit(ADS::HeaderIdentifierOfAPC::GHGF_ROLE_CELL, value)||
             value < static_cast<uint8_t>(GM::GHGFNodeRole::OBSERVATION) ||
             value > static_cast<uint8_t>(GM::GHGFNodeRole::VOLATILE)
         )

@@ -17,7 +17,7 @@ namespace BidirectionalInMemGraph
             !raw_cells_ptr ||
             !fabric_owner ||
             !ADS::IsCapacityOfAPCValid(fabric_owner->FabCache_->PerAPCRuntimeCellCount_) ||
-            !ADS::IsValid32BitAPCUnit(fabric_slot_idx) ||
+            !ADS::ValidateSlotIdx(fabric_slot_idx) ||
             IsFabricBound_()
         )
         {
@@ -32,7 +32,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        std::span<SchemaDefinition::RegionSchemaRecord> region_row = fabric_owner->MetrixViewRow_(
+        SchemaOrchestrator::ConstRSSpan region_row = fabric_owner->MetrixViewRow_(
             static_cast<uint32_t>(fabric_slot_idx)
         );
 
@@ -54,71 +54,6 @@ namespace BidirectionalInMemGraph
     {
         APCCache_ = ADS::CacheOfAPC{};
     }
-
-    bool FabricToAPCLinker::InitiateAPCMetaHeader() noexcept
-    {
-        using DSA = DescriptionOfAPC;
-
-        HeaderOrchestrator::APCMetaBuffer header_meta_buffer{};
-
-        if (!IsFabricBound_())
-        {
-            return false;
-        }
-
-        HAS::LifeCycleControl current_state{};
-
-        if (
-            APCCache_.FabricOwnerPtr_->ReadAPCStateAtomically_(
-                APCCache_.APCSlotIdx_,
-                current_state
-            ) != SeqLockedOperation::FOUND ||
-            current_state.State != StateOfAPC::RESERVED ||
-            !HeaderOrchestrator::InitializeDefaultHeaderBuffer(
-                header_meta_buffer,
-                APCCache_.APCSlotIdx_,
-                APCCache_.FabricOwnerPtr_->FabCache_->PerAPCRuntimeCellCount_
-            )
-        )
-        {
-            return false;
-        }
-
-        const ADS::RangeOfAPC range_of_this_apc = APCCache_.FabricOwnerPtr_->GetSegmentPoolRange(APCCache_.APCSlotIdx_);
-
-        return
-            range_of_this_apc.IsValid &&
-            APCCache_.FabricOwnerPtr_->ForceNxLenMemCopy(
-                range_of_this_apc.BeginIndex,
-                ADS::META_CELL_COUNT,
-                header_meta_buffer.data()
-            );
-    }
-
-    bool FabricToAPCLinker::ReadAPCMetaUnit(
-        ADS::HeaderIdentifierOfAPC meta_idx,
-        uint64_t& return_value
-    ) noexcept
-    {
-        if (!IsActiveAPC())
-        {
-            return false;
-        }
-        const uint8_t idx_u = static_cast<uint8_t>(meta_idx);
-        const ADS::RangeOfAPC range_of_this_apc = APCCache_.FabricOwnerPtr_->GetSegmentPoolRange(APCCache_.APCSlotIdx_);
-        const size_t slab_idx = static_cast<uint64_t>(range_of_this_apc.BeginIndex + idx_u);
-        return range_of_this_apc.IsValid && APCCache_.FabricOwnerPtr_->AtomicallyLoadReadAUnit(slab_idx, return_value);
-    }
-
-    bool FabricToAPCLinker::IsFabricBound_() const noexcept
-    {
-        return APCCache_.FabricOwnerPtr_ != nullptr &&
-            APCCache_.RawAPCBasePtr_ != nullptr &&
-            APCCache_.GenerationCellPtr_ != nullptr &&
-            ADS::IsValid32BitAPCUnit(APCCache_.APCSlotIdx_) &&
-            HandleOfAPCStatic::IsGenerationValid(APCCache_.CurrentGeneration_);
-    }
-
 
     APCUseScope FabricToAPCLinker::AcquireAPCUse_() noexcept
     {
@@ -177,6 +112,36 @@ namespace BidirectionalInMemGraph
 
         return HandleOfAPCStatic::IsOpenGeneration(raw, APCCache_.CurrentGeneration_);
     }
+
+    bool FabricToAPCLinker::InitializeNodeModelDescription_() noexcept
+    {
+        if (!IsFabricBound_()) return false;
+        HAS::LifeCycleControl current_state{};
+        if (
+            APCCache_.FabricOwnerPtr_->ReadAPCStateAtomically_(
+                APCCache_.APCSlotIdx_, current_state
+            ) != SeqLockedOperation::FOUND ||
+            current_state.State != StateOfAPC::RESERVED
+        ) 
+        {
+            return false;
+        }
+
+        GMI::NodeModelDescription* model_record = APCCache_.FabricOwnerPtr_->NodeModel_(APCCache_.APCSlotIdx_);
+        if (!model_record) return false;
+        *model_record = {};
+        return true;
+    }
+
+    bool FabricToAPCLinker::IsFabricBound_() const noexcept
+    {
+        return APCCache_.FabricOwnerPtr_ != nullptr &&
+            APCCache_.RawAPCBasePtr_ != nullptr && 
+            APCCache_.GenerationCellPtr_ != nullptr &&
+            ADS::ValidateSlotIdx(APCCache_.APCSlotIdx_) &&
+            HandleOfAPCStatic::IsGenerationValid(APCCache_.CurrentGeneration_);
+    }
+
 
 
 }

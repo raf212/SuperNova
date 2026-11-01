@@ -6,7 +6,7 @@ namespace BidirectionalInMemGraph
 {
 
     using SO = SchemaOrchestrator;
-    static_assert(sizeof(SO::RegionSchemaRecord) == 5u * sizeof(std::uint64_t));
+    static_assert(sizeof(SO::RegionSchemaRecord) == 6u * sizeof(std::uint64_t));
     static_assert(alignof(SO::RegionSchemaRecord) == alignof(std::uint64_t));
     static_assert(std::is_trivially_copyable_v<SO::RegionSchemaRecord>);
     static_assert(std::is_trivially_destructible_v<SO::RegionSchemaRecord>);
@@ -23,13 +23,14 @@ namespace BidirectionalInMemGraph
 
     ////
     using HAS = HandleOfAPCStatic;
+    using CFC = CoreOfFabricCoordinator;
     static_assert(std::atomic<HAS::LifeCycleControl>::is_always_lock_free == true);
     static_assert(std::atomic<HAS::ParentRowControl>::is_always_lock_free == true);
     static_assert(std::atomic<HAS::ChildListControl>::is_always_lock_free == true);
     static_assert(sizeof(HAS::StructuralHotRow) ==  8 * sizeof(uint64_t));
     static_assert((HandleOfAPCStatic::ACTIVE_COUNT_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
     static_assert((HandleOfAPCStatic::CLOSED_MASK & HandleOfAPCStatic::GENERATION_MASK) == 0u);
-    static_assert(sizeof(FabricCache) == 16 * sizeof(uint64_t));
+    static_assert(sizeof(CFC::FabricCache) == 24 * sizeof(uint64_t));
 
     ///
     static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 8 * sizeof(uint64_t));
@@ -37,5 +38,8 @@ namespace BidirectionalInMemGraph
     //
     static_assert(sizeof(FabricMemory::NativeABI) == sizeof(std::uint64_t));
 
+    //
+    static_assert(sizeof(GMI::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
+    static_assert(sizeof(GMI::ModelStorageDiaphragm) == 6 * sizeof(uint64_t));
 
 }

@@ -1,5 +1,5 @@
 #pragma once 
-#include "FabricConstructor.h"
+#include "FabricConstructor.hpp"
 #include <new>
 
 namespace BidirectionalInMemGraph
@@ -10,11 +10,10 @@ namespace BidirectionalInMemGraph
     protected:
         using SD = SchemaDefinition;
         using DSA = DescriptionOfAPC;
-        using RBC = RecordBookConf;
 
         bool GetRecordMapCarrierRanges_(
             const FabricSegments table_class,
-            RecordBookConf::FabricSegmentBounds& return_bounds
+            CoreOfFabricCoordinator::FabricSegmentBounds& return_bounds
         ) noexcept;
 
         void IdleAFabricTableClassRangesMemory_(FabricSegments table_class) noexcept;
