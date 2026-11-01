@@ -195,7 +195,7 @@ namespace BidirectionalInMemGraph
                 {
                     return false;
                 }
-                *ResolveCell(sequense_cell) = i;
+                *ResolveCell_(sequense_cell) = i;
             }
         }
         

@@ -27,7 +27,7 @@ namespace BidirectionalInMemGraph
 
         void RefreshNumericalBase_() noexcept;
 
-        uint64_t* ResolveCell(uint64_t index) noexcept;
+        uint64_t* ResolveCell_(uint64_t index) noexcept;
 
         GMI::NodeModelDescription* NodeModel_(uint32_t slot) noexcept;
 

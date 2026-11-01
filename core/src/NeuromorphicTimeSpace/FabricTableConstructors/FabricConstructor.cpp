@@ -152,7 +152,7 @@ namespace BidirectionalInMemGraph
             (SlabBasePtr_ && FabCache_ ? (SlabBasePtr_ + FabCache_->SegmentPoolBegin_) : nullptr);
     }
 
-    uint64_t* FabricConstructor::ResolveCell(uint64_t index) noexcept
+    uint64_t* FabricConstructor::ResolveCell_(uint64_t index) noexcept
     {
         if (
             !FabCache_ ||
