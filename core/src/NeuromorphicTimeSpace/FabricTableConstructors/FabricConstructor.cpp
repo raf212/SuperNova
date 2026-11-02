@@ -120,20 +120,9 @@ namespace BidirectionalInMemGraph
             !FabCache_ ||
             !desired_units ||
             number_of_cells == UNSIGNED_ZERO ||
-            number_of_cells > (FabCache_->SlabCellCount_ - slab_starting_idx) ||
-            slab_starting_idx > (FabCache_->SlabCellCount_ - slab_starting_idx)
+            slab_starting_idx >= FabCache_->SlabCellCount_ ||
+            number_of_cells > (FabCache_->SlabCellCount_ - slab_starting_idx)
         )
-        {
-            return false;
-        }
-
-        // fail safe CODE:: FAIL_SAFE_ForceNxLenMemCopy
-        try
-        {
-            uint64_t value_of_last_idx = desired_units[number_of_cells - 1];
-            (void) value_of_last_idx;
-        }
-        catch(...)
         {
             return false;
         }

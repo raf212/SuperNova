@@ -138,9 +138,8 @@ namespace BidirectionalInMemGraph
 
         if (
             cells > static_cast<uint64_t>(std::numeric_limits<off_t>::max() / sizeof(uint64_t)) ||
-            ::ftruncate(File_, static_cast<off_t>(Bytes_) != 0
+            ::ftruncate(File_, static_cast<off_t>(Bytes_)) != 0
         )
-        ) 
         {
             Close();
             return false;   
@@ -155,8 +154,9 @@ namespace BidirectionalInMemGraph
             0
         );
 
-        if (address != MAP_FAILED) 
+        if (address == MAP_FAILED) 
         {
+            Close();
             return false;
         }
         Data_ = static_cast<uint64_t*>(address);

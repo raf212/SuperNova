@@ -2,12 +2,9 @@
 .vscode
 .cache
 *build*
-Dump
 /FUTUTE_DIRECTIONS
-/PaperWritings
 *.pdb
 *.ilk
 *.so
 *.pyd
-/external/llvm-bootstrap
-/external/llvm-project
+*llvm-*
