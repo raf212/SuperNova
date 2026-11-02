@@ -377,7 +377,7 @@ namespace BidirectionalInMemGraph
         if (!catalog.ValidCatalog()) return false;
 
         StorageAllocationDef layout{};
-        CFC::FabricCache& expected = *FabCache_;
+        CFC::FabricCache expected = *FabCache_;
         if (!layout.BuildStorage(expected)) return false;
         for (const CFC::FabricSegmentBounds& range : layout.DefaultSegments__) 
         {
@@ -407,14 +407,14 @@ namespace BidirectionalInMemGraph
                 }
 
                 if (
-                    static_cast<uint8_t>(schema.Region) > ADS::CountOfMacroColumn() ||
+                    static_cast<uint8_t>(schema.Region) >= ADS::CountOfMacroColumn() ||
                     (mask & ADS::RegionBit(schema.Region)) ||
                     schema.CellOffset < previous_end ||
                     !SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::SEALED) ||
                     !SD::ValidateStortedRegionSchema(
                         schema, 
                         FabCache_->PerAPCRuntimeCellCount_, 
-                        FabCache_->MatrixViewRowCellCount_
+                        FabCache_->MatrixBatchCapacity_
                     ) ||
                     !catalog.Accept(schema)
                 ) 
@@ -423,10 +423,10 @@ namespace BidirectionalInMemGraph
                 }
 
                 mask = static_cast<uint16_t>(mask | ADS::RegionBit(schema.Region));
-                previous_end = uint64_t{schema.CellOffset} * schema.CellCount;
+                previous_end = uint64_t{schema.CellOffset} + schema.CellCount;
             }
 
-            if ((mask && mask) != FabCache_->ActiveRegionMask_) 
+            if ((mask != UNSIGNED_ZERO && mask != FabCache_->ActiveRegionMask_))
             {
                 return false;
             }
