@@ -352,7 +352,7 @@ namespace BidirectionalInMemGraph
 
 }
 
-namespace BidirectionalInMemGraph {
+namespace BidirectionalInMemGraph::ComputerDetail {
 using ComputerBackend = ComputerDefAndVect::ComputerBackend;
 using ComputerWorkType = ComputerDefAndVect::ComputerWorkType;
 using ComputerError = ComputerDefAndVect::ComputerError;
