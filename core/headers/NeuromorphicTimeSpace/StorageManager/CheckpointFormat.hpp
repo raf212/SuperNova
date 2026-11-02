@@ -1,4 +1,4 @@
-#include "GlobalStorage.hpp"
+#include "../FabricOrchestrators/HandleAndRetirement.hpp"
 
 namespace BidirectionalInMemGraph::CheckpointFormat 
 {
@@ -59,12 +59,47 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
     static bool WritePageHeaderWords(std::ostream& output, uint64_t value) noexcept
     {
-        for (size_t byte = 0; byte < sizeof(uint64_t); byte++) 
+        for (unsigned byte = 0; byte < sizeof(uint64_t); byte++) 
         {
             output.put(static_cast<char>(value >> (byte * sizeof(uint64_t))));
         }
         return static_cast<bool>(output);
     }
 
+    static  bool ReadWord(std::istream& input, uint64_t& value) noexcept
+    {
+        value = UNSIGNED_ZERO;
+        for (unsigned b = 0; b < sizeof(uint64_t); b++) 
+        {
+            const int encoded = input.get();
+            if (encoded == std::char_traits<char>::eof()) 
+            {
+                return false;
+            }
 
+            value |= uint64_t{static_cast<unsigned char>(encoded)} << (b * sizeof(uint64_t));
+        }
+        return true;
+    }
+
+    static constexpr uint64_t HedaderHash(const FileHeader& header) noexcept
+    {
+        std::array<std::byte, IV::HeaderWords * sizeof(uint64_t)> encoded{};
+        for (size_t word = 0; word < IV::HeaderDataWords; word++) 
+        {
+            for (size_t b = 0; b < sizeof(uint64_t); b++) 
+            {
+                encoded[word * IV::BytesPerWord + b] = static_cast<std::byte>(
+                    header[word] >> (b * sizeof(uint64_t))
+                );
+            }
+        }
+        return PageHash(encoded);
+    }
+
+    static constexpr uint64_t PageCount(uint64_t bytes) noexcept
+    {
+        return bytes == UNSIGNED_ZERO ? UNSIGNED_ZERO : (1 + ((bytes - 1) / IV::PageBytes));
+    }
+    
 }

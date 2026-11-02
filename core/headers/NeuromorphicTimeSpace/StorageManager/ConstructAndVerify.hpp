@@ -1,5 +1,5 @@
 #pragma once
-#include "../FabricOrchestrators/HandleAndRetirement.hpp"
+#include "CheckpointFormat.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <limits>
