@@ -237,11 +237,20 @@ namespace BidirectionalInMemGraph
             RMSNormFunctionSN RMSNormRows = nullptr;
         };
 
+        enum class NumericalAccess : uint8_t
+        {
+            READ = 0,
+            WRITE = 1,
+            READ_WRITE = 2
+        };
+
         template<class DT>
         struct NumericRange final
         {
             DT* Host;
             uint64_t Count;
+            NumericalAccess Access = std::is_const_v<DT> ?
+                NumericalAccess::READ : NumericalAccess::READ_WRITE;
         };
 
         template<class DT>
@@ -363,8 +372,27 @@ template<class T> constexpr auto ComputerDataTypeOf() noexcept {
     return ComputerDefAndVect::DataTypeOfSN<T>();
 }
 }
-namespace BidirectionalInMemGraph::ComputerDetail {
-template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
-template<class T> constexpr NumericRange<const T> ReadRange(const T* p, uint64_t n) noexcept {return {p,n};}
-template<class T> constexpr NumericRange<T> WriteRange(T* p, uint64_t n) noexcept {return {p,n};}
+namespace BidirectionalInMemGraph::ComputerDetail 
+{
+    template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
+
+    template<class T> constexpr NumericRange<const T> ReadRange(const T* p, uint64_t count) noexcept 
+    {
+        return {p, count};
+    }
+
+    template<class T> constexpr NumericRange<T> WriteRange(T* p, uint64_t count) noexcept 
+    {
+        return {p, count};
+    }
+
+    template<class T> constexpr NumericRange<T> OverWriteRange(T* p, uint64_t count) noexcept
+    {
+        return {
+            p,
+            count,
+            ComputerDefAndVect::NumericalAccess::WRITE
+        };
+    }
+
 }
