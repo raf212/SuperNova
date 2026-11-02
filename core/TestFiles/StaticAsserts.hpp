@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph
     static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 8 * sizeof(uint64_t));
 
     //
-    static_assert(sizeof(ComputerDetail::FabricMemory::NativeABI) == sizeof(std::uint64_t));
+    static_assert(sizeof(ComputerDetail::NativeABI) == sizeof(std::uint64_t));
 
     //
     static_assert(sizeof(GMI::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
