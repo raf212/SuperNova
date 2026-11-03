@@ -207,4 +207,39 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
             reinterpret_cast<uintptr_t>(data) % alignof(DT) == UNSIGNED_ZERO &&
             IsRangeInside(slab, slab_cells, data, *bytes);
     }
+
+    template <class... Ts>
+    bool IndependentNumericalRanges(NumericRange<Ts>... ranges) noexcept
+    {
+        struct Extent
+        {
+            const void* Pointer;
+            uint64_t Bytes;
+        };
+
+        const std::array<Extent, sizeof...(Ts)> extents
+        {{
+            {
+                ranges.Host,
+                ByteCount<Ts>(ranges.Count).value_or(UINT64_MAX)
+            }...
+        }};
+        for (size_t first = 0; first < extents.size(); first++) 
+        {
+            for (size_t second = first + 1; second < extents.size(); second++)
+            {
+                if (RangesOverlap(
+                    extents[first].Pointer,
+                    extents[first].Bytes,
+                    extents[second].Pointer,
+                    extents[second].Bytes
+                )) 
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
 };

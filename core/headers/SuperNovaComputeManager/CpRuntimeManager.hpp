@@ -39,10 +39,10 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
         }
 
-        bool Upload()
+        bool PrepareStage()
         {
             const std::optional<uint64_t> bytes = Memory::ByteCount<U>(Range_.Count);
-            if (!bytes ||!Range_.Host || Range_.Count == UNSIGNED_ZERO) 
+            if (!bytes.has_value() ||!Range_.Host || Range_.Count == UNSIGNED_ZERO) 
             {
                 return false;
             }
@@ -67,21 +67,29 @@ namespace BidirectionalInMemGraph::ComputerDetail
             Device_.ComputeQueuePtr()->memcpy(
                 Local_, 
                 Range_.Host, 
-                *Memory::ByteCount<U>(Range_.Count)
+                *bytes
             );
             return true;
         }
 
         DT* Data() const noexcept {return Local_;}
 
-        void Download() 
+        bool Download() 
         {
-            if constexpr (!std::is_const_v<DT>) 
+            if constexpr (std::is_const_v<DT>) return true;
+            else
             {
+                if (Range_.Access == CDV::NumericalAccess::READ) return true;
+                
+                const std::optional<uint64_t> bytes = Memory::ByteCount<U>(Range_.Count);
+                if (!bytes.has_value() ||!Range_.Host || !Local_) 
+                {
+                    return false;
+                }
                 Device_.ComputeQueuePtr()->memcpy(
                     Range_.Host,
                     Local_,
-                    *Memory::ByteCount<U>(Range_.Count)
+                    *bytes
                 );
             }
         }

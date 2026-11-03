@@ -124,7 +124,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         uint64_t Size() noexcept {return Count_;}
         DT* Data() const noexcept {return Data_;}
 
-        std::optional<sycl::event> Upload(
+        std::optional<sycl::event> PrepareStage(
             std::span<const DT> source, 
             uint64_t offset = UNSIGNED_ZERO,
             std::span<const sycl::event> dependencies = {}
