@@ -64,11 +64,13 @@ namespace BidirectionalInMemGraph::ComputerDetail
             );
             if (!Local_) return false;
 
-            Device_.ComputeQueuePtr()->memcpy(
-                Local_, 
-                Range_.Host, 
-                *bytes
-            );
+            if (Range_.Access != CDV::NumericalAccess::WRITE) {
+                Device_.ComputeQueuePtr()->memcpy(
+                    Local_, 
+                    Range_.Host, 
+                    *bytes
+                );
+            }
             return true;
         }
 

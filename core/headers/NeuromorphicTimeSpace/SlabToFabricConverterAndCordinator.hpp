@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph
                 std::span<uint64_t>{};
         }
 
-        std::span<uint64_t> HotStorageDramUSM() noexcept
+        std::span<uint64_t> HotStorageDramUsm() noexcept
         {
             return FabCache_ ?
                 std::span<uint64_t>{DisposableFCache___.SlabBasePtr_, FabCache_->SegmentPoolBegin_} :

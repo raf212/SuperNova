@@ -1,5 +1,5 @@
 #pragma once
-#include "../../NeuromorphicTimeSpace/StorageManager/GlobalStorage.hpp"
+#include "../../NeuromorphicTimeSpace/StorageManager/FabricAllocators.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -12,18 +12,6 @@
 #include <string>
 #include <type_traits>
 #include <utility>
-
-
-///TEMPORARY to keep track
-// Define either backend macro only in the AdaptiveCpp build configuration.
-#if defined(SUPERNOVA_ENABLE_ADAPTIVECPP) && !defined(SN_ACPP_ENABLED)
-#define SN_ACPP_ENABLED
-#endif
-//just for inselisense
-
-#if defined (SN_ACPP_ENABLED)
-    #include <sycl/sycl.hpp>
-#endif
 
 namespace BidirectionalInMemGraph 
 {

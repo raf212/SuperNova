@@ -72,7 +72,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return Numerics.empty() ? Cells : Numerics;
         }
 
-        std::optional<uint64_t> LogicalByteOffset(const void* data, uint64_t bytes) noexcept;
+        std::optional<uint64_t> LogicalByteOffset(const void* data, uint64_t bytes) const noexcept;
 
         uint64_t LogicalCellCount() const noexcept
         {
@@ -207,15 +207,5 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
         return true;
     }
 
-    class ACppFabricALocator final
-    {
-        sycl::queue* Queue;
-        RawPackedCellAllocator Allocator_{};
-        sycl::usm::alloc __Loc__ = sycl::usm::alloc::device;
 
-        static uint64_t* Allocate(size_t cells, size_t allignment, void* user) noexcept
-        {
-            if (cells > LIMIT_OF_CELL_COUNT) return nullptr;
-        }
-    };
 }

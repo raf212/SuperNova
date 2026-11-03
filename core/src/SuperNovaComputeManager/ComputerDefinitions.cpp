@@ -3,7 +3,7 @@
 namespace BidirectionalInMemGraph::ComputerDetail 
 {
 
-    std::optional<uint64_t> FabricRuntimeBinding::LogicalByteOffset(const void* data, uint64_t bytes) noexcept
+    std::optional<uint64_t> FabricRuntimeBinding::LogicalByteOffset(const void* data, uint64_t bytes) const noexcept
     {
         const std::span<uint64_t> storage = NumericalCells();
         const uintptr_t begin = reinterpret_cast<uintptr_t>(storage.data());

@@ -1,6 +1,17 @@
 #pragma once 
 #include "ConstructAndVerify.hpp"
 
+///TEMPORARY to keep track
+// Define either backend macro only in the AdaptiveCpp build configuration.
+#if defined(SUPERNOVA_ENABLE_ADAPTIVECPP) && !defined(SN_ACPP_ENABLED)
+#define SN_ACPP_ENABLED
+#endif
+//just for inselisense
+
+#if defined (SN_ACPP_ENABLED)
+    #include <sycl/sycl.hpp>
+#endif
+
 namespace BidirectionalInMemGraph
 {
     struct RawPackedCellAllocator final
@@ -252,3 +263,49 @@ namespace BidirectionalInMemGraph::Numerics
         void Commit() noexcept {Complete_ = true;}
     };
 }
+
+#if defined(SN_ACPP_ENABLED)
+namespace BidirectionalInMemGraph::ComputerDetail::Memory
+{
+    class ACppFabricAlocator final
+    {
+        sycl::queue* Queue_;
+        RawPackedCellAllocator Allocator_{};
+        sycl::usm::alloc __Loc__;
+
+        static uint64_t* AllocateFn_(size_t cells, size_t alignment, void* user) noexcept
+        {
+            ACppFabricAlocator& allocator = *static_cast<ACppFabricAlocator*>(user);
+            if (allocator.__Loc__ == sycl::usm::alloc::device) return nullptr;
+
+            return allocator.AllocateUsm(cells, alignment);
+        }
+
+        static void FreeFn_(uint64_t* data, size_t, size_t, void* user) noexcept
+        {
+            static_cast<ACppFabricAlocator*>(user)->FreeUsm(data);
+        }
+
+    public:
+        explicit ACppFabricAlocator::ACppFabricAlocator(
+            sycl::queue& queue,
+            sycl::usm::alloc location = sycl::usm::alloc::host
+        ) noexcept :
+            Queue_(&queue), __Loc__(location)
+        {
+            Allocator_.AllocatePackedCellStorage = &AllocateFn_;
+            Allocator_.FreePackedCellStorage = &FreeFn_;
+            Allocator_.User = this;
+            Allocator_.Alignment = ADS::CACELINE_SIZE_IN_BYTES;
+        }
+        ACppFabricAlocator(const ACppFabricAlocator&) = delete;
+        ACppFabricAlocator& operator = (const ACppFabricAlocator&) = delete;
+
+        // const RawPackedCellAllocator& Allocator_
+
+        uint64_t* AllocateUsm(size_t cells, size_t allignment = ADS::CACELINE_SIZE_IN_BYTES) noexcept;
+
+        void FreeUsm(uint64_t* data) noexcept;
+    };
+}
+#endif

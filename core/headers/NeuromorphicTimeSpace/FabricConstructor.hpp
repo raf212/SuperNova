@@ -1,7 +1,7 @@
 #pragma once 
 #include <span>
 #include "FabricOrchestrators/HandleAndRetirement.hpp"
-#include "StorageManager/GlobalStorage.hpp"
+#include "StorageManager/FabricAllocators.hpp"
 
 namespace BidirectionalInMemGraph
 {
