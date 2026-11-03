@@ -1,12 +1,10 @@
 #pragma once 
 #include "ConstructAndVerify.hpp"
 
-///TEMPORARY to keep track
-// Define either backend macro only in the AdaptiveCpp build configuration.
+
 #if defined(SUPERNOVA_ENABLE_ADAPTIVECPP) && !defined(SN_ACPP_ENABLED)
 #define SN_ACPP_ENABLED
 #endif
-//just for inselisense
 
 #if defined (SN_ACPP_ENABLED)
     #include <sycl/sycl.hpp>
@@ -18,7 +16,7 @@ namespace BidirectionalInMemGraph
     {
         using AllocateFunction = uint64_t* (*)(
             size_t count_of_packed_cell, size_t alignment, void* user
-        ) noexcept;
+        );
 
         using FreeFunction = void (*)(
             uint64_t* packed_cell_storage_ptr, 
@@ -41,25 +39,11 @@ namespace BidirectionalInMemGraph
                 std::has_single_bit(EffectiveAllignment());
         }
 
-        uint64_t* Allocate(size_t cells) const noexcept
-        {
-            if (!IsValid() || cells > (SIZE_MAX / sizeof(uint64_t)))
-            {
-                return nullptr;
-            }
+        uint64_t* Allocate(size_t cells) const noexcept;
 
-            const auto FN_ALLOC =  AllocatePackedCellStorage ? AllocatePackedCellStorage:DefaultAllocateAtomicCells;
-            return FN_ALLOC(cells, EffectiveAllignment(), User);
-        }
+        void Free(uint64_t* data, size_t cells) const noexcept;
 
-        void Free(uint64_t* data, size_t cells) const noexcept
-        {
-            if (!data) return;
-            const auto FN_FREE =  FreePackedCellStorage ? FreePackedCellStorage:DefaultFreeAtomicCells;
-            FN_FREE(data, cells, EffectiveAllignment(), User);
-        }
-
-        static size_t AlignBiteCount_(size_t bytes, size_t alignment) noexcept
+        static size_t RawPackedCellAllocator::AlignBiteCount_(size_t bytes, size_t alignment) noexcept
         {
             if (alignment == UNSIGNED_ZERO)
             {
@@ -273,7 +257,7 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
         RawPackedCellAllocator Allocator_{};
         sycl::usm::alloc __Loc__;
 
-        static uint64_t* AllocateFn_(size_t cells, size_t alignment, void* user) noexcept
+        static uint64_t* AllocateFn_(size_t cells, size_t alignment, void* user)
         {
             ACppFabricAlocator& allocator = *static_cast<ACppFabricAlocator*>(user);
             if (allocator.__Loc__ == sycl::usm::alloc::device) return nullptr;
@@ -303,9 +287,14 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
 
         // const RawPackedCellAllocator& Allocator_
 
-        uint64_t* AllocateUsm(size_t cells, size_t allignment = ADS::CACELINE_SIZE_IN_BYTES) noexcept;
+        uint64_t* AllocateUsm(size_t cells, size_t alignment = ADS::CACELINE_SIZE_IN_BYTES);
 
         void FreeUsm(uint64_t* data) noexcept;
+
+        const RawPackedCellAllocator& AllocatorRaw() const noexcept
+        {
+            return Allocator_;
+        }
     };
 }
 #endif
