@@ -15,7 +15,6 @@ private:
         uint32_t max_tries = DEFAULT_MAX_TRIES
     ) noexcept;
 
-
     bool ReclaimRetiredSlotTemp_(uint32_t slot) noexcept;
 
     constexpr bool IsNodePolicyReConfigurable_(const SD::RegionSchemaTable& table) noexcept;
@@ -97,6 +96,35 @@ public:
         uint32_t internal_max_tries = DEFAULT_MAX_TRIES,
         bool override_table = false
     ) noexcept;
+
+    template<class DT>
+    SNTOComputerBridge<DT> PinNumericRegion(
+        uint32_t slot,
+        MacroColumnOfAPC column,
+        uint32_t ordinal,
+        std::optional<uint32_t> generation
+    ) noexcept
+    {
+        ReadLease admission = ExecutionGate().TryTransientRead(true);
+        AdaptivePackedCellContainer apc{};
+        if (
+            !admission ||
+            !BindExistingAPCSnapshot_(slot, apc, generation)
+        ) 
+        {
+            return {};
+        }
+
+        SNTOComputerBridge<DT> region = apc.template BuildAViewOverRegion<DT>(column, ordinal);
+
+        if (
+            region.GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION
+        ) 
+        {
+            return {};
+        }
+        return region;
+    }
     
 };
 
