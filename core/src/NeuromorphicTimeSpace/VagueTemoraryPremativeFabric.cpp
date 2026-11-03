@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        uint64_t * const generation_cell = SlabBasePtr_ + FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
+        uint64_t * const generation_cell = VolatileCache___.SlabBasePtr_ + FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
         const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(
             std::atomic_ref<const uint64_t>(*generation_cell).load(std::memory_order_acquire)
         );
@@ -929,7 +929,7 @@ namespace BidirectionalInMemGraph
     {
         if (
             !FabricInitialized_.load(std::memory_order_acquire) ||
-            !SlabBasePtr_ || 
+            !VolatileCache___.SlabBasePtr_ || 
             !ADS::IsCapacityOfAPCValid(FabCache_->PerAPCRuntimeCellCount_)
         )
         {

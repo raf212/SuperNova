@@ -7,7 +7,7 @@ namespace BidirectionalInMemGraph
     SchemaDefinition::RSSpan MatrixViewConstructor::MutableMatrixViewRow_(uint32_t apc_slot) noexcept
     {
         if (
-            !SlabBasePtr_ ||
+            !VolatileCache___.SlabBasePtr_ ||
             apc_slot >= FabCache_->CountOfAPC_ ||
             FabCache_->ActiveRegionCount_ == UNSIGNED_ZERO ||
             FabCache_->MatrixViewRowCellCount_ != FabCache_->ActiveRegionCount_ * SD::RegionSchemaCellCount()
@@ -16,7 +16,7 @@ namespace BidirectionalInMemGraph
             return {};
         }
 
-        std::byte* table_bytes = reinterpret_cast<std::byte*>(SlabBasePtr_ + FabCache_->MatrixViewTableBeginIndex_);
+        std::byte* table_bytes = reinterpret_cast<std::byte*>(VolatileCache___.SlabBasePtr_ + FabCache_->MatrixViewTableBeginIndex_);
 
         const size_t row_byte_offset = static_cast<size_t>(apc_slot) * FabCache_->MatrixViewRowCellCount_ * sizeof(uint64_t);
 
@@ -37,7 +37,7 @@ namespace BidirectionalInMemGraph
         const size_t required_cells = total_records * SD::RegionSchemaCellCount();
 
         if (
-            !SlabBasePtr_ ||
+            !VolatileCache___.SlabBasePtr_ ||
             table_begin >= table_end ||
             table_end - table_begin != required_cells ||
             table_end > FabCache_->SlabCellCount_
@@ -46,7 +46,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
         
-        std::byte* bytes = reinterpret_cast<std::byte*>(SlabBasePtr_ + table_begin);
+        std::byte* bytes = reinterpret_cast<std::byte*>(VolatileCache___.SlabBasePtr_ + table_begin);
         for (size_t i = 0; i < total_records; i++)
         {
             void* place = static_cast<void*>(bytes + (i * sizeof(SD::RegionSchemaRecord)));
@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph
             
             cursor = record.CellOffset + record.CellCount;
             observed_mask = static_cast<uint16_t>(observed_mask | ADS::RegionBit(expected_region));
-            if (!GMI::GetModelCatalog(*FabCache_, SlabBasePtr_).Accept(record)) 
+            if (!GMI::GetModelCatalog(*FabCache_, VolatileCache___.SlabBasePtr_).Accept(record)) 
             {
                 return false;
             }

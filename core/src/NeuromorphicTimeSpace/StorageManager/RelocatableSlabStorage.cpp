@@ -23,14 +23,14 @@ namespace BidirectionalInMemGraph
         FabricInitialized_.store(false, std::memory_order_release);
         SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
 
-        detached.Slab_ = SlabBasePtr_;
+        detached.Slab_ = VolatileCache___.SlabBasePtr_;
         detached.CellCount_ = FabCache_->SlabCellCount_;
         detached.Ownership_ = BackingOwnership_;
 
         __NumericalBacking__.Close();
-        SlabBasePtr_ = nullptr;
+        VolatileCache___.SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
-        HotCellCount_ = UNSIGNED_ZERO;
+        VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
         BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
         return detached;
     }
@@ -55,7 +55,7 @@ namespace BidirectionalInMemGraph
 
         std::memcpy(
             destination.data(), 
-            SlabBasePtr_, 
+            VolatileCache___.SlabBasePtr_, 
             FabCache_->SegmentPoolBegin_ * sizeof(uint64_t)
         );
 
@@ -89,7 +89,7 @@ namespace BidirectionalInMemGraph
 
         std::memcpy(
             destination.data(),
-            SlabBasePtr_,
+            VolatileCache___.SlabBasePtr_,
             FabCache_->SegmentPoolBegin_ * sizeof(uint64_t)
         );
         std::memcpy(
@@ -154,7 +154,7 @@ namespace BidirectionalInMemGraph
             !raw_cells || cell_count < CFC::FABRIC_UNIT_COUNT || 
             ownership == CFC::FabricBackigOwnership::NONE ||
             (reinterpret_cast<uintptr_t>(raw_cells) % alignof(FabricCache) != UNSIGNED_ZERO)  ||
-            raw_cells == SlabBasePtr_
+            raw_cells == VolatileCache___.SlabBasePtr_
         )
         {
             return false;
@@ -191,8 +191,8 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        SlabBasePtr_ = raw_cells;
-        HotCellCount_ = cell_count;
+        VolatileCache___.SlabBasePtr_ = raw_cells;
+        VolatileCache___.HotCellCount_ = cell_count;
         FabCache_ = cache.Construct(raw_cells);
 
         RefreshNumericalBase_();
@@ -260,7 +260,7 @@ namespace BidirectionalInMemGraph::Numerics
     Replacement::Replacement(SlabToFabricConverterAndCordinator& self) noexcept :
         Self_(self),
         Previous_(
-            self.SlabBasePtr_, self.HotCellCount_, self.AllocatorOfFabric_,
+            self.VolatileCache___.SlabBasePtr_, self.VolatileCache___.HotCellCount_, self.AllocatorOfFabric_,
             self.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
         ),
         Numbers_(std::move(self.__NumericalBacking__)),
@@ -272,9 +272,9 @@ namespace BidirectionalInMemGraph::Numerics
         Track_(self.TrackDAGRevision_.load(std::memory_order_acquire)),
         Revision_(self.SealedDAGRevision_.load(std::memory_order_acquire))
     {
-        self.SlabBasePtr_ = nullptr;
-        self.StorageBasePtr_ = nullptr;
-        self.HotCellCount_ = UNSIGNED_ZERO;
+        self.VolatileCache___.SlabBasePtr_ = nullptr;
+        self.VolatileCache___.StorageBasePtr_ = nullptr;
+        self.VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
         self.FabCache_ = nullptr;
         self.BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
         self.FabricInitialized_.store(false, std::memory_order_release);
@@ -286,14 +286,14 @@ namespace BidirectionalInMemGraph::Numerics
         if (Complete_) return;
         Self_.__NumericalBacking__.Close();
         if (
-            Self_.SlabBasePtr_ &&
+            Self_.VolatileCache___.SlabBasePtr_ &&
             Self_.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
         ) 
         {
-            Self_.AllocatorOfFabric_.Free(Self_.SlabBasePtr_, Self_.HotCellCount_);
+            Self_.AllocatorOfFabric_.Free(Self_.VolatileCache___.SlabBasePtr_, Self_.VolatileCache___.HotCellCount_);
         }
-        Self_.SlabBasePtr_ = Previous_.Relese();
-        Self_.HotCellCount_ = Previous_.Count();
+        Self_.VolatileCache___.SlabBasePtr_ = Previous_.Relese();
+        Self_.VolatileCache___.HotCellCount_ = Previous_.Count();
         Self_.FabCache_ = Cache_;
         Self_.__NumericalBacking__ = std::move(Numbers_);
         Self_.RefreshNumericalBase_();

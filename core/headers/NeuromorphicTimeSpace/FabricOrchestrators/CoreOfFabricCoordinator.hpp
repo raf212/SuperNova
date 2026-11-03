@@ -97,12 +97,15 @@ namespace BidirectionalInMemGraph
         struct VolatileFabricCache final
         {
             FabricExecutionGate ExecutionGate_{};
-            CoreOfFabricCoordinator::FabricBackigOwnership BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
+            FabricBackigOwnership BackingOwnership_ = FabricBackigOwnership::NONE;
             std::atomic<bool> FabricInitialized_{false};
             std::atomic<bool> InitializationInProgress_{false};
             std::atomic<uint64_t> SealedDAGRevision_{UNSIGNED_ZERO};
             std::atomic<bool> TrackDAGRevision_{false};
             SchemaDefinition::RegionSchemaTable DefaultRegionTable_{};
+            uint64_t HotCellCount_{UNSIGNED_ZERO};
+            uint64_t* StorageBasePtr_{nullptr};
+            uint64_t* SlabBasePtr_{nullptr};
         };
 
         struct DetachFabric final

@@ -229,15 +229,14 @@ namespace BidirectionalInMemGraph
     protected:
         using FabricCache = CoreOfFabricCoordinator::FabricCache;
         NumericalBacking __NumericalBacking__{}; // __NumericalBacking__
-        uint64_t* StorageBasePtr_{nullptr};
 
-        uint64_t* SlabBasePtr_{nullptr};
         FabricCache* FabCache_{nullptr};
-        uint64_t HotCellCount_{UNSIGNED_ZERO};
 
         RawPackedCellAllocator AllocatorOfFabric_{};
 
-        uint64_t* NumericalBase_() noexcept { return StorageBasePtr_; }
+        CoreOfFabricCoordinator::VolatileFabricCache VolatileCache___{};
+        
+        uint64_t* NumericalBase_() noexcept { return VolatileCache___.StorageBasePtr_; }
     };
 }
 

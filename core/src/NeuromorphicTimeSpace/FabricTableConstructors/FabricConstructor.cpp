@@ -134,7 +134,7 @@ namespace BidirectionalInMemGraph
         if (hot_cells > UNSIGNED_ZERO) 
         {
             std::memcpy(
-                (SlabBasePtr_ + slab_starting_idx),
+                (VolatileCache___.SlabBasePtr_ + slab_starting_idx),
                 desired_units,
                 hot_cells * sizeof(uint64_t)
             );
@@ -155,16 +155,16 @@ namespace BidirectionalInMemGraph
 
     void FabricConstructor::RefreshNumericalBase_() noexcept
     {
-        StorageBasePtr_ = __NumericalBacking__.DataPtr() ? 
+        VolatileCache___.StorageBasePtr_ = __NumericalBacking__.DataPtr() ? 
             __NumericalBacking__.DataPtr() :
-            (SlabBasePtr_ && FabCache_ ? (SlabBasePtr_ + FabCache_->SegmentPoolBegin_) : nullptr);
+            (VolatileCache___.SlabBasePtr_ && FabCache_ ? (VolatileCache___.SlabBasePtr_ + FabCache_->SegmentPoolBegin_) : nullptr);
     }
 
     uint64_t* FabricConstructor::ResolveCell_(uint64_t index) noexcept
     {
         if (
             !FabCache_ ||
-            !SlabBasePtr_ ||
+            !VolatileCache___.SlabBasePtr_ ||
             !NumericalBase_() ||
             index >= FabCache_->SlabCellCount_
         )
@@ -172,7 +172,7 @@ namespace BidirectionalInMemGraph
             return nullptr;
         }
 
-        return index < FabCache_->SegmentPoolBegin_ ? (SlabBasePtr_ + index) :
+        return index < FabCache_->SegmentPoolBegin_ ? (VolatileCache___.SlabBasePtr_ + index) :
             NumericalBase_() + (index - FabCache_->SegmentPoolBegin_);
     }
 
@@ -180,7 +180,7 @@ namespace BidirectionalInMemGraph
     {
         return FabCache_ && slot < FabCache_->CountOfAPC_ ?
             reinterpret_cast<GMI::NodeModelDescription*>(
-                SlabBasePtr_ + FabCache_->ModelDiaphragm_.GlobalTableBeginIdx_ + slot
+                VolatileCache___.SlabBasePtr_ + FabCache_->ModelDiaphragm_.GlobalTableBeginIdx_ + slot
             ) : nullptr;
     }
 
@@ -188,7 +188,7 @@ namespace BidirectionalInMemGraph
     {
         if (
             FabCache_ &&
-            SlabBasePtr_ &&
+            VolatileCache___.SlabBasePtr_ &&
             index < FabCache_->SegmentPoolBegin_
         ) 
         {

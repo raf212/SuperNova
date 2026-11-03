@@ -77,7 +77,7 @@ namespace BidirectionalInMemGraph
 
         constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
         {
-            if (FabCache_ && SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
+            if (FabCache_ && VolatileCache___.SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
             {
                 return true;
             }
@@ -92,7 +92,7 @@ namespace BidirectionalInMemGraph
         template<typename T>
         bool IsInternalBuffer(const T* data, size_t count) noexcept
         {
-            if (!FabCache_ || !SlabBasePtr_ || count == UNSIGNED_ZERO)
+            if (!FabCache_ || !VolatileCache___.SlabBasePtr_ || count == UNSIGNED_ZERO)
             {
                 return false;
             }
@@ -105,7 +105,7 @@ namespace BidirectionalInMemGraph
             }
 
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
-            const uintptr_t slab = reinterpret_cast<uintptr_t>(SlabBasePtr_);
+            const uintptr_t slab = reinterpret_cast<uintptr_t>(VolatileCache___.SlabBasePtr_);
             const size_t bytes = count * sizeof(T);
 
             auto OverLaps___ = [&](const void* mem, uint64_t cells) noexcept -> bool
@@ -116,7 +116,7 @@ namespace BidirectionalInMemGraph
             };
 
             return OverLaps___(
-                SlabBasePtr_, 
+                VolatileCache___.SlabBasePtr_, 
                 __NumericalBacking__.DataPtr() ? FabCache_->SegmentPoolBegin_ : FabCache_->SlabCellCount_
             ) ||
             (

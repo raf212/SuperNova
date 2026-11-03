@@ -20,15 +20,15 @@ namespace BidirectionalInMemGraph
 
         __NumericalBacking__.Close();
         BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
-        SlabBasePtr_ = nullptr;
+        VolatileCache___.SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
-        StorageBasePtr_ = nullptr;
-        HotCellCount_ = UNSIGNED_ZERO;
+        VolatileCache___.StorageBasePtr_ = nullptr;
+        VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
     }
 
     bool SlabToFabricConverterAndCordinator::QuiesceFabric_() noexcept
     {
-        if (!SlabBasePtr_ || !FabCache_)
+        if (!VolatileCache___.SlabBasePtr_ || !FabCache_)
         {
             return false;
         }
@@ -72,7 +72,7 @@ namespace BidirectionalInMemGraph
 
     bool SlabToFabricConverterAndCordinator::ReopenLiveAPCGenerations_() noexcept
     {
-        if (!SlabBasePtr_ || !FabCache_)
+        if (!VolatileCache___.SlabBasePtr_ || !FabCache_)
         {
             return false;
         }
@@ -133,13 +133,13 @@ namespace BidirectionalInMemGraph
         const size_t  physical_cells = storage.SegmentPoolPath.empty() ?
             cache.SlabCellCount_ : cache.SegmentPoolBegin_;
 
-        SlabBasePtr_ = AllocatePackedCellRaw_(physical_cells);
-        if (!SlabBasePtr_) return false;
+        VolatileCache___.SlabBasePtr_ = AllocatePackedCellRaw_(physical_cells);
+        if (!VolatileCache___.SlabBasePtr_) return false;
         
-        std::fill_n(SlabBasePtr_, physical_cells, uint64_t{UNSIGNED_ZERO});
+        std::fill_n(VolatileCache___.SlabBasePtr_, physical_cells, uint64_t{UNSIGNED_ZERO});
 
-        FabCache_ = cache.Construct(SlabBasePtr_);
-        HotCellCount_ = physical_cells;
+        FabCache_ = cache.Construct(VolatileCache___.SlabBasePtr_);
+        VolatileCache___.HotCellCount_ = physical_cells;
         BackingOwnership_ = CFC::FabricBackigOwnership::OWNED;
         if (
             !storage.SegmentPoolPath.empty() &&
@@ -290,7 +290,7 @@ namespace BidirectionalInMemGraph
 
         __InitModelStorage__(
             catalog,
-            reinterpret_cast<std::byte*>(SlabBasePtr_ + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_),
+            reinterpret_cast<std::byte*>(VolatileCache___.SlabBasePtr_ + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_),
             cache.CountOfAPC_
         );
 
@@ -337,8 +337,8 @@ namespace BidirectionalInMemGraph
             phase = ExecutionGate().TryMaintenance();
         }
 
-        uint64_t* old_ptr = SlabBasePtr_;
-        const size_t old_count = HotCellCount_;
+        uint64_t* old_ptr = VolatileCache___.SlabBasePtr_;
+        const size_t old_count = VolatileCache___.HotCellCount_;
         const CFC::FabricBackigOwnership old_ownership = BackingOwnership_;
         if (
             old_ptr &&
@@ -348,9 +348,9 @@ namespace BidirectionalInMemGraph
         {
             QuiesceFabric_();
         }
-        SlabBasePtr_ = nullptr;
+        VolatileCache___.SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
-        HotCellCount_ = UNSIGNED_ZERO;
+        VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
         BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
         FabricInitialized_.store(false, std::memory_order_release);
 
@@ -366,14 +366,14 @@ namespace BidirectionalInMemGraph
     bool SlabToFabricConverterAndCordinator::ValidateAttachedFabricLayout_() noexcept
     {
         if (
-            !FabCache_ || !SlabBasePtr_ ||
+            !FabCache_ || !VolatileCache___.SlabBasePtr_ ||
             !StorageAllocationDef::ValidateFabricCache(*FabCache_)
         ) 
         {
             return false;
         }
 
-        const GMI::ModelCatalog catalog = GMI::GetModelCatalog(*FabCache_, SlabBasePtr_);
+        const GMI::ModelCatalog catalog = GMI::GetModelCatalog(*FabCache_, VolatileCache___.SlabBasePtr_);
         if (!catalog.ValidCatalog()) return false;
 
         StorageAllocationDef layout{};
