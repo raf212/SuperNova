@@ -6,6 +6,44 @@
 
 namespace BidirectionalInMemGraph::CheckpointFormat 
 {
+    using CFC = CoreOfFabricCoordinator;
+    struct FabricId
+    {
+        uint64_t High{};
+        uint64_t Low{};
+        friend constexpr bool operator == (const FabricId&, const FabricId&) = default;
+        explicit operator bool() const noexcept
+        {
+            return High || Low;
+        }
+        static FabricId New()
+        {
+            std::random_device random;
+            FabricId id{(uint64_t{random()}<<32)^random(), (uint64_t{random()}<<32)^random()};
+            if (!id)
+            {
+                id.Low = 1;
+            }
+            return id;
+        }
+    };
+
+    struct RegionRef
+    {
+        FabricId Id{};
+        uint64_t ByteOffset{};
+        uint64_t ByteCount{};
+        uint32_t Slot{};
+        uint32_t Generation{};
+        uint32_t RecordOrdinal{};
+        uint32_t Height{};
+        uint32_t Width{};
+        MacroColumnOfAPC Column{MacroColumnOfAPC::FREE_SLOT};
+        SchemaDefinition::DataTypeOfMacroColumn Type{};
+
+        friend constexpr bool operator == (const RegionRef&, const RegionRef&) noexcept = default;  
+    };
+
     enum class PageHeader : size_t 
     {
         MAGIC,
@@ -14,14 +52,14 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         FABRICHIGH,
         FABRICLOW,
         REVISION,
-        CELLCOUNT,
-        PAGESIZE,
-        PAGECOUNT,
-        METADATASIZE,
-        PAYLOADOFFSET,
-        DIRECTORYHASH,
-        TOTALFILESIZE,
-        HEADERHASH,
+        CELL_COUNT,
+        PAGE_SIZE,
+        PAGE_COUNT,
+        METADATA_SIZE,
+        PAYLOAD_OFFSET,
+        DIRECTORY_HASH,
+        TOTAL_FILE_SIZE,
+        HEADER_HASH,
     };
 
     struct InternalValues
@@ -36,9 +74,50 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         static constexpr uint64_t FnvOffsetBasis = 14695981039346656037ULL;
         static constexpr uint64_t FnvPrime = 1099511628211ULL;
 
-        static constexpr size_t HeaderWords = static_cast<size_t>(PageHeader::HEADERHASH) + 1;
+        static constexpr size_t HeaderWords = static_cast<size_t>(PageHeader::HEADER_HASH) + 1;
         static constexpr uint64_t HeaderBytes = HeaderWords * BytesPerWord;
-        static constexpr size_t HeaderDataWords = static_cast<size_t>(PageHeader::HEADERHASH);
+        static constexpr size_t HeaderDataWords = static_cast<size_t>(PageHeader::HEADER_HASH);
+        using FileHeader = std::array<uint64_t, HeaderWords>;
+
+        enum class ReferanceField : size_t
+        {
+            FABRIC_HIGH,
+            FABRIC_LOW,
+            BYTE_OFFSET,
+            BYTE_COUNT,
+            SLOT,
+            GENERATION,
+            RECORD_ORDINAL,
+            COLIMN,
+            TYPE,
+            HEIGHT,
+            WIDTH,
+            VERSION
+        };
+
+        struct CheckpointCache
+        {
+            std::filesystem::path Path_{};
+            FabricId Id_{};
+            uint64_t Cells_{};
+            uint64_t Revision_{};
+            uint64_t Payload_{};
+            uint64_t MetaBytes_{};
+            uint64_t TotalBytes_{};
+            std::vector<uint64_t> Hashes_{};
+            std::vector<std::byte> MetaData_{};
+            FileHeader Header_{};
+            CFC::FabricCache SlabCache_{};
+        };
+
+    };
+
+    struct ReadStatic
+    {
+        uint64_t FileOpens{};
+        uint64_t HeaderChecks{};
+        uint64_t PageWords{};
+        uint64_t RegionValidation{};
     };
 
     using IV = InternalValues;
@@ -106,40 +185,5 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return bytes == UNSIGNED_ZERO ? UNSIGNED_ZERO : (1 + ((bytes - 1) / IV::PageBytes));
     }
     
-    struct FabricId
-    {
-        uint64_t High{};
-        uint64_t Low{};
-        friend constexpr bool operator == (const FabricId&, const FabricId&) = default;
-        explicit operator bool() const noexcept
-        {
-            return High || Low;
-        }
-        static FabricId New()
-        {
-            std::random_device random;
-            FabricId id{(uint64_t{random()}<<32)^random(), (uint64_t{random()}<<32)^random()};
-            if (!id)
-            {
-                id.Low = 1;
-            }
-            return id;
-        }
-    };
 
-    struct RegionRef
-    {
-        FabricId Id{};
-        uint64_t ByteOffset{};
-        uint64_t ByteCount{};
-        uint32_t Slot{};
-        uint32_t Generation{};
-        uint32_t RecordOrdinal{};
-        uint32_t Height{};
-        uint32_t Width{};
-        MacroColumnOfAPC Column{MacroColumnOfAPC::FREE_SLOT};
-        SchemaDefinition::DataTypeOfMacroColumn Type{};
-
-        friend constexpr bool operator == (const RegionRef&, const RegionRef&) noexcept = default;  
-    };
 }
