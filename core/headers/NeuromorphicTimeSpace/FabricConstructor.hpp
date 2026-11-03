@@ -6,25 +6,26 @@
 namespace BidirectionalInMemGraph
 {
 
-    class FabricConstructor : protected StoragePointers
+    class FabricConstructor 
     {
         friend class AdaptivePackedCellContainer;
     public:
-        FabricExecutionGate& ExecutionGate() noexcept {return ExecutionGate_;}
+        FabricExecutionGate& ExecutionGate() noexcept {return DisposableFCache___.ExecutionGate_;}
     protected:
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
-
         using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
         using DSA = DescriptionOfAPC;
         using SD = SchemaDefinition;
+        using CFC = CoreOfFabricCoordinator;
+        using FabricCache = CFC::FabricCache;
 
-        FabricExecutionGate ExecutionGate_{};
-        CoreOfFabricCoordinator::FabricBackigOwnership BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
-        std::atomic<bool> FabricInitialized_{false};
-        std::atomic<bool> InitializationInProgress_{false};
-        std::atomic<uint64_t> SealedDAGRevision_{UNSIGNED_ZERO};
-        std::atomic<bool> TrackDAGRevision_{false};
-        SD::RegionSchemaTable DefaultRegionTable_{};
+        NumericalBacking __NumericalBacking__{}; // __NumericalBacking__
+        RawPackedCellAllocator AllocatorOfFabric_{};
+
+        FabricCache* FabCache_{nullptr};
+        CFC::VolatileFabricCache DisposableFCache___{};
+        
+        uint64_t* NumericalBase_() noexcept { return DisposableFCache___.StorageBasePtr_; }
 
         void RefreshNumericalBase_() noexcept;
 
@@ -77,7 +78,7 @@ namespace BidirectionalInMemGraph
 
         constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
         {
-            if (FabCache_ && VolatileCache___.SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
+            if (FabCache_ && DisposableFCache___.SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
             {
                 return true;
             }
@@ -92,7 +93,7 @@ namespace BidirectionalInMemGraph
         template<typename T>
         bool IsInternalBuffer(const T* data, size_t count) noexcept
         {
-            if (!FabCache_ || !VolatileCache___.SlabBasePtr_ || count == UNSIGNED_ZERO)
+            if (!FabCache_ || !DisposableFCache___.SlabBasePtr_ || count == UNSIGNED_ZERO)
             {
                 return false;
             }
@@ -105,7 +106,7 @@ namespace BidirectionalInMemGraph
             }
 
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
-            const uintptr_t slab = reinterpret_cast<uintptr_t>(VolatileCache___.SlabBasePtr_);
+            const uintptr_t slab = reinterpret_cast<uintptr_t>(DisposableFCache___.SlabBasePtr_);
             const size_t bytes = count * sizeof(T);
 
             auto OverLaps___ = [&](const void* mem, uint64_t cells) noexcept -> bool
@@ -116,7 +117,7 @@ namespace BidirectionalInMemGraph
             };
 
             return OverLaps___(
-                VolatileCache___.SlabBasePtr_, 
+                DisposableFCache___.SlabBasePtr_, 
                 __NumericalBacking__.DataPtr() ? FabCache_->SegmentPoolBegin_ : FabCache_->SlabCellCount_
             ) ||
             (

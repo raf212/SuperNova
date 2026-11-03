@@ -20,18 +20,18 @@ namespace BidirectionalInMemGraph
             return detached;
         }
         
-        FabricInitialized_.store(false, std::memory_order_release);
-        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
+        DisposableFCache___.FabricInitialized_.store(false, std::memory_order_release);
+        DisposableFCache___.SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
 
-        detached.Slab_ = VolatileCache___.SlabBasePtr_;
+        detached.Slab_ = DisposableFCache___.SlabBasePtr_;
         detached.CellCount_ = FabCache_->SlabCellCount_;
-        detached.Ownership_ = BackingOwnership_;
+        detached.Ownership_ = DisposableFCache___.BackingOwnership_;
 
         __NumericalBacking__.Close();
-        VolatileCache___.SlabBasePtr_ = nullptr;
+        DisposableFCache___.SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
-        VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
-        BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        DisposableFCache___.HotCellCount_ = UNSIGNED_ZERO;
+        DisposableFCache___.BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
         return detached;
     }
 
@@ -55,12 +55,12 @@ namespace BidirectionalInMemGraph
 
         std::memcpy(
             destination.data(), 
-            VolatileCache___.SlabBasePtr_, 
+            DisposableFCache___.SlabBasePtr_, 
             FabCache_->SegmentPoolBegin_ * sizeof(uint64_t)
         );
 
         const bool reopened = ReopenLiveAPCGenerations_();
-        FabricInitialized_.store(reopened, std::memory_order_release);
+        DisposableFCache___.FabricInitialized_.store(reopened, std::memory_order_release);
         return reopened;
     }
 
@@ -89,7 +89,7 @@ namespace BidirectionalInMemGraph
 
         std::memcpy(
             destination.data(),
-            VolatileCache___.SlabBasePtr_,
+            DisposableFCache___.SlabBasePtr_,
             FabCache_->SegmentPoolBegin_ * sizeof(uint64_t)
         );
         std::memcpy(
@@ -100,7 +100,7 @@ namespace BidirectionalInMemGraph
 
         bool reopened = ReopenLiveAPCGenerations_();
 
-        FabricInitialized_.store(reopened, std::memory_order_release);
+        DisposableFCache___.FabricInitialized_.store(reopened, std::memory_order_release);
 
         return reopened;
     }
@@ -109,7 +109,7 @@ namespace BidirectionalInMemGraph
     {
         ExclusiveLease phase = ExecutionGate().TryMaintenance();
         return phase &&
-            !ExecutionGate_.IsPoisoned() &&
+            !DisposableFCache___.ExecutionGate_.IsPoisoned() &&
             __NumericalBacking__.Flush();
     }
 
@@ -154,7 +154,7 @@ namespace BidirectionalInMemGraph
             !raw_cells || cell_count < CFC::FABRIC_UNIT_COUNT || 
             ownership == CFC::FabricBackigOwnership::NONE ||
             (reinterpret_cast<uintptr_t>(raw_cells) % alignof(FabricCache) != UNSIGNED_ZERO)  ||
-            raw_cells == VolatileCache___.SlabBasePtr_
+            raw_cells == DisposableFCache___.SlabBasePtr_
         )
         {
             return false;
@@ -191,13 +191,13 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        VolatileCache___.SlabBasePtr_ = raw_cells;
-        VolatileCache___.HotCellCount_ = cell_count;
+        DisposableFCache___.SlabBasePtr_ = raw_cells;
+        DisposableFCache___.HotCellCount_ = cell_count;
         FabCache_ = cache.Construct(raw_cells);
 
         RefreshNumericalBase_();
-        BackingOwnership_ = CFC::FabricBackigOwnership::BORROWED;
-        DefaultRegionTable_ = SD::RegionSchemaTable{};
+        DisposableFCache___.BackingOwnership_ = CFC::FabricBackigOwnership::BORROWED;
+        DisposableFCache___.DefaultRegionTable_ = SD::RegionSchemaTable{};
 
         if (!ValidateAttachedFabricLayout_())
         {
@@ -243,9 +243,9 @@ namespace BidirectionalInMemGraph
             __NumericalBacking__.WarmAll();
         }
         __NumericalBacking__.CommitCreation();
-        BackingOwnership_ = ownership;
-        SealedDAGRevision_.fetch_add(replacement.Revision() + 1, std::memory_order_release);
-        FabricInitialized_.store(true, std::memory_order_release);
+        DisposableFCache___.BackingOwnership_ = ownership;
+        DisposableFCache___.SealedDAGRevision_.fetch_add(replacement.Revision() + 1, std::memory_order_release);
+        DisposableFCache___.FabricInitialized_.store(true, std::memory_order_release);
         (void)ExecutionGate().ConfirmedRestored();
 
         replacement.Commit();
@@ -260,25 +260,25 @@ namespace BidirectionalInMemGraph::Numerics
     Replacement::Replacement(SlabToFabricConverterAndCordinator& self) noexcept :
         Self_(self),
         Previous_(
-            self.VolatileCache___.SlabBasePtr_, self.VolatileCache___.HotCellCount_, self.AllocatorOfFabric_,
-            self.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
+            self.DisposableFCache___.SlabBasePtr_, self.DisposableFCache___.HotCellCount_, self.AllocatorOfFabric_,
+            self.DisposableFCache___.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
         ),
         Numbers_(std::move(self.__NumericalBacking__)),
         Cache_(self.FabCache_),
-        Ownership_(self.BackingOwnership_),
+        Ownership_(self.DisposableFCache___.BackingOwnership_),
         Allocator_(self.AllocatorOfFabric_),
-        Schemas_(self.DefaultRegionTable_),
-        Active_(self.FabricInitialized_.load(std::memory_order_acquire)),
-        Track_(self.TrackDAGRevision_.load(std::memory_order_acquire)),
-        Revision_(self.SealedDAGRevision_.load(std::memory_order_acquire))
+        Schemas_(self.DisposableFCache___.DefaultRegionTable_),
+        Active_(self.DisposableFCache___.FabricInitialized_.load(std::memory_order_acquire)),
+        Track_(self.DisposableFCache___.TrackDAGRevision_.load(std::memory_order_acquire)),
+        Revision_(self.DisposableFCache___.SealedDAGRevision_.load(std::memory_order_acquire))
     {
-        self.VolatileCache___.SlabBasePtr_ = nullptr;
-        self.VolatileCache___.StorageBasePtr_ = nullptr;
-        self.VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
+        self.DisposableFCache___.SlabBasePtr_ = nullptr;
+        self.DisposableFCache___.StorageBasePtr_ = nullptr;
+        self.DisposableFCache___.HotCellCount_ = UNSIGNED_ZERO;
         self.FabCache_ = nullptr;
-        self.BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
-        self.FabricInitialized_.store(false, std::memory_order_release);
-        self.TrackDAGRevision_.store(false, std::memory_order_release);
+        self.DisposableFCache___.BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        self.DisposableFCache___.FabricInitialized_.store(false, std::memory_order_release);
+        self.DisposableFCache___.TrackDAGRevision_.store(false, std::memory_order_release);
     }
 
     Replacement::~Replacement()
@@ -286,22 +286,22 @@ namespace BidirectionalInMemGraph::Numerics
         if (Complete_) return;
         Self_.__NumericalBacking__.Close();
         if (
-            Self_.VolatileCache___.SlabBasePtr_ &&
-            Self_.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
+            Self_.DisposableFCache___.SlabBasePtr_ &&
+            Self_.DisposableFCache___.BackingOwnership_ == CFC::FabricBackigOwnership::OWNED
         ) 
         {
-            Self_.AllocatorOfFabric_.Free(Self_.VolatileCache___.SlabBasePtr_, Self_.VolatileCache___.HotCellCount_);
+            Self_.AllocatorOfFabric_.Free(Self_.DisposableFCache___.SlabBasePtr_, Self_.DisposableFCache___.HotCellCount_);
         }
-        Self_.VolatileCache___.SlabBasePtr_ = Previous_.Relese();
-        Self_.VolatileCache___.HotCellCount_ = Previous_.Count();
+        Self_.DisposableFCache___.SlabBasePtr_ = Previous_.Relese();
+        Self_.DisposableFCache___.HotCellCount_ = Previous_.Count();
         Self_.FabCache_ = Cache_;
         Self_.__NumericalBacking__ = std::move(Numbers_);
         Self_.RefreshNumericalBase_();
-        Self_.BackingOwnership_ = Ownership_;
+        Self_.DisposableFCache___.BackingOwnership_ = Ownership_;
         Self_.AllocatorOfFabric_ = Allocator_;
-        Self_.DefaultRegionTable_ = Schemas_;
-        Self_.TrackDAGRevision_.store(Track_, std::memory_order_release);
-        Self_.SealedDAGRevision_.store(Revision_, std::memory_order_release);
-        Self_.FabricInitialized_.store(Active_, std::memory_order_release);
+        Self_.DisposableFCache___.DefaultRegionTable_ = Schemas_;
+        Self_.DisposableFCache___.TrackDAGRevision_.store(Track_, std::memory_order_release);
+        Self_.DisposableFCache___.SealedDAGRevision_.store(Revision_, std::memory_order_release);
+        Self_.DisposableFCache___.FabricInitialized_.store(Active_, std::memory_order_release);
     }
 }

@@ -14,7 +14,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const uint64_t revision = SealedDAGRevision_.load(std::memory_order_acquire);
+        const uint64_t revision = DisposableFCache___.SealedDAGRevision_.load(std::memory_order_acquire);
         GHGFCache_.ModelPrepared_ = false;
         GHGFCache_.NodeCount_ = GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         const uint64_t allowed_mask = MaskLowBitsForU64(FabCache_->MaxDirectParentsPerAxis_);
@@ -199,7 +199,7 @@ namespace BidirectionalInMemGraph
         
         if (
             GHGFCache_.NodeCount_ == UNSIGNED_ZERO || GHGFCache_.ObservationCount_ == UNSIGNED_ZERO ||
-            revision != SealedDAGRevision_.load(std::memory_order_acquire)
+            revision != DisposableFCache___.SealedDAGRevision_.load(std::memory_order_acquire)
         )
         {
             return false;

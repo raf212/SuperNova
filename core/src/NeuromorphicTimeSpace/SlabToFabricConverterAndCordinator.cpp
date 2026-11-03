@@ -14,26 +14,26 @@ namespace BidirectionalInMemGraph
 
     void SlabToFabricConverterAndCordinator::ResetScalarsofTheFabric_() noexcept
     {
-        TrackDAGRevision_.store(false, std::memory_order_release);
-        FabricInitialized_.store(false, std::memory_order_release);
-        InitializationInProgress_.store(false, std::memory_order_release);
+        DisposableFCache___.TrackDAGRevision_.store(false, std::memory_order_release);
+        DisposableFCache___.FabricInitialized_.store(false, std::memory_order_release);
+        DisposableFCache___.InitializationInProgress_.store(false, std::memory_order_release);
 
         __NumericalBacking__.Close();
-        BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
-        VolatileCache___.SlabBasePtr_ = nullptr;
+        DisposableFCache___.BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
+        DisposableFCache___.SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
-        VolatileCache___.StorageBasePtr_ = nullptr;
-        VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
+        DisposableFCache___.StorageBasePtr_ = nullptr;
+        DisposableFCache___.HotCellCount_ = UNSIGNED_ZERO;
     }
 
     bool SlabToFabricConverterAndCordinator::QuiesceFabric_() noexcept
     {
-        if (!VolatileCache___.SlabBasePtr_ || !FabCache_)
+        if (!DisposableFCache___.SlabBasePtr_ || !FabCache_)
         {
             return false;
         }
 
-        FabricInitialized_.store(false, std::memory_order_release);
+        DisposableFCache___.FabricInitialized_.store(false, std::memory_order_release);
         for (uint32_t i = 0; i < FabCache_->CountOfAPC_; i++)
         {
             uint64_t* control_cell = GetAPCGenerationPtr_(i);
@@ -72,7 +72,7 @@ namespace BidirectionalInMemGraph
 
     bool SlabToFabricConverterAndCordinator::ReopenLiveAPCGenerations_() noexcept
     {
-        if (!VolatileCache___.SlabBasePtr_ || !FabCache_)
+        if (!DisposableFCache___.SlabBasePtr_ || !FabCache_)
         {
             return false;
         }
@@ -133,14 +133,14 @@ namespace BidirectionalInMemGraph
         const size_t  physical_cells = storage.SegmentPoolPath.empty() ?
             cache.SlabCellCount_ : cache.SegmentPoolBegin_;
 
-        VolatileCache___.SlabBasePtr_ = AllocatePackedCellRaw_(physical_cells);
-        if (!VolatileCache___.SlabBasePtr_) return false;
+        DisposableFCache___.SlabBasePtr_ = AllocatePackedCellRaw_(physical_cells);
+        if (!DisposableFCache___.SlabBasePtr_) return false;
         
-        std::fill_n(VolatileCache___.SlabBasePtr_, physical_cells, uint64_t{UNSIGNED_ZERO});
+        std::fill_n(DisposableFCache___.SlabBasePtr_, physical_cells, uint64_t{UNSIGNED_ZERO});
 
-        FabCache_ = cache.Construct(VolatileCache___.SlabBasePtr_);
-        VolatileCache___.HotCellCount_ = physical_cells;
-        BackingOwnership_ = CFC::FabricBackigOwnership::OWNED;
+        FabCache_ = cache.Construct(DisposableFCache___.SlabBasePtr_);
+        DisposableFCache___.HotCellCount_ = physical_cells;
+        DisposableFCache___.BackingOwnership_ = CFC::FabricBackigOwnership::OWNED;
         if (
             !storage.SegmentPoolPath.empty() &&
             !__NumericalBacking__.Create(
@@ -215,7 +215,7 @@ namespace BidirectionalInMemGraph
             for (uint32_t s = 0; s < FabCache_->CountOfAPC_; s++) 
             {
                 if (
-                    !PrepareMatrixViewRow_(s, DefaultRegionTable_) ||
+                    !PrepareMatrixViewRow_(s, DisposableFCache___.DefaultRegionTable_) ||
                     (
                         !IsDiskPaged() &&
                         !InitializeRegionProtocolStorage_(s)
@@ -239,17 +239,17 @@ namespace BidirectionalInMemGraph
     {
         using SAD = StorageAllocationDef;
 
-        ExclusiveLease exc_phase = ExecutionGate_.TryMaintenance();
+        ExclusiveLease exc_phase = DisposableFCache___.ExecutionGate_.TryMaintenance();
         if (!exc_phase) return false;
         bool expected = false;
         if (
-            !InitializationInProgress_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)
+            !DisposableFCache___.InitializationInProgress_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)
         ) 
         {
             return false;
         }
 
-        InitFlagReset flag{InitializationInProgress_};
+        InitFlagReset flag{DisposableFCache___.InitializationInProgress_};
         const RawPackedCellAllocator allocator =  storage.HostAlloc ? *storage.HostAlloc : RawPackedCellAllocator{};
         const GMI::ModelCatalog catalog{
             storage.Models,
@@ -290,7 +290,7 @@ namespace BidirectionalInMemGraph
 
         __InitModelStorage__(
             catalog,
-            reinterpret_cast<std::byte*>(VolatileCache___.SlabBasePtr_ + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_),
+            reinterpret_cast<std::byte*>(DisposableFCache___.SlabBasePtr_ + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_),
             cache.CountOfAPC_
         );
 
@@ -317,8 +317,8 @@ namespace BidirectionalInMemGraph
         }
 
         __NumericalBacking__.CommitCreation();
-        SealedDAGRevision_.store(replacement.Revision() + 1, std::memory_order_release);
-        FabricInitialized_.store(true, std::memory_order_release);
+        DisposableFCache___.SealedDAGRevision_.store(replacement.Revision() + 1, std::memory_order_release);
+        DisposableFCache___.FabricInitialized_.store(true, std::memory_order_release);
         (void) ExecutionGate().ConfirmedRestored();
         replacement.Commit();
         return true;
@@ -329,7 +329,7 @@ namespace BidirectionalInMemGraph
         // Preserve the original blocking/draining shutdown contract.
         // Disallow fresh Fabric access before waiting for existing read pins.
         if (ExecutionGate().EpochOwnedByCaller()) return;
-        const bool was_initialized = FabricInitialized_.exchange(false, std::memory_order_acq_rel);
+        const bool was_initialized = DisposableFCache___.FabricInitialized_.exchange(false, std::memory_order_acq_rel);
         auto phase = ExecutionGate().TryMaintenance();
         while (!phase)
         {
@@ -337,9 +337,9 @@ namespace BidirectionalInMemGraph
             phase = ExecutionGate().TryMaintenance();
         }
 
-        uint64_t* old_ptr = VolatileCache___.SlabBasePtr_;
-        const size_t old_count = VolatileCache___.HotCellCount_;
-        const CFC::FabricBackigOwnership old_ownership = BackingOwnership_;
+        uint64_t* old_ptr = DisposableFCache___.SlabBasePtr_;
+        const size_t old_count = DisposableFCache___.HotCellCount_;
+        const CFC::FabricBackigOwnership old_ownership = DisposableFCache___.BackingOwnership_;
         if (
             old_ptr &&
             FabCache_ &&
@@ -348,32 +348,32 @@ namespace BidirectionalInMemGraph
         {
             QuiesceFabric_();
         }
-        VolatileCache___.SlabBasePtr_ = nullptr;
+        DisposableFCache___.SlabBasePtr_ = nullptr;
         FabCache_ = nullptr;
-        VolatileCache___.HotCellCount_ = UNSIGNED_ZERO;
-        BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
-        FabricInitialized_.store(false, std::memory_order_release);
+        DisposableFCache___.HotCellCount_ = UNSIGNED_ZERO;
+        DisposableFCache___.BackingOwnership_ = CFC::FabricBackigOwnership::NONE;
+        DisposableFCache___.FabricInitialized_.store(false, std::memory_order_release);
 
         if (old_ptr && old_ownership == CFC::FabricBackigOwnership::OWNED)
         {
             FreeRawPackedCells_(old_ptr, old_count);
         }
 
-        SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
+        DisposableFCache___.SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         ResetScalarsofTheFabric_();
     }
 
     bool SlabToFabricConverterAndCordinator::ValidateAttachedFabricLayout_() noexcept
     {
         if (
-            !FabCache_ || !VolatileCache___.SlabBasePtr_ ||
+            !FabCache_ || !DisposableFCache___.SlabBasePtr_ ||
             !StorageAllocationDef::ValidateFabricCache(*FabCache_)
         ) 
         {
             return false;
         }
 
-        const GMI::ModelCatalog catalog = GMI::GetModelCatalog(*FabCache_, VolatileCache___.SlabBasePtr_);
+        const GMI::ModelCatalog catalog = GMI::GetModelCatalog(*FabCache_, DisposableFCache___.SlabBasePtr_);
         if (!catalog.ValidCatalog()) return false;
 
         StorageAllocationDef layout{};

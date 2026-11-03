@@ -59,7 +59,7 @@ namespace BidirectionalInMemGraph
     bool APCHandleAndRetirement::InitializeStructHotRowApcHandleTable_() noexcept
     {
         if (
-            !VolatileCache___.SlabBasePtr_ ||
+            !DisposableFCache___.SlabBasePtr_ ||
             !FabCache_
         )
         {
@@ -93,7 +93,7 @@ namespace BidirectionalInMemGraph
             initial.VolatileChildTail = EdgeBuilder::RELATION_NULL;
 
             std::construct_at(
-                reinterpret_cast<HAS::StructuralHotRow*>(VolatileCache___.SlabBasePtr_ + begin),
+                reinterpret_cast<HAS::StructuralHotRow*>(DisposableFCache___.SlabBasePtr_ + begin),
                 initial
             );
         }
@@ -238,7 +238,7 @@ namespace BidirectionalInMemGraph
 
     HAS::StructuralHotRow* APCHandleAndRetirement::GetStructuralHotRow_(uint32_t slot) noexcept
     {
-        if (!VolatileCache___.SlabBasePtr_ || !FabCache_ || slot >= FabCache_->CountOfAPC_)
+        if (!DisposableFCache___.SlabBasePtr_ || !FabCache_ || slot >= FabCache_->CountOfAPC_)
         {
             return nullptr;
         }
@@ -252,7 +252,7 @@ namespace BidirectionalInMemGraph
             return nullptr;
         }
 
-        return std::launder(reinterpret_cast<HAS::StructuralHotRow*>(VolatileCache___.SlabBasePtr_ + begin));
+        return std::launder(reinterpret_cast<HAS::StructuralHotRow*>(DisposableFCache___.SlabBasePtr_ + begin));
     }
 
 

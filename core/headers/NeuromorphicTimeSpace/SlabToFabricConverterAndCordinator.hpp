@@ -40,7 +40,7 @@ namespace BidirectionalInMemGraph
             ShutDownFabric();
             // A rejected close must not destroy the admission gate while a
             // retained APC scope still refers to it.
-            if (VolatileCache___.SlabBasePtr_) std::terminate();
+            if (DisposableFCache___.SlabBasePtr_) std::terminate();
         }
 
         bool IsDiskPaged() const noexcept
@@ -57,8 +57,8 @@ namespace BidirectionalInMemGraph
         bool IsFabricActive() noexcept
         {
             return
-                FabricInitialized_.load(std::memory_order_acquire) &&
-                VolatileCache___.SlabBasePtr_ &&
+                DisposableFCache___.FabricInitialized_.load(std::memory_order_acquire) &&
+                DisposableFCache___.SlabBasePtr_ &&
                 FabCache_ &&
                 ADS::ValidateSlotIdx(FabCache_->PerAPCRuntimeCellCount_) &&
                 ADS::ValidateSlotIdx(FabCache_->CountOfAPC_);
@@ -118,14 +118,14 @@ namespace BidirectionalInMemGraph
         std::span<uint64_t> HotStorageDramUSM() noexcept
         {
             return FabCache_ ?
-                std::span<uint64_t>{VolatileCache___.SlabBasePtr_, FabCache_->SegmentPoolBegin_} :
+                std::span<uint64_t>{DisposableFCache___.SlabBasePtr_, FabCache_->SegmentPoolBegin_} :
                 std::span<uint64_t>{};
         }
 
         std::span<uint64_t> ContiguousStorage() noexcept
         {
             return FabCache_  && !IsDiskPaged() ? 
-                std::span<uint64_t>{VolatileCache___.SlabBasePtr_, FabCache_->SlabCellCount_} :
+                std::span<uint64_t>{DisposableFCache___.SlabBasePtr_, FabCache_->SlabCellCount_} :
                 std::span<uint64_t>{};
         }
 

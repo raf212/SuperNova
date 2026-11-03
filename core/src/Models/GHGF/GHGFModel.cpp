@@ -230,7 +230,7 @@ namespace BidirectionalInMemGraph
         InvalidateGHGFModel_();
         GHGFCache_.NodeCount_ = UNSIGNED_ZERO;
         GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
-        DefaultRegionTable_ = profile.DefaultSchemaTable;
+        DisposableFCache___.DefaultRegionTable_ = profile.DefaultSchemaTable;
         if (
             !InitializeFabric(
                 slot_count,
@@ -288,7 +288,7 @@ namespace BidirectionalInMemGraph
         if (
             !IsFabricActive() ||
             !FabCache_->HasDefaultRegionTable_ ||
-            !CreateAPC(desired_apc, DefaultRegionTable_)
+            !CreateAPC(desired_apc, DisposableFCache___.DefaultRegionTable_)
         )
         {
             return false;

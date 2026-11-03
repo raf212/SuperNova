@@ -403,9 +403,9 @@ namespace BidirectionalInMemGraph
             }
         }
 
-        if (TrackDAGRevision_.load(std::memory_order_relaxed))
+        if (DisposableFCache___.TrackDAGRevision_.load(std::memory_order_relaxed))
         {
-            SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
+            DisposableFCache___.SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         }
 
         const auto PublishDomain___ = [this, &transaction](

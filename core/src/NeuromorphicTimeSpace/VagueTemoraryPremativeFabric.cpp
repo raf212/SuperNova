@@ -5,10 +5,10 @@ namespace BidirectionalInMemGraph
     {
         if (
             ExecutionGate().EpochOwnedByCaller() &&
-            TrackDAGRevision_.load(std::memory_order_relaxed)
+            DisposableFCache___.TrackDAGRevision_.load(std::memory_order_relaxed)
         ) 
         {
-            SealedDAGRevision_.fetch_add(count, std::memory_order_release);
+            DisposableFCache___.SealedDAGRevision_.fetch_add(count, std::memory_order_release);
         }
     }
 
@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        uint64_t * const generation_cell = VolatileCache___.SlabBasePtr_ + FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
+        uint64_t * const generation_cell = DisposableFCache___.SlabBasePtr_ + FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
         const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(
             std::atomic_ref<const uint64_t>(*generation_cell).load(std::memory_order_acquire)
         );
@@ -801,7 +801,7 @@ namespace BidirectionalInMemGraph
         {
             const SD::RegionSchemaTable& schemas =
                 FabCache_->HasDefaultRegionTable_ && !override_table
-                    ? DefaultRegionTable_
+                    ? DisposableFCache___.DefaultRegionTable_
                     : region_schemas;
             if (!PrepareMatrixViewRow_(slot, schemas))
             {
@@ -928,8 +928,8 @@ namespace BidirectionalInMemGraph
     std::optional<uint32_t> APCFinilizer::GetASlotForNewAPCLink() noexcept
     {
         if (
-            !FabricInitialized_.load(std::memory_order_acquire) ||
-            !VolatileCache___.SlabBasePtr_ || 
+            !DisposableFCache___.FabricInitialized_.load(std::memory_order_acquire) ||
+            !DisposableFCache___.SlabBasePtr_ || 
             !ADS::IsCapacityOfAPCValid(FabCache_->PerAPCRuntimeCellCount_)
         )
         {
@@ -1357,7 +1357,7 @@ namespace BidirectionalInMemGraph
 
         for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
         {
-            const SD::RegionSchemaRecord& expected = DefaultRegionTable_[i];
+            const SD::RegionSchemaRecord& expected = DisposableFCache___.DefaultRegionTable_[i];
 
             const SD::RegionSchemaRecord& supplied = table[i];
             const bool expected_disabled = SD::HasSchemaFlag(expected.Flags, SD::SchemaFlags::REGION_DISABLED);

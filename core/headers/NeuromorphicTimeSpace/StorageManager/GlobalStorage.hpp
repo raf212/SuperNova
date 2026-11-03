@@ -223,21 +223,6 @@ namespace BidirectionalInMemGraph
         void WarmAll() noexcept;
     };
 
-    //Start of the Fabric
-    struct StoragePointers
-    {
-    protected:
-        using FabricCache = CoreOfFabricCoordinator::FabricCache;
-        NumericalBacking __NumericalBacking__{}; // __NumericalBacking__
-
-        FabricCache* FabCache_{nullptr};
-
-        RawPackedCellAllocator AllocatorOfFabric_{};
-
-        CoreOfFabricCoordinator::VolatileFabricCache VolatileCache___{};
-        
-        uint64_t* NumericalBase_() noexcept { return VolatileCache___.StorageBasePtr_; }
-    };
 }
 
 namespace BidirectionalInMemGraph::Numerics 

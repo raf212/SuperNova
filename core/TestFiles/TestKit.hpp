@@ -959,7 +959,7 @@ public:
             return nullptr;
         }
         return reinterpret_cast<std::byte*>(
-            VolatileCache___.SlabBasePtr_ +
+            DisposableFCache___.SlabBasePtr_ +
             FabCache_->SegmentPoolBegin_ +
             static_cast<std::size_t>(slot) *
                 FabCache_->PerAPCRuntimeCellCount_);
@@ -4881,7 +4881,7 @@ public:
         }
 
         return std::atomic_ref<const std::uint64_t>(
-            VolatileCache___.SlabBasePtr_[range.BeginIndex + local_cell]
+            DisposableFCache___.SlabBasePtr_[range.BeginIndex + local_cell]
         ).load(std::memory_order_acquire);
     }
 
@@ -6293,7 +6293,7 @@ public:
 
     std::uint64_t* SlabAddressForTest() noexcept
     {
-        return VolatileCache___.SlabBasePtr_;
+        return DisposableFCache___.SlabBasePtr_;
     }
 
     std::uint64_t SlabCellCountForTest() const noexcept
