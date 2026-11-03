@@ -43,7 +43,7 @@ namespace BidirectionalInMemGraph
 
         void Free(uint64_t* data, size_t cells) const noexcept;
 
-        static size_t RawPackedCellAllocator::AlignBiteCount_(size_t bytes, size_t alignment) noexcept
+        static size_t AlignBiteCount_(size_t bytes, size_t alignment) noexcept
         {
             if (alignment == UNSIGNED_ZERO)
             {

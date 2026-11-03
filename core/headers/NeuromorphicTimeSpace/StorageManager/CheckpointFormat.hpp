@@ -1,3 +1,7 @@
+#pragma once
+#include <istream>
+#include <ostream>
+
 #include "../FabricOrchestrators/HandleAndRetirement.hpp"
 
 namespace BidirectionalInMemGraph::CheckpointFormat 
@@ -84,7 +88,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
     static constexpr uint64_t HedaderHash(const FileHeader& header) noexcept
     {
-        std::array<std::byte, IV::HeaderWords * sizeof(uint64_t)> encoded{};
+        std::array<std::byte, IV::HeaderDataWords * sizeof(uint64_t)> encoded{};
         for (size_t word = 0; word < IV::HeaderDataWords; word++) 
         {
             for (size_t b = 0; b < sizeof(uint64_t); b++) 

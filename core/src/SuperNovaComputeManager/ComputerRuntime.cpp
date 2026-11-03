@@ -1,4 +1,4 @@
-#include "SuperNovaComputeManager/ComputerRuntime.hpp"
+#include <SuperNova>
 
 namespace BidirectionalInMemGraph::ComputerDetail
 {

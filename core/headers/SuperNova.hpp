@@ -28,7 +28,7 @@
 #include "Models/GHGF/GHGFModelOfAPC.hpp"
 
 //COMPUTER
-#include "SuperNovaComputeManager/DeviceResources.hpp"
+#include "SuperNovaComputeManager/Computer.hpp"
 
 // Transitional public namespace facade.
 //
