@@ -102,4 +102,40 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return bytes == UNSIGNED_ZERO ? UNSIGNED_ZERO : (1 + ((bytes - 1) / IV::PageBytes));
     }
     
+    struct FabricId
+    {
+        uint64_t High{};
+        uint64_t Low{};
+        friend constexpr bool operator == (const FabricId&, const FabricId&) = default;
+        explicit operator bool() const noexcept
+        {
+            return High || Low;
+        }
+        static FabricId New()
+        {
+            std::random_device random;
+            FabricId id{(uint64_t{random()}<<32)^random(), (uint64_t{random()}<<32)^random()};
+            if (!id)
+            {
+                id.Low = 1;
+            }
+            return id;
+        }
+    };
+
+    struct RegionRef
+    {
+        FabricId Id{};
+        uint64_t ByteOffset{};
+        uint64_t ByteCount{};
+        uint32_t Slot{};
+        uint32_t Generation{};
+        uint32_t RecordOrdinal{};
+        uint32_t Height{};
+        uint32_t Width{};
+        MacroColumnOfAPC Column{MacroColumnOfAPC::FREE_SLOT};
+        SchemaDefinition::DataTypeOfMacroColumn Type{};
+
+        friend constexpr bool operator == (const RegionRef&, const RegionRef&) noexcept = default;  
+    };
 }
