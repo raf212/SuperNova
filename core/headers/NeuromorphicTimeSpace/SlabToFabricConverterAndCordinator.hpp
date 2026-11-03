@@ -28,10 +28,6 @@ namespace BidirectionalInMemGraph
 
         struct InitFlagReset;
     protected :
-        std::atomic<bool> TrackDAGRevision_{false};
-
-        SD::RegionSchemaTable DefaultRegionTable_{};
-
         void FreeRawPackedCells_(uint64_t*packed_cell_memory_ptr, size_t packed_cell_count) noexcept;
         void ResetScalarsofTheFabric_() noexcept;
 

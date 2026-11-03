@@ -12,18 +12,19 @@ namespace BidirectionalInMemGraph
     public:
         FabricExecutionGate& ExecutionGate() noexcept {return ExecutionGate_;}
     protected:
-        FabricExecutionGate ExecutionGate_{};
-        
-    protected:
-        using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
-        using DSA = DescriptionOfAPC;
-
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
 
+        using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
+        using DSA = DescriptionOfAPC;
+        using SD = SchemaDefinition;
+
+        FabricExecutionGate ExecutionGate_{};
         CoreOfFabricCoordinator::FabricBackigOwnership BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
         std::atomic<bool> FabricInitialized_{false};
         std::atomic<bool> InitializationInProgress_{false};
-
+        std::atomic<uint64_t> SealedDAGRevision_{UNSIGNED_ZERO};
+        std::atomic<bool> TrackDAGRevision_{false};
+        SD::RegionSchemaTable DefaultRegionTable_{};
 
         void RefreshNumericalBase_() noexcept;
 
