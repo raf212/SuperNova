@@ -8,6 +8,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
     class VerifyReader final : private IV
     {
+    private:
         const FabricCheckpoint& Image_;
         std::ifstream Input_;
         std::array<std::byte, PAGE_BYTES> Page_{};
@@ -17,6 +18,10 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         bool Valid_{false};
 
         bool PageLoaded_(size_t page) noexcept;
+    public:
+        VerifyReader(const FabricCheckpoint& image, ReadStatic* statics = nullptr);
+
+        bool Read(uint64_t offset, std::span<std::byte> output) noexcept;
     };
 
     class FabricCheckpoint final : private InternalValues
@@ -36,4 +41,5 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         }
         
     };
+
 }
