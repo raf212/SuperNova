@@ -77,6 +77,9 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         static constexpr size_t HeaderWords = static_cast<size_t>(PageHeader::HEADER_HASH) + 1;
         static constexpr uint64_t HeaderBytes = HeaderWords * BytesPerWord;
         static constexpr size_t HeaderDataWords = static_cast<size_t>(PageHeader::HEADER_HASH);
+        // static constexpr size_t MaxPageCount = (DefaultMaximumCells * BytesPerWord + PageBytes)
+
+
         using FileHeader = std::array<uint64_t, HeaderWords>;
 
         enum class ReferanceField : size_t
@@ -92,7 +95,8 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             TYPE,
             HEIGHT,
             WIDTH,
-            VERSION
+            VERSION,
+            COUNT
         };
 
         struct CheckpointCache
@@ -116,21 +120,20 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     {
         uint64_t FileOpens{};
         uint64_t HeaderChecks{};
-        uint64_t PageWords{};
-        uint64_t RegionValidation{};
+        uint64_t PageReads{};
+        uint64_t RegionValidations{};
     };
 
     using IV = InternalValues;
-    using FileHeader = std::array<uint64_t, IV::HeaderWords>;
+    using FileHeader = IV::FileHeader;
 
     static constexpr size_t FieldIndex(PageHeader field) noexcept
     {
         return static_cast<size_t>(field);
     }
 
-    static constexpr uint64_t PageHash(std::span<const std::byte> bytes) noexcept
+    static constexpr uint64_t PageHash(std::span<const std::byte> bytes, uint64_t hash = IV::FnvOffsetBasis) noexcept
     {
-        uint64_t hash = IV::FnvOffsetBasis;
         for (std::byte b : bytes) 
         {
             hash ^= std::to_integer<uint8_t>(b);
@@ -165,19 +168,25 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return true;
     }
 
+    static constexpr std::array<std::byte, IV::BytesPerWord> EncodeWord(uint64_t value) noexcept
+    {
+        std::array<std::byte, IV::BytesPerWord> bytes{};
+        for (size_t i = 0; i < bytes.size(); i++) 
+        {
+            bytes[i] = static_cast<std::byte>(value >> (i * IV::BitsPerByte));
+        }
+        return bytes;
+    }
+
     static constexpr uint64_t HedaderHash(const FileHeader& header) noexcept
     {
-        std::array<std::byte, IV::HeaderDataWords * sizeof(uint64_t)> encoded{};
+        std::array<std::byte, IV::HeaderDataWords * IV::BytesPerWord> encoded{};
+        uint64_t hash = IV::FnvOffsetBasis;
         for (size_t word = 0; word < IV::HeaderDataWords; word++) 
         {
-            for (size_t b = 0; b < sizeof(uint64_t); b++) 
-            {
-                encoded[word * IV::BytesPerWord + b] = static_cast<std::byte>(
-                    header[word] >> (b * sizeof(uint64_t))
-                );
-            }
+            hash = PageHash(EncodeWord(header[word]), hash);
         }
-        return PageHash(encoded);
+        return hash;
     }
 
     static constexpr uint64_t PageCount(uint64_t bytes) noexcept

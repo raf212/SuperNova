@@ -271,7 +271,7 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
         }
 
     public:
-        explicit ACppFabricAlocator::ACppFabricAlocator(
+        explicit ACppFabricAlocator(
             sycl::queue& queue,
             sycl::usm::alloc location = sycl::usm::alloc::host
         ) noexcept :
