@@ -6,6 +6,9 @@
 
 namespace BidirectionalInMemGraph::CheckpointFormat 
 {
+    static constexpr size_t CellCountInAPage = 1024; // can be optimized
+    static constexpr uint64_t MaxCheckpointMetaCellCount = 1024;
+
     using CFC = CoreOfFabricCoordinator;
     struct FabricId
     {
@@ -66,18 +69,18 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     {
         static constexpr uint64_t FileMagic = 0x3354504b43464e53ULL; // "SNFCKPT3" on disk
         static constexpr uint64_t FileVersion = 1;
-        static constexpr uint64_t BytesPerWord = sizeof(uint64_t);
+        static constexpr uint64_t BytesPerCell = sizeof(uint64_t);
         static constexpr unsigned BitsPerByte = CHAR_BIT;
-        static constexpr uint64_t PageBytes = 64u * 1024u;
-        static constexpr uint64_t MaximumMetadataBytes = 64u * 1024u;
+        static constexpr uint64_t PageBytes = BitsPerByte * BytesPerCell * CellCountInAPage;
+        static constexpr uint64_t MaximumMetadataBytes = BitsPerByte * BytesPerCell * MaxCheckpointMetaCellCount;
         static constexpr uint64_t DefaultMaximumCells = uint64_t{10} << 27;
         static constexpr uint64_t FnvOffsetBasis = 14695981039346656037ULL;
         static constexpr uint64_t FnvPrime = 1099511628211ULL;
 
         static constexpr size_t HeaderWords = static_cast<size_t>(PageHeader::HEADER_HASH) + 1;
-        static constexpr uint64_t HeaderBytes = HeaderWords * BytesPerWord;
+        static constexpr uint64_t HeaderBytes = HeaderWords * BytesPerCell;
         static constexpr size_t HeaderDataWords = static_cast<size_t>(PageHeader::HEADER_HASH);
-        // static constexpr size_t MaxPageCount = (DefaultMaximumCells * BytesPerWord + PageBytes)
+        static constexpr size_t MaxPageCount = (DefaultMaximumCells * BytesPerCell + PageBytes - 1) / PageBytes;
 
 
         using FileHeader = std::array<uint64_t, HeaderWords>;
@@ -108,8 +111,8 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             uint64_t Payload_{};
             uint64_t MetaBytes_{};
             uint64_t TotalBytes_{};
-            std::vector<uint64_t> Hashes_{};
-            std::vector<std::byte> MetaData_{};
+            std::array<uint64_t, MaxPageCount> Hashes_{};
+            std::array<std::byte, MaximumMetadataBytes> MetaData_{};
             FileHeader Header_{};
             CFC::FabricCache SlabCache_{};
         };
@@ -168,9 +171,9 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return true;
     }
 
-    static constexpr std::array<std::byte, IV::BytesPerWord> EncodeWord(uint64_t value) noexcept
+    static constexpr std::array<std::byte, IV::BytesPerCell> EncodeWord(uint64_t value) noexcept
     {
-        std::array<std::byte, IV::BytesPerWord> bytes{};
+        std::array<std::byte, IV::BytesPerCell> bytes{};
         for (size_t i = 0; i < bytes.size(); i++) 
         {
             bytes[i] = static_cast<std::byte>(value >> (i * IV::BitsPerByte));
@@ -180,7 +183,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
     static constexpr uint64_t HedaderHash(const FileHeader& header) noexcept
     {
-        std::array<std::byte, IV::HeaderDataWords * IV::BytesPerWord> encoded{};
+        std::array<std::byte, IV::HeaderDataWords * IV::BytesPerCell> encoded{};
         uint64_t hash = IV::FnvOffsetBasis;
         for (size_t word = 0; word < IV::HeaderDataWords; word++) 
         {
