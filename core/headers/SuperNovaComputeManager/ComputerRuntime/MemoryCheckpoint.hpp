@@ -14,7 +14,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         std::array<std::byte, PAGE_BYTES> Page_{};
         size_t PageLength_{};
         std::optional<size_t> CachedPage_{};
-        ReadStatic* RStatics_;
+        ReadStatic* RStatics_{};
         bool Valid_{false};
 
         bool PageLoaded_(size_t page) noexcept;
@@ -39,6 +39,34 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         {
             return HeaderValue_(PageHeader::CELL_COUNT);
         }
+
+        constexpr FabricId Identity() const noexcept
+        {
+            return {
+                HeaderValue_(PageHeader::FABRICLOW),
+                HeaderValue_(PageHeader::FABRICLOW)
+            };
+        }
+
+        constexpr  bool FabSlabCache(CFC::FabricCache& cache) const noexcept
+        {
+            if (CCache_) 
+            {
+                cache = CCache_.SlabCache_;
+                return true;
+            }
+            cache = CFC::FabricCache{};
+            return false;
+        }
+
+        constexpr std::span<const std::byte> MetaData() const noexcept
+        {
+            return CCache_ ? std::span<const std::byte>{
+                CCache_.MetaData_.data(),
+                static_cast<size_t>(HeaderValue_(PageHeader::METADATA_SIZE))
+            } : std::span<const std::byte>{};
+        }
+
         
     };
 
