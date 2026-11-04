@@ -206,12 +206,4 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return bytes == UNSIGNED_ZERO ? UNSIGNED_ZERO : (1 + ((bytes - 1) / IV::PAGE_BYTES));
     }
 
-    template<class Reader>
-    static constexpr bool WriteStremed(
-        const std::filesystem::path path,
-        FabricId id,
-        uint64_t revision,
-        const CFC::FabricCache& cache,
-        Reader reader
-    ) noexcept;
 }

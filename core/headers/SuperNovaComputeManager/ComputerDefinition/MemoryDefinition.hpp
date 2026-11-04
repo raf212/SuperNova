@@ -1,6 +1,7 @@
 #pragma once
 #include "Definition.hpp"
 
+/// WORK - MEMORY - COMPUTER 
 namespace BidirectionalInMemGraph::ComputerDetail
 {
 
@@ -76,6 +77,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     };
 }
 
+/// WORK - MEMORY
 namespace BidirectionalInMemGraph::ComputerDetail::Memory
 {
     template<class DT>
@@ -198,4 +200,76 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
     }
 
 
+}
+
+/// DISK - MEMORY - Checkpoint
+namespace BidirectionalInMemGraph::CheckpointFormat
+{
+
+    template<class Reader>
+    static bool WriteStremed(
+        const std::filesystem::path path,
+        FabricId id,
+        uint64_t revision,
+        const CFC::FabricCache& cache,
+        Reader reader,
+        std::span<const std::byte> meta_data = {}
+    ) noexcept
+    {
+        std::filesystem::path temp_path;
+        try 
+        {
+            if (
+                !id || meta_data.size() > IV::MAX_META_BYTES ||
+                !StorageAllocationDef::ValidateFabricCache(cache)
+            ) 
+            {
+                return false;
+            }
+            const uint64_t total_cells = cache.SlabCellCount_;
+            const uint64_t total_bytes = total_cells * IV::BYTES_PER_CELL;
+            const uint64_t pages = PageCount(total_bytes);
+
+            std::array<std::byte, IV::PAGE_BYTES> buffer;
+            if (
+                total_cells > LIMIT_OF_CELL_COUNT ||
+                pages > IV::MAX_PAGE_COUNT
+            ) 
+            {
+                return false;
+            }
+
+            //PAGE HASHES
+            std::unique_ptr hashes = std::make_unique<std::array<uint64_t, IV::MAX_PAGE_COUNT>>();
+            for (uint64_t p = 0; p < pages; p++) 
+            {
+                const uint64_t begin = p * IV::PAGE_BYTES;
+                const size_t len = static_cast<size_t>(
+                    std::min<uint64_t>(IV::PAGE_BYTES, (total_bytes - begin))
+                );
+
+                std::span bytes = std::span<std::byte>(buffer.data(), len);
+                if (!reader(begin, bytes)) return false;
+                (*hashes)[p] = PageHash(bytes);
+            }
+
+            if (pages > (UINT64_MAX - IV::HEADER_BYTES - meta_data.size())) 
+            {
+                return false;
+            }
+
+            const uint64_t directory_bytes = pages * IV::BYTES_PER_CELL + meta_data.size();
+            const uint64_t payload_offset = IV::HEADER_BYTES * directory_bytes;
+            if (total_bytes > (UINT64_MAX - payload_offset)) return false;
+
+
+
+        }
+        catch (...)
+        {
+            return false;
+        }
+
+        return true;
+    }
 }
