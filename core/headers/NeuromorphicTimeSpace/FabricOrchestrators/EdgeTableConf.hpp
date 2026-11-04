@@ -1,7 +1,5 @@
 #pragma once 
 #include "CoreOfFabricCoordinator.hpp"
-#include <span>
-#include <bitset>
 
 namespace BidirectionalInMemGraph
 {

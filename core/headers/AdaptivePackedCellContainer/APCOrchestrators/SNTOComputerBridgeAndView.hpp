@@ -1,6 +1,5 @@
 #pragma once
 #include "SchemaOrchestratorForRegion.hpp"
-#include <span>
 
 
 namespace BidirectionalInMemGraph

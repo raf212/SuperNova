@@ -1,26 +1,5 @@
 #pragma once
-
-#include <type_traits>
-#include <cstring>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <random>
-#include <optional>
-#include <vector>
-#include <algorithm>
-#include <limits>
-#include <cassert>
-#include <cstddef>
-#include <array>
-#include <thread>
-#include <stdexcept>
-#include <memory>
-#include <bit>
-#if defined(_MSC_VER)
-    #include <intrin.h>
-#endif
+#include "../../OutterIncludes.hpp"
 
 namespace BidirectionalInMemGraph 
 {

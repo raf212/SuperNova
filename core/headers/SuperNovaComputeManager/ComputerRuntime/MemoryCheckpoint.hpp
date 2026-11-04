@@ -1,9 +1,6 @@
 #pragma once
 #include "../ComputerDefinition/MemoryDefinition.hpp"
-#if !defined(_WIN32)
-    #include <fcntl.h>
-    #include <unistd.h>
-#endif
+
 
 namespace BidirectionalInMemGraph::CheckpointFormat 
 {

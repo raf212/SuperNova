@@ -1,6 +1,5 @@
 #pragma once
 #include "MemoryCheckpoint.hpp"
-#include <exception>
 
 namespace BidirectionalInMemGraph::ComputerDetail
 {

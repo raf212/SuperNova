@@ -1,8 +1,5 @@
 #pragma once
-#include <atomic>
-#include <cstdint>
-#include <exception>
-#include <utility>
+
 #include "SharedConf.hpp"
 
 namespace BidirectionalInMemGraph 

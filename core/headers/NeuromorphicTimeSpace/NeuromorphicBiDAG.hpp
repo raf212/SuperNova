@@ -1,3 +1,5 @@
+#pragma once
+
 #include "SlabToFabricConverterAndCordinator.hpp"
 
 namespace BidirectionalInMemGraph 

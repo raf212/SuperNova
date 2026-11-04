@@ -1,6 +1,4 @@
 #pragma once
-#include <functional>
-#include <utility>
 #include "APCOrchestrators/SNTOComputerBridgeAndView.hpp"
 
 namespace BidirectionalInMemGraph

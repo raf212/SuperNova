@@ -1,16 +1,6 @@
 #pragma once
 #include "Definition.hpp"
-#include <random>
-#include <chrono>
-#include <filesystem>
-#include <fstream>
-#include <vector>
-#include <array>
-#include <bit>
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <unistd.h>
-#endif
+
 namespace BidirectionalInMemGraph::ComputerDetail
 {
 

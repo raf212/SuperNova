@@ -1,6 +1,5 @@
 #pragma once 
 #include "EdgeTableConf.hpp"
-#include <bitset>
 
 namespace BidirectionalInMemGraph
 {

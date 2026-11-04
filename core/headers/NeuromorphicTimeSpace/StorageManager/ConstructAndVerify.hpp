@@ -1,20 +1,5 @@
 #pragma once
 #include "CheckpointFormat.hpp"
-#include <cstdint>
-#include <filesystem>
-#include <limits>
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 
 namespace BidirectionalInMemGraph
 {

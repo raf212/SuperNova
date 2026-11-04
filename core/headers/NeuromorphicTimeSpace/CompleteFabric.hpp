@@ -1,6 +1,5 @@
 #pragma once 
 #include "FabricConstructor.hpp"
-#include <new>
 
 namespace BidirectionalInMemGraph
 {
