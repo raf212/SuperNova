@@ -50,11 +50,11 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     {
         MAGIC,
         VERSION,
+        PAGE_SIZE,
         FABRICHIGH,
         FABRICLOW,
         REVISION,
         CELL_COUNT,
-        PAGE_SIZE,
         PAGE_COUNT,
         METADATA_SIZE,
         PAYLOAD_OFFSET,
@@ -155,7 +155,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return hash;
     }
 
-    static bool WritePageHeaderWords(std::ostream& output, uint64_t value) noexcept
+    static bool WritePageHeaderCells(std::ostream& output, uint64_t value) noexcept
     {
         for (unsigned byte = 0; byte < sizeof(uint64_t); byte++) 
         {

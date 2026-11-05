@@ -262,14 +262,107 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             const uint64_t payload_offset = IV::HEADER_BYTES * directory_bytes;
             if (total_bytes > (UINT64_MAX - payload_offset)) return false;
 
+            uint64_t directory_hash = IV::FnvOffsetBasis;
 
+            FileHeader header
+            {
+                IV::FILE_MAGIC,
+                IV::FILE_VERSION,
+                IV::PAGE_BYTES,
+                id.High,
+                id.Low,
+                revision,
+                static_cast<uint64_t>(total_cells),
+                static_cast<uint64_t>(meta_data.size()),
+                payload_offset,
+                directory_hash,
+                (payload_offset + total_bytes),
+                UNSIGNED_ZERO
+            };
 
+            header[PageHeaderIndex(PageHeader::HEADER_HASH)] = HedaderHash(header);
+
+            const FabricId fab_id = FabricId::New();
+
+            temp_path = path;
+            temp_path += std::string(".tmp-") + std::to_string(fab_id.High) +
+                "-" + std::to_string(fab_id.Low);
+            {
+                std::ofstream output(temp_path, (std::ios::binary | std::ios::trunc));
+                if (!output) return false;
+                for (uint64_t val : header) 
+                {
+                    if (!WritePageHeaderCells(output, val)) 
+                    {
+                        throw std::runtime_error("header write");
+                    }
+                }
+                for (uint64_t p = 0; p < pages; p++) 
+                {
+                    if (!WritePageHeaderCells(output, (*hashes)[p])) 
+                    {
+                        throw std::runtime_error("directory write");
+                    }
+                }
+
+                output.write(
+                    reinterpret_cast<const char*>(meta_data.data()), 
+                    static_cast<std::streamsize>(meta_data.size())  
+                );
+
+                for (uint64_t p = 0; p < pages; p++) 
+                {
+                    const uint64_t begin = p * IV::PAGE_BYTES;
+                    const size_t len = static_cast<size_t>(
+                        std::min<uint64_t>(IV::PAGE_BYTES, (total_bytes - begin))
+                    );
+
+                    std::span bytes = std::span<std::byte>(buffer.data(), len);
+                    if (
+                        !reader(begin, bytes) ||
+                        PageHash(bytes) != (*hashes)[p]
+                    )
+                    {
+                        throw std::runtime_error("payload changed during checkpoint");
+                    }
+                }
+                output.flush();
+                if (!output) throw std::runtime_error("payload write");
+            }
+        
+        #if !defined (_WIN32)
+            const int fd = ::open(temp_path.c_str(), O_RDONLY);
+            if (fd < 0) throw std::runtime_error("open flush");
+
+            const int synced = ::fsync(fd);
+            ::close(fd);
+            if (synced != 0) throw std::runtime_error("file flush");
+        #endif
+        
+            std::filesystem::rename(temp_path, path);
+            temp_path.clear();
+
+        #if !defined(_WIN32)
+            auto parent = path.parent_path();
+            if (parent.empty()) parent = ".";
+
+            const int directory_fd = ::open(parent.c_str(), (O_RDONLY | O_DIRECTORY));
+            if (directory_fd < 0) return false;
+
+            const int directory_synced = ::fsync(directory_fd);
+            ::close(directory_fd);
+            if (directory_synced != 0) return false;
+        #endif
+            return true;
         }
         catch (...)
         {
+            if (!temp_path.empty()) 
+            {
+                std::error_code ignored;
+                std::filesystem::remove(temp_path, ignored);
+            }
             return false;
         }
-
-        return true;
     }
 }
