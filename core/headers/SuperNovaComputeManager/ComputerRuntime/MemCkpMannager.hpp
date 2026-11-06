@@ -30,12 +30,18 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
         std::unique_ptr<CheckpointCache> CCache_{};
 
-        constexpr uint64_t HeaderValue_(PageHeader field) const noexcept
+        uint64_t HeaderValue_(PageHeader field) const noexcept
         {
             return CCache_ ? CCache_->Header_[PageHeaderIndex(field)] : UNSIGNED_ZERO;
         }
 
+        bool ReadBytes_(uint64_t offset, std::span<std::byte> output) noexcept;
+
+        bool ValidateRegion(const RegionRef& ref, VerifyReader& reader) noexcept;
+
     public:
+        uint64_t Revision() const noexcept {return HeaderValue_(PageHeader::REVISION);}
+        uint64_t Fingerprint() const noexcept {return HeaderValue_(PageHeader::HEADER_HASH);}
 
         bool Open(
             const std::filesystem::path& path,
@@ -43,12 +49,12 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         ) noexcept;
 
 
-        constexpr uint64_t CellCountFromHeader() const noexcept
+        uint64_t CellCountFromHeader() const noexcept
         {
             return HeaderValue_(PageHeader::CELL_COUNT);
         }
 
-        constexpr FabricId Identity() const noexcept
+        FabricId Identity() const noexcept
         {
             return {
                 HeaderValue_(PageHeader::FABRICLOW),
@@ -56,7 +62,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             };
         }
 
-        constexpr  bool FabSlabCache(CFC::FabricCache& cache) const noexcept
+         bool FabSlabCache(CFC::FabricCache& cache) const noexcept
         {
             if (CCache_) 
             {
@@ -67,7 +73,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             return false;
         }
 
-        constexpr std::span<const std::byte> MetaData() const noexcept
+        std::span<const std::byte> MetaData() const noexcept
         {
             return CCache_ ? std::span<const std::byte>{
                 CCache_->MetaData_.data(),
@@ -75,7 +81,18 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             } : std::span<const std::byte>{};
         }
 
-        
+        bool ReadCells(uint64_t first, std::span<uint64_t> cells) const noexcept;
+
+        bool ReadSlab(std::vector<uint64_t>& slab) const noexcept;
+
+        bool Validate(const RegionRef r_ref) const noexcept;
+
+        bool ReadExtent(
+            const RegionRef& ref,
+            uint64_t relative,
+            std::span<std::byte> destination,
+            ReadStatic* read_static = nullptr
+        ) noexcept;
     };
 
 }
