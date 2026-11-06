@@ -38,7 +38,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return true;
     }
 
-    VerifyReader::VerifyReader(const FabricCheckpoint& image, ReadStatic* statics) :
+    VerifyReader::VerifyReader(const FabricCheckpoint& image, ReadStatistics* statics) :
         Image_(image), 
         Input_(
             image.CCache_ ? image.CCache_->Path_ : std::filesystem::path{},
@@ -192,4 +192,70 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             return false;
         }
     }
+
+    bool FabricCheckpoint::ReadBytes_(uint64_t offset, std::span<std::byte> output) const noexcept
+    {
+        
+    }
+
+
+    bool FabricCheckpoint::ReadCells(uint64_t first, std::span<uint64_t> cells) const noexcept
+    {
+        if (
+            !CCache_ || first > CellCountFromHeader() ||
+            cells.size() > CellCountFromHeader()
+        ) 
+        {
+            return false;
+        }
+
+        return ReadBytes_(first * BYTES_PER_CELL, std::as_writable_bytes(cells));
+    }
+
+    bool FabricCheckpoint::ReadSlab(std::vector<uint64_t>& slab) const noexcept
+    {
+        if (!CCache_) return false;
+        try
+        {
+            std::vector<uint64_t> result(static_cast<size_t>(CellCountFromHeader()));
+            if (!ReadCells(UNSIGNED_ZERO, result)) return false;
+
+            slab = std::move(result);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool FabricCheckpoint::ReadExtent(
+        const RegionRef& ref,
+        uint64_t relative,
+        std::span<std::byte> destination,
+        ReadStatistics* read_static
+    ) noexcept
+    {
+        if (
+            relative > ref.ByteCount ||
+            destination.size() > (ref.ByteCount - relative)
+        ) 
+        {
+            return false;
+        }
+
+        try 
+        {
+            VerifyReader reader(*this, read_static);
+            if (read_static) ++read_static->RegionValidations;
+            return ValidateRegion_(ref, reader) && reader.Read(ref.ByteOffset + relative, destination);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    // bool FabricCheckpoint::Validate(const RegionRef r_ref) const noexcept;
+
 }

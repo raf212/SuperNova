@@ -128,7 +128,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
     };
 
-    struct ReadStatic
+    struct ReadStatistics
     {
         uint64_t FileOpens{};
         uint64_t HeaderChecks{};

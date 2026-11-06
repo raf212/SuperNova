@@ -14,12 +14,12 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         std::array<std::byte, PAGE_BYTES> Page_{};
         size_t PageLength_{};
         std::optional<size_t> CachedPage_{};
-        ReadStatic* RStatics_{};
+        ReadStatistics* RStatics_{};
         bool Valid_{false};
 
         bool PageLoaded_(size_t page) noexcept;
     public:
-        VerifyReader(const FabricCheckpoint& image, ReadStatic* statics = nullptr);
+        VerifyReader(const FabricCheckpoint& image, ReadStatistics* statics = nullptr);
 
         bool Read(uint64_t offset, std::span<std::byte> output) noexcept;
     };
@@ -35,9 +35,9 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             return CCache_ ? CCache_->Header_[PageHeaderIndex(field)] : UNSIGNED_ZERO;
         }
 
-        bool ReadBytes_(uint64_t offset, std::span<std::byte> output) noexcept;
+        bool ReadBytes_(uint64_t offset, std::span<std::byte> output) const noexcept;
 
-        bool ValidateRegion(const RegionRef& ref, VerifyReader& reader) noexcept;
+        bool ValidateRegion_(const RegionRef& ref, VerifyReader& reader) const noexcept;
 
     public:
         uint64_t Revision() const noexcept {return HeaderValue_(PageHeader::REVISION);}
@@ -91,7 +91,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             const RegionRef& ref,
             uint64_t relative,
             std::span<std::byte> destination,
-            ReadStatic* read_static = nullptr
+            ReadStatistics* read_static = nullptr
         ) noexcept;
     };
 
