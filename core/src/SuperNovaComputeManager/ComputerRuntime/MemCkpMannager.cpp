@@ -5,9 +5,15 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     bool VerifyReader::PageLoaded_(size_t page) noexcept
     {
         if (CachedPage_.has_value() && CachedPage_ == page) return true;
-
+        const uint64_t slab_bytes = Image_.CellCountFromHeader() * BYTES_PER_CELL;
+        if (
+            page >= MAX_PAGE_COUNT ||
+            page >= PageCount(slab_bytes)
+        ) 
+        {
+            return false;
+        }
         const uint64_t begin = page * PAGE_BYTES;
-        const uint64_t slab_bytes = Image_.CellCountFromHeader();
         const uint64_t len = static_cast<size_t>(std::min(PAGE_BYTES, (slab_bytes - begin)));
 
         PageLength_ = len;
@@ -24,7 +30,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
         auto HashPageMatches___ = [&]() noexcept -> bool
         {
-            return PageHash(Page_, PageLength_) != Image_.CCache_->Hashes_[page];
+            return PageHash({Page_.data(), PageLength_}) != Image_.CCache_->Hashes_[page];
         };
         if (!HashPageMatches___()) return false;
         if (RStatics_) ++RStatics_->PageReads;
@@ -81,11 +87,13 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             const uint64_t absolute = offset + copied;
             const uint64_t page = static_cast<size_t>(absolute / PAGE_BYTES);
             if (!PageLoaded_(page)) return false;
+
             const size_t within = static_cast<size_t>(absolute % PAGE_BYTES);
+            if (within >= PageLength_) return false;
+
             const size_t count = std::min(
                 (PageLength_ - within), (output.size() - copied) 
             );
-
             std::copy_n((Page_.data() + within), count, (output.data() + copied));
         }
         return true;
@@ -141,7 +149,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             };
             
             if (!input.read(
-                reinterpret_cast<char*>(meta_data.size()),
+                reinterpret_cast<char*>(meta_data.data()),
                 static_cast<std::streamsize>(meta_data.size())
             )) 
             {
@@ -153,15 +161,35 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             {
                 return false;
             }
-            if (
-                !candidate.Read()
-            ) {
-            
+
+            CheckpointCache& cache = *candidate.CCache_;
+            cache.Id_ = candidate.Identity();
+            cache.Cells_ = cell_count;
+            cache.Revision_ = header[PageHeaderIndex(PageHeader::REVISION)];
+            cache.Payload_ = header[PageHeaderIndex(PageHeader::PAYLOAD_OFFSET)];
+            cache.MetaBytes_ = meta_size;
+            cache.TotalBytes_ = *total_bytes;
+
+            VerifyReader reader(candidate);
+            if (!reader.Read(UNSIGNED_ZERO, std::as_writable_bytes(
+                std::span{&cache.SlabCache_, size_t{1}}
+            ))) 
+            {
+                return false;
             }
 
+            if (
+                !StorageAllocationDef::ValidateFabricCache(cache.SlabCache_) ||
+                cache.SlabCache_.SlabCellCount_ != cell_count
+            ) 
+            {
+                return false;
+            }
 
+            CCache_ = std::move(candidate.CCache_);
+            return true;
         } catch (...) {
-        
+            return false;
         }
     }
 }
