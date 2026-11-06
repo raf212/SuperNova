@@ -217,6 +217,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         if (
             header[PageHeaderIndex(PageHeader::MAGIC)]  != IV::FILE_MAGIC ||
             header[PageHeaderIndex(PageHeader::VERSION)] != IV::FILE_VERSION ||
+            header[PageHeaderIndex(PageHeader::PAGE_SIZE)] != IV::PAGE_BYTES ||
             header[PageHeaderIndex(PageHeader::HEADER_HASH)] != HedaderHash(header) ||
             cell_count == UNSIGNED_ZERO ||
             cell_count > maximum_cells ||
@@ -235,10 +236,10 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             page_count > ((UINT64_MAX - IV::HEADER_BYTES - meta_size) / IV::BYTES_PER_CELL)
         ) 
         {
-            return false;
+            return std::nullopt;
         }
 
-        const uint64_t directory_bytes = page_count * IV::BYTES_PER_CELL * meta_size;
+        const uint64_t directory_bytes = page_count * IV::BYTES_PER_CELL + meta_size;
         if (
             payload_offset != (IV::HEADER_BYTES + directory_bytes) ||
             payload_offset > (UINT64_MAX - slab_bytes) ||
@@ -246,12 +247,12 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             slab_bytes > (uint64_t{NOS::max()} - payload_offset)
         ) 
         {
-            return false;
+            return std::nullopt;
         }
 
         const uint64_t total_bytes = payload_offset + slab_bytes;
 
-        return PageHeaderIndex(PageHeader::TOTAL_FILE_SIZE) == total_bytes ?
+        return header[PageHeaderIndex(PageHeader::TOTAL_FILE_SIZE)] == total_bytes ?
             std::optional<uint64_t>{total_bytes} : std::nullopt;
     }
 

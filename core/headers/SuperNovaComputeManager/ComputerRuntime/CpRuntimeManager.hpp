@@ -93,6 +93,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                     Local_,
                     *bytes
                 );
+                return true;
             }
         }
     };
