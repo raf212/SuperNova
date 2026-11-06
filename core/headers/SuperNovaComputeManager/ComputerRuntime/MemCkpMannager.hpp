@@ -28,11 +28,11 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     {
         friend class VerifyReader;
 
-        CheckpointCache CCache_{};
+        std::unique_ptr<CheckpointCache> CCache_{};
 
         constexpr uint64_t HeaderValue_(PageHeader field) const noexcept
         {
-            return CCache_ ? CCache_.Header_[PageHeaderIndex(field)] : UNSIGNED_ZERO;
+            return CCache_ ? CCache_->Header_[PageHeaderIndex(field)] : UNSIGNED_ZERO;
         }
 
     public:
@@ -60,7 +60,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         {
             if (CCache_) 
             {
-                cache = CCache_.SlabCache_;
+                cache = CCache_->SlabCache_;
                 return true;
             }
             cache = CFC::FabricCache{};
@@ -70,7 +70,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         constexpr std::span<const std::byte> MetaData() const noexcept
         {
             return CCache_ ? std::span<const std::byte>{
-                CCache_.MetaData_.data(),
+                CCache_->MetaData_.data(),
                 static_cast<size_t>(HeaderValue_(PageHeader::METADATA_SIZE))
             } : std::span<const std::byte>{};
         }

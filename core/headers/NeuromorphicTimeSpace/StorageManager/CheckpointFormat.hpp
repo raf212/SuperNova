@@ -180,7 +180,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         return true;
     }
 
-    static constexpr std::array<std::byte, IV::BYTES_PER_CELL> EncodeWord(uint64_t value) noexcept
+    static constexpr std::array<std::byte, IV::BYTES_PER_CELL> EncodeCell(uint64_t value) noexcept
     {
         std::array<std::byte, IV::BYTES_PER_CELL> bytes{};
         for (size_t i = 0; i < bytes.size(); i++) 
@@ -196,7 +196,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         uint64_t hash = IV::FnvOffsetBasis;
         for (size_t word = 0; word < IV::HEADER_DATA_CELLS; word++) 
         {
-            hash = PageHash(EncodeWord(header[word]), hash);
+            hash = PageHash(EncodeCell(header[word]), hash);
         }
         return hash;
     }
@@ -204,6 +204,55 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     static constexpr uint64_t PageCount(uint64_t bytes) noexcept
     {
         return bytes == UNSIGNED_ZERO ? UNSIGNED_ZERO : (1 + ((bytes - 1) / IV::PAGE_BYTES));
+    }
+
+    static constexpr std::optional<uint64_t> VerifyPageHeader(const FileHeader& header, uint64_t maximum_cells) noexcept
+    {
+        using NOS = std::numeric_limits<std::streamoff>;
+        const uint64_t cell_count = header[PageHeaderIndex(PageHeader::CELL_COUNT)];
+        const uint64_t meta_size = header[PageHeaderIndex(PageHeader::METADATA_SIZE)];
+        const uint64_t page_count = header[PageHeaderIndex(PageHeader::PAGE_COUNT)];
+        const uint64_t payload_offset = header[PageHeaderIndex(PageHeader::PAYLOAD_OFFSET)];
+
+        if (
+            header[PageHeaderIndex(PageHeader::MAGIC)]  != IV::FILE_MAGIC ||
+            header[PageHeaderIndex(PageHeader::VERSION)] != IV::FILE_VERSION ||
+            header[PageHeaderIndex(PageHeader::HEADER_HASH)] != HedaderHash(header) ||
+            cell_count == UNSIGNED_ZERO ||
+            cell_count > maximum_cells ||
+            cell_count > LIMIT_OF_CELL_COUNT ||
+            header[PageHeaderIndex(PageHeader::PAGE_SIZE)] != IV::PAGE_BYTES ||
+            meta_size > IV::MAX_META_BYTES
+        ) 
+        {
+            return std::nullopt;
+        }
+
+        const uint64_t slab_bytes = cell_count * IV::BYTES_PER_CELL;
+        if (
+            page_count > IV::MAX_PAGE_COUNT ||
+            page_count != PageCount(slab_bytes) ||
+            page_count > ((UINT64_MAX - IV::HEADER_BYTES - meta_size) / IV::BYTES_PER_CELL)
+        ) 
+        {
+            return false;
+        }
+
+        const uint64_t directory_bytes = page_count * IV::BYTES_PER_CELL * meta_size;
+        if (
+            payload_offset != (IV::HEADER_BYTES + directory_bytes) ||
+            payload_offset > (UINT64_MAX - slab_bytes) ||
+            payload_offset > uint64_t{NOS::max()} ||
+            slab_bytes > (uint64_t{NOS::max()} - payload_offset)
+        ) 
+        {
+            return false;
+        }
+
+        const uint64_t total_bytes = payload_offset + slab_bytes;
+
+        return PageHeaderIndex(PageHeader::TOTAL_FILE_SIZE) == total_bytes ?
+            std::optional<uint64_t>{total_bytes} : std::nullopt;
     }
 
 }

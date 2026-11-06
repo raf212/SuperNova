@@ -24,7 +24,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
         auto HashPageMatches___ = [&]() noexcept -> bool
         {
-            return PageHash(Page_, PageLength_) != Image_.CCache_.Hashes_[page];
+            return PageHash(Page_, PageLength_) != Image_.CCache_->Hashes_[page];
         };
         if (!HashPageMatches___()) return false;
         if (RStatics_) ++RStatics_->PageReads;
@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     VerifyReader::VerifyReader(const FabricCheckpoint& image, ReadStatic* statics) :
         Image_(image), 
         Input_(
-            image.CCache_ ? image.CCache_.Path_ : std::filesystem::path{},
+            image.CCache_ ? image.CCache_->Path_ : std::filesystem::path{},
             std::ios::binary
         ),
         RStatics_(statics)
@@ -52,7 +52,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         }
         if (RStatics_) ++RStatics_->HeaderChecks;
 
-        for (uint64_t expected : Image_.CCache_.Header_) 
+        for (uint64_t expected : Image_.CCache_->Header_) 
         {
             uint64_t actual{};
             if (!ReadWord(Input_, actual) || actual != expected) 
@@ -92,5 +92,76 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     }
 
 
+    bool FabricCheckpoint::Open(
+        const std::filesystem::path& path,
+        uint64_t maximum_cells
+    ) noexcept
+    {
+        try 
+        {
+            FabricCheckpoint candidate;
+            candidate.CCache_ = std::make_unique<CheckpointCache>();
+            candidate.CCache_->Path_ = path;
+            std::ifstream input(path, std::ios::binary);
+            if (!input) return false;
 
+            for (uint64_t& v : candidate.CCache_->Header_) 
+            {
+                if (!ReadWord(input, v)) return false;
+            }
+
+            const FileHeader& header = candidate.CCache_->Header_;
+
+            const uint64_t cell_count = header[PageHeaderIndex(PageHeader::CELL_COUNT)];
+            const uint64_t meta_size = header[PageHeaderIndex(PageHeader::METADATA_SIZE)];
+            const uint64_t page_count = header[PageHeaderIndex(PageHeader::PAGE_COUNT)];
+            
+            std::optional<uint64_t> total_bytes = VerifyPageHeader(header, maximum_cells);
+            if (
+                !total_bytes.has_value() || 
+                std::filesystem::file_size(path) != total_bytes.value()
+            )
+            {
+                return false;
+            } 
+
+            if (!candidate.Identity()) return false;
+            uint64_t directory_hash = FnvOffsetBasis;
+
+            for (size_t p = 0; p < page_count; p++) 
+            {
+                uint64_t& hash = candidate.CCache_->Hashes_[p];
+                if (!ReadWord(input, hash)) return false;
+                directory_hash = PageHash(EncodeCell(hash), directory_hash);
+            }
+
+            auto meta_data = std::span{
+                candidate.CCache_->MetaData_.data(),
+                static_cast<size_t>(meta_size)
+            };
+            
+            if (!input.read(
+                reinterpret_cast<char*>(meta_data.size()),
+                static_cast<std::streamsize>(meta_data.size())
+            )) 
+            {
+                return false;
+            }
+
+            directory_hash = PageHash(meta_data, directory_hash);
+            if (directory_hash != header[PageHeaderIndex(PageHeader::DIRECTORY_HASH)]) 
+            {
+                return false;
+            }
+            if (
+                !candidate.Read()
+            ) {
+            
+            }
+
+
+        } catch (...) {
+        
+        }
+    }
 }
