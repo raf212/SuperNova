@@ -1,5 +1,5 @@
 #pragma once
-#include "../ComputerDefinition/MemoryDefinition.hpp"
+#include "../ComputerDefinition/CheckpointAccessDefinition.hpp"
 
 
 namespace BidirectionalInMemGraph::CheckpointFormat 
@@ -34,6 +34,14 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         {
             return CCache_ ? CCache_.Header_[PageHeaderIndex(field)] : UNSIGNED_ZERO;
         }
+
+    public:
+
+        bool Open(
+            const std::filesystem::path& path,
+            uint64_t maximum_cells = DEFAULT_STORAGE_LIMIT
+        ) noexcept;
+
 
         constexpr uint64_t CellCountFromHeader() const noexcept
         {
