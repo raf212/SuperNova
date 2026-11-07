@@ -126,6 +126,28 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             return static_cast<size_t>(field);
         }
 
+
+        static constexpr bool ValidateReferenceFields(const std::array<uint64_t, REFERANCE_CELL_COUNT>& fields) noexcept
+        {
+            using SD = SchemaDefinition;
+
+            if (
+                fields[ReferanceIndex(ReferanceField::VERSION)] != FILE_VERSION ||
+                ADS::ValidateSlotIdx(fields[ReferanceIndex(ReferanceField::SLOT)]) ||
+                fields[ReferanceIndex(ReferanceField::GENERATION)] > ADS::APC_INDEX_BOUND_SENTINAL ||
+                fields[ReferanceIndex(ReferanceField::RECORD_ORDINAL)] > ADS::APC_INDEX_BOUND_SENTINAL ||
+                fields[ReferanceIndex(ReferanceField::COLIMN)] >= ADS::CountOfMacroColumn() ||
+                fields[ReferanceIndex(ReferanceField::TYPE)] > SD::HIGHEST_INDEX_IN_SUPPORTED_DTYPE ||
+                fields[ReferanceIndex(ReferanceField::WIDTH)] > ADS::APC_INDEX_BOUND_SENTINAL ||
+                fields[ReferanceIndex(ReferanceField::WIDTH)] > ADS::APC_INDEX_BOUND_SENTINAL
+
+            ) 
+            {
+                return false;
+            }
+            return true;
+        }
+
     };
 
     struct ReadStatistics

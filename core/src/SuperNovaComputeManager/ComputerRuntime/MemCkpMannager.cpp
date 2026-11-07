@@ -331,6 +331,24 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
             uint64_t bytes{};
             uint32_t cells{};
+            uint32_t stride{};
+            uint32_t records{};
+
+            if (
+                !SD::GetALLRequiredComputerInfo(bytes, cells, stride, records, schema) ||
+                ref.RecordOrdinal >= records
+            ) 
+            {
+                return false;
+            }
+
+            const uint64_t expected_offset = (CCache_->SlabCache_.SegmentPoolBegin_ + 
+                (uint64_t{ref.Slot} * CCache_->SlabCache_.PerAPCRuntimeCellCount_) +
+                schema.CellOffset + (uint64_t{ref.RecordOrdinal} * stride)
+            ) * BYTES_PER_CELL;
+
+            return ref.ByteOffset == expected_offset && 
+                ref.ByteCount == bytes;
         }
         catch (...)
         {
@@ -339,6 +357,17 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     }
 
 
-    // bool FabricCheckpoint::Validate(const RegionRef r_ref) const noexcept;
+    bool FabricCheckpoint::Validate(const RegionRef ref) const noexcept
+    {
+        try 
+        {
+            VerifyReader reader(*this);
+            return ValidateRegion_(ref, reader);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
 
 }

@@ -36,6 +36,7 @@ namespace BidirectionalInMemGraph
             FLOAT64_T = 11,
             CHAR = 12
         };
+        static constexpr uint8_t HIGHEST_INDEX_IN_SUPPORTED_DTYPE = static_cast<uint8_t>(DataTypeOfMacroColumn::CHAR);
 
         enum class SchemaFlags : uint8_t
         {

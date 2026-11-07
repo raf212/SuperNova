@@ -261,4 +261,50 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             meta_data
         );
     }
+
+
+    std::optional<RegionRef> ReadReferanceField(const std::filesystem::path& path) noexcept
+    {
+        using RF = IV::ReferanceField;
+        using SD = SchemaDefinition;
+        try 
+        {
+            std::ifstream input(path, std::ios::binary);
+            if(!input) return std::nullopt;
+
+            std::array<uint64_t, IV::REFERANCE_CELL_COUNT> fields{};
+            for (uint64_t& f : fields)
+            {
+                if (!ReadWord(input, f)) return std::nullopt;
+            }
+
+            if (
+                input.peek() != std::char_traits<char>::eof() ||
+                !IV::ValidateReferenceFields(fields)
+            ) 
+            {
+                return std::nullopt;
+            }
+
+            return RegionRef{
+                {
+                    fields[IV::ReferanceIndex(RF::FABRIC_HIGH)],
+                    fields[IV::ReferanceIndex(RF::FABRIC_LOW)]
+                },
+                fields[IV::ReferanceIndex(RF::BYTE_OFFSET)],
+                fields[IV::ReferanceIndex(RF::BYTE_COUNT)],
+                static_cast<uint32_t>(fields[IV::ReferanceIndex(RF::SLOT)]),
+                static_cast<uint32_t>(fields[IV::ReferanceIndex(RF::GENERATION)]),
+                static_cast<uint32_t>(fields[IV::ReferanceIndex(RF::RECORD_ORDINAL)]),
+                static_cast<uint32_t>(fields[IV::ReferanceIndex(RF::HEIGHT)]),
+                static_cast<uint32_t>(fields[IV::ReferanceIndex(RF::WIDTH)]),
+                static_cast<MacroColumnOfAPC>(fields[IV::ReferanceIndex(RF::COLIMN)]),
+                static_cast<SD::DataTypeOfMacroColumn>(fields[IV::ReferanceIndex(RF::TYPE)])
+            };
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
 }
