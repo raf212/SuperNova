@@ -51,7 +51,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
                 (*hashes)[p] = PageHash(bytes);
             }
 
-            if (pages > (UINT64_MAX - IV::HEADER_BYTES - meta_data.size())) 
+            if (pages > ((UINT64_MAX - IV::HEADER_BYTES - meta_data.size()) / IV::BYTES_PER_CELL)) 
             {
                 return false;
             }
@@ -62,6 +62,12 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
             uint64_t directory_hash = IV::FnvOffsetBasis;
 
+            for (uint64_t p = 0; p < pages; p++) 
+            {
+                directory_hash = PageHash(EncodeCell((*hashes)[p]), directory_hash);
+            }
+            directory_hash = PageHash(meta_data, directory_hash);
+
             FileHeader header
             {
                 IV::FILE_MAGIC,
@@ -71,6 +77,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
                 id.Low,
                 revision,
                 static_cast<uint64_t>(total_cells),
+                pages,
                 static_cast<uint64_t>(meta_data.size()),
                 payload_offset,
                 directory_hash,
@@ -79,6 +86,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             };
 
             header[PageHeaderIndex(PageHeader::HEADER_HASH)] = HedaderHash(header);
+            if (!VerifyPageHeader(header, total_cells)) return false;
 
             const FabricId fab_id = FabricId::New();
 
@@ -123,6 +131,9 @@ namespace BidirectionalInMemGraph::CheckpointFormat
                     {
                         throw std::runtime_error("payload changed during checkpoint");
                     }
+
+                    output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(len));
+                    if (!output) throw std::runtime_error("payload write");
                 }
                 output.flush();
                 if (!output) throw std::runtime_error("payload write");
