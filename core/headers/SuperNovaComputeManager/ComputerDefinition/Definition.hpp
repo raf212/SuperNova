@@ -1,7 +1,7 @@
 #pragma once
 #include "../../NeuromorphicTimeSpace/StorageManager/FabricAllocators.hpp"
 
-namespace BidirectionalInMemGraph 
+namespace BidirectionalInMemGraph :: ComputerDetail
 {
     class Computer;
 
@@ -326,29 +326,27 @@ namespace BidirectionalInMemGraph
     };
 
 
-}
+    using BackendC = ComputerDefAndVect::ComputerBackend;
+    using WorkTypeC = ComputerDefAndVect::ComputerWorkType;
+    using ErrorC = ComputerDefAndVect::ComputerError;
+    using ConfigC = ComputerDefAndVect::ComputerConf;
+    using ExecutionPolicyC = ComputerDefAndVect::ComputeExecutionPolicy;
+    using RuntimeInfoC = ComputerDefAndVect::ComputerRuntimeInfo;
+    using OptimizedPrimitivesC = ComputerDefAndVect::ComputerOptimizedPrimitives;
+    using PrimitiveResultC = ComputerDefAndVect::PrimitiveResult;
+    using MatMulSNDesc = ComputerDefAndVect::MatMulSNDesc;
+    using RowsDescSN = ComputerDefAndVect::RowsDescSN;
+    using RMSNormDescSN = ComputerDefAndVect::RMSNormDscSN;
+    using RMSNormDscSN = ComputerDefAndVect::RMSNormDscSN;
 
-namespace BidirectionalInMemGraph::ComputerDetail {
-using ComputerBackend = ComputerDefAndVect::ComputerBackend;
-using ComputerWorkType = ComputerDefAndVect::ComputerWorkType;
-using ComputerError = ComputerDefAndVect::ComputerError;
-using ComputerConfig = ComputerDefAndVect::ComputerConf;
-using ComputerExecutionPolicy = ComputerDefAndVect::ComputeExecutionPolicy;
-using ComputerRuntimeInfo = ComputerDefAndVect::ComputerRuntimeInfo;
-using ComputerOptimizedPrimitives = ComputerDefAndVect::ComputerOptimizedPrimitives;
-using PrimitiveResult = ComputerDefAndVect::PrimitiveResult;
-using MatMulSNDesc = ComputerDefAndVect::MatMulSNDesc;
-using RowsDescSN = ComputerDefAndVect::RowsDescSN;
-using RMSNormDescSN = ComputerDefAndVect::RMSNormDscSN;
-using RMSNormDscSN = ComputerDefAndVect::RMSNormDscSN;
-template<class T> concept ComputerScalar = ComputerScalarV<T>;
-template<class... Ts> using ComputerDefaultAccumulator = DefaultAccumulatorSN<Ts...>;
-template<class T> constexpr auto ComputerDataTypeOf() noexcept {
-    return ComputerDefAndVect::DataTypeOfSN<T>();
-}
-}
-namespace BidirectionalInMemGraph::ComputerDetail 
-{
+    
+    template<class T> using _Legion_ = SNTOComputerBridge<T>;
+    template<class T> concept ComputerScalar = ComputerScalarV<T>;
+    template<class... Ts> using DefaultAccumulatorC = DefaultAccumulatorSN<Ts...>;
+    template<class T> constexpr auto ComputerDataTypeOf() noexcept {
+        return ComputerDefAndVect::DataTypeOfSN<T>();
+    }
+
     template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
 
     template<class T> constexpr NumericRange<const T> ReadRange(const T* p, uint64_t count) noexcept 
