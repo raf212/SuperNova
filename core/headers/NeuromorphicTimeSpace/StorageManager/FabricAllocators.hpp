@@ -220,34 +220,6 @@ namespace BidirectionalInMemGraph
 
 }
 
-namespace BidirectionalInMemGraph::Numerics 
-{
-    using CFC = CoreOfFabricCoordinator;
-    class Replacement final
-    {
-    private:
-        SlabToFabricConverterAndCordinator& Self_;
-        PackedCellStorage Previous_;
-        NumericalBacking Numbers_;
-        CFC::FabricCache* Cache_;
-        CFC::FabricBackigOwnership Ownership_;
-        RawPackedCellAllocator Allocator_;
-        SchemaDefinition::RegionSchemaTable Schemas_;
-        bool Active_;
-        bool Track_;
-        uint64_t Revision_;
-        bool Complete_{false};
-    public:
-        explicit Replacement(SlabToFabricConverterAndCordinator&) noexcept;
-        Replacement(const Replacement&) = delete;
-        Replacement& operator = (const Replacement&) = delete;
-        ~Replacement();
-
-        uint64_t Revision() const noexcept {return Revision_;}
-        void Commit() noexcept {Complete_ = true;}
-    };
-}
-
 #if defined(SN_ACPP_ENABLED)
 namespace BidirectionalInMemGraph::ComputerDetail::Memory
 {
@@ -298,3 +270,76 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
     };
 }
 #endif
+
+namespace BidirectionalInMemGraph::Numerics 
+{
+    using CFC = CoreOfFabricCoordinator;
+    class Replacement final
+    {
+    private:
+        SlabToFabricConverterAndCordinator& Self_;
+        PackedCellStorage Previous_;
+        NumericalBacking Numbers_;
+        CFC::FabricCache* Cache_;
+        CFC::FabricBackigOwnership Ownership_;
+        RawPackedCellAllocator Allocator_;
+        SchemaDefinition::RegionSchemaTable Schemas_;
+        bool Active_;
+        bool Track_;
+        uint64_t Revision_;
+        bool Complete_{false};
+    public:
+        explicit Replacement(SlabToFabricConverterAndCordinator&) noexcept;
+        Replacement(const Replacement&) = delete;
+        Replacement& operator = (const Replacement&) = delete;
+        ~Replacement();
+
+        uint64_t Revision() const noexcept {return Revision_;}
+        void Commit() noexcept {Complete_ = true;}
+    };
+
+    template<class T>
+    struct NumericalRegionRef
+    {
+        uint64_t Epoch{};
+        uint64_t Index{LIMIT_OF_CELL_COUNT + 1u};
+
+        explicit operator bool() const noexcept 
+        {
+            return Index <= LIMIT_OF_CELL_COUNT;
+        }
+    };
+
+    template<class T>
+    struct NumericOperand
+    {
+        NumericalRegionRef<T> Region{};
+        uint32_t Row{ADS::APC_INDEX_BOUND_SENTINAL};
+        uint64_t Offset{};
+        uint64_t Count{};
+
+        explicit operator bool() const noexcept 
+        {
+            return Row <= ADS::APC_INDEX_BOUND_SENTINAL && Region;
+        }
+    };
+
+    template<class T>
+    struct NumericalMetrixOperand
+    {
+        NumericalRegionRef<T> Region{};
+        uint32_t FirstRow{ADS::APC_INDEX_BOUND_SENTINAL};
+        uint32_t Rows{ADS::APC_INDEX_BOUND_SENTINAL};
+        uint32_t FirstColumn{ADS::APC_INDEX_BOUND_SENTINAL};
+        uint32_t Columns{ADS::APC_INDEX_BOUND_SENTINAL};
+
+        explicit operator bool() const noexcept 
+        {
+            return Region && 
+                FirstRow != ADS::APC_INDEX_BOUND_SENTINAL &&
+                Rows != ADS::APC_INDEX_BOUND_SENTINAL &&
+                FirstColumn != ADS::APC_INDEX_BOUND_SENTINAL &&
+                Columns != ADS::APC_INDEX_BOUND_SENTINAL;
+        }
+    };
+}
