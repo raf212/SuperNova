@@ -28,7 +28,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         template<class> friend class DevicePlanDoubleBuffer;
         static_assert(std::is_trivially_copyable_v<DT> && !std::is_const_v<DT>);
     private:
-        std::shared_ptr<Runtime> Runtime_;
+        std::shared_ptr<RuntimeAcpp> Runtime_;
         DT* Data_{nullptr};
         uint64_t Count_{0};
         std::optional<sycl::event> Tail_{};
@@ -42,7 +42,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ) noexcept;
 
     public:
-        explicit ResidentDeviceRegion(std::shared_ptr<Runtime> runtime) noexcept :
+        explicit ResidentDeviceRegion(std::shared_ptr<RuntimeAcpp> runtime) noexcept :
             Runtime_(std::move(runtime))
         {}
         ResidentDeviceRegion(const ResidentDeviceRegion&) = delete;
@@ -148,7 +148,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         static constexpr uint8_t DOUBLE = 2u;
 
         static_assert(std::is_trivially_copyable_v<Record> && !std::is_const_v<Record>);
-        std::shared_ptr<Runtime> Runtime_;
+        std::shared_ptr<RuntimeAcpp> Runtime_;
         Record* Bank_[DOUBLE] {nullptr, nullptr};
         void* Stage_[DOUBLE] {nullptr, nullptr};
         bool HostUsm_[DOUBLE] {false, false};
@@ -168,7 +168,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         void Relese_() noexcept;
     public:
-        explicit DevicePlanDoubleBuffer(std::shared_ptr<Runtime> runtime) noexcept:
+        explicit DevicePlanDoubleBuffer(std::shared_ptr<RuntimeAcpp> runtime) noexcept:
             Runtime_(std::move(runtime))
         {}
         DevicePlanDoubleBuffer(const DevicePlanDoubleBuffer&) = delete;

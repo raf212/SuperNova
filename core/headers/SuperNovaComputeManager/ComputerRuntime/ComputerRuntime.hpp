@@ -7,7 +7,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     static constexpr uint64_t MAX_SLAB_CELLS = ADS::MAX_SLAB_CELLS;
 
 #if defined (SN_ACPP_ENABLED)
-    struct Runtime 
+    struct RuntimeAcpp 
     {
         using SEL = sycl::exception_list;
 
@@ -17,28 +17,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         sycl::queue ComputeQueue;
         sycl::queue ControlQueue;
 
-        explicit Runtime(sycl::device gpu) :
-            Gpu(gpu), 
-            Contex(Gpu),
-            ComputeQueue(
-                Contex, Gpu, [error = Failed](SEL list) noexcept{
-                    if (list.size()) 
-                    {
-                        error->store(true, std::memory_order_relaxed);
-                    }
-                },
-                sycl::property_list{sycl::property::queue::in_order{}}
-            ),
-            ControlQueue(
-                Contex, Gpu, [error = Failed](SEL list) noexcept{
-                    if (list.size()) 
-                    {
-                        error->store(true, std::memory_order_relaxed);
-                    }
-                },
-                sycl::property_list{sycl::property::queue::in_order{}}
-            )
-        {}
+        RuntimeAcpp(sycl::device gpu);
 
         bool Healthy() const noexcept
         {
@@ -50,47 +29,9 @@ namespace BidirectionalInMemGraph::ComputerDetail
             Failed->store(true, std::memory_order_relaxed);
         }
 
-        bool Wait(sycl::queue& queue) noexcept
-        {
-            try 
-            {
-                queue.wait_and_throw();
-                return Healthy();
-            }
-            catch(...)
-            {
-                MarkFaild();
-                try 
-                {
-                    queue.wait();
-                }
-                catch(...)
-                {
-                }
-                return false;
-            }
-        }
+        bool Wait(sycl::queue& queue) noexcept;
 
-        bool Wait(sycl::event& event) noexcept
-        {
-            try 
-            {
-                event.wait_and_throw();
-                return Healthy();
-            }
-            catch(...)
-            {
-                MarkFaild();
-                try 
-                {
-                    event.wait();
-                }
-                catch(...)
-                {
-                }
-                return false;
-            }
-        }
+        bool Wait(sycl::event& event) noexcept;
 
         // Completion and numerical health are distinct: async failure can
         // poison results even when every submitted command has completed.
@@ -102,7 +43,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return compute && control;
         }
 
-        ~Runtime() noexcept 
+        ~RuntimeAcpp() noexcept 
         {
             if (!Drain()) std::terminate();
         }
@@ -114,98 +55,56 @@ namespace BidirectionalInMemGraph::ComputerDetail
     class Device
     {
     private:
-
     #if defined (SN_ACPP_ENABLED)
-        std::shared_ptr<Runtime> Runtime_{};
+        std::shared_ptr<RuntimeAcpp> Runtime_{};
     #endif
-
         bool FP16_{false};
         bool FP64_{false};
         std::string Name_{};
-
     public:
         Device() noexcept = default;
         Device(const Device&) = delete;
         Device& operator = (const Device&) = delete;
 
-        void Reset()
-        {
-            (void)Sync();
-        #if defined (SN_ACPP_ENABLED)
-            Runtime_.reset();
-        #endif
-            FP16_ = FP64_ = false;
-            Name_.clear();
-        }
+        void Reset();
 
         bool ConfigureGPU() noexcept;
 
-        bool SyncComputeQ() noexcept
-        {
-        #if defined (SN_ACPP_ENABLED)
-            return !Runtime_ || Runtime_->Wait(Runtime_->ComputeQueue);
-        #else
-            return true;
-        #endif
-        }
+        bool SyncComputeQ() noexcept;
 
-        bool SyncControlQ() noexcept
-        {
-        #if defined (SN_ACPP_ENABLED)
-            return !Runtime_ || Runtime_->Wait(Runtime_->ControlQueue);
-        #else
-            return true;
-        #endif
-        }
+        bool SyncControlQ() noexcept;
 
-        bool Sync() noexcept
-        {
-            const bool compute = SyncComputeQ();
-            const bool control = SyncControlQ();
-            return compute && control;
-        }
+        bool Sync() noexcept;
 
-        bool Available() const noexcept
-        {
-        #if defined (SN_ACPP_ENABLED)
-            return static_cast<bool>(Runtime_);
-        #else
-            return false;
-        #endif
-        }
+        bool Available() const noexcept;
 
-        void MarkField() noexcept
-        {
-        #if defined (SN_ACPP_ENABLED)
-            if (Runtime_) 
-            {
-                Runtime_->MarkFaild();
-            }
-        #endif
-        }
+        void MarkField() noexcept;
 
         bool StagingAvailable() const noexcept;
 
-        bool NumericReady() const noexcept
-        {
-        #if defined (SN_ACPP_ENABLED)
-            return StagingAvailable() && Runtime_->Healthy();
-        #else
-            return false;
-        #endif
-        }
+        bool NumericReady() const noexcept;
+        
+        bool Drain() noexcept;
 
-        template<class DT>
-        static constexpr bool AtomicTypeSupport() noexcept
-        {
-            using U = std::remove_cv_t<DT>;
-            return (sizeof(U)== sizeof(uint32_t) || sizeof(U)== sizeof(uint64_t)) &&
-                (std::is_same_v<U,int> || std::is_same_v<U,unsigned int> ||
-                std::is_same_v<U,long> || std::is_same_v<U,unsigned long> ||
-                std::is_same_v<U,long long> || std::is_same_v<U,unsigned long long> ||
-                std::is_same_v<U,float> || std::is_same_v<U,double>);
-        }
+        bool SynchronizeCompute() noexcept {return SyncComputeQ();}
 
+        bool SynchronizeControl() noexcept {return SyncControlQ();}
+
+        bool Synchronize() noexcept {return Sync();}
+
+        const std::string& Name() const noexcept {return Name_;}
+
+    #if defined (SN_ACPP_ENABLED)
+        std::shared_ptr<RuntimeAcpp> RuntimeSharedPtr() const noexcept {return Runtime_;}
+
+        std::shared_ptr<RuntimeAcpp> AcquireRuntime() const noexcept {return Runtime_;}
+
+        sycl::queue* ControlQueuePtr() noexcept {return Runtime_ ? &Runtime_->ControlQueue : nullptr;}
+
+        sycl::queue* ComputeQueuePtr() noexcept {return Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
+
+        const sycl::queue* ComputeQueuePtr() const noexcept {return Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
+    #endif
         template<class DT>
         bool SupportsArithmeticType() const noexcept
         {
@@ -222,7 +121,6 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
             return true;
         }
-
 
         template<class DT> 
         bool SupportsDeviceAtomicRMW() const  noexcept
@@ -251,32 +149,6 @@ namespace BidirectionalInMemGraph::ComputerDetail
         #endif
             } else {return false;}
         }
-
-        bool Drain() noexcept
-        {
-        #if defined(SN_ACPP_ENABLED)
-            return !Runtime_ || Runtime_->Drain();
-        #else
-            return true;
-        #endif
-        }
-
-        bool SynchronizeCompute() noexcept {return SyncComputeQ();}
-        bool SynchronizeControl() noexcept {return SyncControlQ();}
-        bool Synchronize() noexcept {return Sync();}
-        template<class T> static constexpr bool AtomicTypeSupported() noexcept {return AtomicTypeSupport<T>();}
-        const std::string& Name() const noexcept {return Name_;}
-
-    #if defined (SN_ACPP_ENABLED)
-        std::shared_ptr<Runtime> RuntimeSharedPtr() const noexcept {return Runtime_;}
-        std::shared_ptr<Runtime> AcquireRuntime() const noexcept {return Runtime_;}
-
-        sycl::queue* ControlQueuePtr() noexcept {return Runtime_ ? &Runtime_->ControlQueue : nullptr;}
-
-        sycl::queue* ComputeQueuePtr() noexcept {return Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
-        const sycl::queue* ComputeQueuePtr() const noexcept {return Runtime_ ? &Runtime_->ComputeQueue : nullptr;}
-
-    #endif
     };
 
     struct Scheduler final

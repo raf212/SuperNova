@@ -9,7 +9,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         try 
         {
             sycl::device gpu = sycl::device{sycl::gpu_selector_v};
-            std::shared_ptr<Runtime> runtime = std::make_shared<Runtime>(gpu);
+            std::shared_ptr<RuntimeAcpp> runtime = std::make_shared<RuntimeAcpp>(gpu);
             FP16_ = gpu.has(sycl::aspect::fp16);
             FP64_ = gpu.has(sycl::aspect::fp64);
             Name_ = gpu.get_info<sycl::info::device::name>();

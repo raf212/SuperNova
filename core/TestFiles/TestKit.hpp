@@ -1373,8 +1373,8 @@ private:
 };
 
 // -----------------------------------------------------------------------------
-// Runtime APC/Fabric adapter used by performance Tests 1-3.
-// Runtime state is intentionally minimal: one typed ParentIDGeneration identity per node.
+// RuntimeAcpp APC/Fabric adapter used by performance Tests 1-3.
+// RuntimeAcpp state is intentionally minimal: one typed ParentIDGeneration identity per node.
 // APC bases are derived from slab geometry; no persistent APC facade, slot table,
 // raw-pointer table, or RegionView array is kept. Mutation timing therefore reaches
 // the production public AddParentByIdentity/RemoveParentByIdentity/ReplaceParentByIdentity

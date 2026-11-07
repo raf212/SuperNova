@@ -368,4 +368,15 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         };
     }
 
+    template<class DT>
+    static constexpr bool AtomicTypeSupport() noexcept
+    {
+        using U = std::remove_cv_t<DT>;
+        return (sizeof(U)== sizeof(uint32_t) || sizeof(U)== sizeof(uint64_t)) &&
+            (std::is_same_v<U,int> || std::is_same_v<U,unsigned int> ||
+            std::is_same_v<U,long> || std::is_same_v<U,unsigned long> ||
+            std::is_same_v<U,long long> || std::is_same_v<U,unsigned long long> ||
+            std::is_same_v<U,float> || std::is_same_v<U,double>);
+    }
+
 }
