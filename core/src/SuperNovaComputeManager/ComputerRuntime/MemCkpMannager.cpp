@@ -195,9 +195,16 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
     bool FabricCheckpoint::ReadBytes_(uint64_t offset, std::span<std::byte> output) const noexcept
     {
-        
+        try 
+        {
+            VerifyReader reader(*this);
+            return reader.Read(offset, output);
+        } 
+        catch (...) 
+        {
+            return false;
+        }
     }
-
 
     bool FabricCheckpoint::ReadCells(uint64_t first, std::span<uint64_t> cells) const noexcept
     {
@@ -255,6 +262,82 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             return false;
         }
     }
+
+    bool FabricCheckpoint::ValidateRegion_(const RegionRef& ref, VerifyReader& reader) const noexcept
+    {
+        try 
+        {
+            using SD = SchemaDefinition;
+            using HAS = HandleOfAPCStatic;
+
+            if (
+                !CCache_ || ref.Id != Identity() ||
+                ref.Slot >= CCache_->SlabCache_.CountOfAPC_ ||
+                !HAS::IsGenerationValid(ref.Generation)
+            ) 
+            {
+                return false;
+            }
+
+            HAS::StructuralHotRow row{};
+            const uint64_t handle_byte = (CCache_->SlabCache_.HandleTableBeginIndex_ + 
+                (uint64_t{ref.Slot} * HAS::HANDLE_TABLE_WIDTH)) * BYTES_PER_CELL;
+
+            if (
+                !reader.Read(
+                    handle_byte, 
+                    std::as_writable_bytes(std::span{&row, size_t{1}})
+                ) ||
+                row.LifeCycle.State != StateOfAPC::LIVE
+            ) 
+            {
+                return false;
+            }
+
+            HAS::ControlValues generation = HAS::ReadControlCell(row.GenerationControl);
+            if (
+                generation.Generation != ref.Generation ||
+                !generation.Closed || generation.ActiveAccess
+            )
+            {
+                return false;
+            }
+
+            const std::optional<uint8_t> index_r = ADS::CompactRegionIndex(
+                CCache_->SlabCache_.ActiveRegionMask_, ref.Column
+            );
+            if (!index_r.has_value()) return false;
+
+            SD::RegionSchemaRecord schema{};
+            const uint64_t schema_byte = (CCache_->SlabCache_.MatrixViewTableBeginIndex_ +
+                uint64_t{ref.Slot} * CCache_->SlabCache_.MatrixViewRowCellCount_
+            ) * BYTES_PER_CELL + (uint64_t{*index_r} * sizeof(schema));
+
+            if (
+                !reader.Read(schema_byte, std::as_writable_bytes(std::span{&schema, size_t{1}})) ||
+                schema.Region != ref.Column ||
+                schema.Protocol != SD::SchemaProtocols::PRIVATE_REGION ||
+                schema.Dtype != ref.Type ||
+                schema.MatrixHeight != ref.Height ||
+                schema.MatrixWidth != ref.Width ||
+                SD::ValidateStortedRegionSchema(
+                    schema, CCache_->SlabCache_.PerAPCRuntimeCellCount_, 
+                    CCache_->SlabCache_.MatrixBatchCapacity_
+                )
+            )
+            {
+                return false;
+            }
+
+            uint64_t bytes{};
+            uint32_t cells{};
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
 
     // bool FabricCheckpoint::Validate(const RegionRef r_ref) const noexcept;
 
