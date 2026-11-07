@@ -28,4 +28,15 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         virtual void* DevicePtr() noexcept = 0;
     };
+
+    template<class T>
+    struct T_NumericResidencyVirtual
+    {
+        std::optional<SNTOComputerBridge<T>> Pin_{};
+        std::vector<T> DiskStorage_{};
+
+    #if defined (SN_ACPP_ENABLED)
+        std::unique_ptr<ResidentDeviceRegion<T>> Allocation_{};
+    #endif
+    };
 }
