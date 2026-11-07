@@ -263,7 +263,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     }
 
 
-    std::optional<RegionRef> ReadReferanceField(const std::filesystem::path& path) noexcept
+    static std::optional<RegionRef> ReadReferanceField(const std::filesystem::path& path) noexcept
     {
         using RF = IV::ReferanceField;
         using SD = SchemaDefinition;
@@ -307,4 +307,41 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             return std::nullopt;
         }
     }
+
+    static bool WriteReferenceField(const std::filesystem::path& path, const RegionRef& ref) noexcept
+    {
+        try 
+        {
+            std::ofstream output(path, (std::ios::binary | std::ios::trunc));
+            if (!output) return false;
+
+            const std::array<uint64_t, IV::REFERANCE_CELL_COUNT> fields{
+                ref.Id.High,
+                ref.Id.Low,
+                ref.ByteOffset,
+                ref.ByteCount,
+                ref.Slot,
+                ref.RecordOrdinal,
+                static_cast<uint64_t>(ref.Column),
+                static_cast<uint64_t>(ref.Type),
+                ref.Height,
+                ref.Width,
+                IV::FILE_VERSION
+            };
+
+            for (uint64_t f : fields) 
+            {
+                if (!WritePageHeaderCells(output, f)) return false;
+            }
+
+            output.flush();
+            return static_cast<bool>(output);
+        }
+        catch (...)
+        {
+            return false;
+        }
+
+    }
+    
 }
