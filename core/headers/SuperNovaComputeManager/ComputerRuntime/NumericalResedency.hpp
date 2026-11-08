@@ -4,7 +4,7 @@
 
 namespace BidirectionalInMemGraph::ComputerDetail 
 {
-    struct NumericResidencyVirtual
+    struct VirtualResidency
     {
         CheckpointFormat::RegionRef LogicalRef_{};
         void* Host_{};
@@ -17,7 +17,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         uint64_t DiskRevision{};
         uint64_t DiskFingerPrint{};
 
-        virtual ~NumericResidencyVirtual() = default;
+        virtual ~VirtualResidency() = default;
         virtual void Unpin() noexcept = 0;
 
         virtual bool EnsureDevice(Device&, TransferStatics&) noexcept = 0;
@@ -27,10 +27,13 @@ namespace BidirectionalInMemGraph::ComputerDetail
         virtual bool Download(TransferStatics&) noexcept = 0;
 
         virtual void* DevicePtr() noexcept = 0;
+
+    protected:
+        virtual size_t UnitCount_() const noexcept = 0;
     };
 
     template<class T>
-    struct T_NumericResidencyVirtual
+    struct T_NumericResidency final : VirtualResidency
     {
         std::optional<SNTOComputerBridge<T>> Pin_{};
         std::vector<T> DiskStorage_{};
@@ -38,5 +41,27 @@ namespace BidirectionalInMemGraph::ComputerDetail
     #if defined (SN_ACPP_ENABLED)
         std::unique_ptr<ResidentDeviceRegion<T>> Allocation_{};
     #endif
+        
+        bool EnsureDevice(Device& device, TransferStatics& stats) noexcept;
+
+        bool Upload(TransferStatics& stats) noexcept;
+
+        bool Download(TransferStatics& stats) noexcept;
+
+        void* DevicePtr() noexcept;
+
+    protected:
+        size_t UnitCount_() const noexcept
+        {
+            return this->LogicalRef_.ByteCount / sizeof(T);
+        }
+    };
+
+
+    class NumericResidency final
+    {
+        std::vector<std::unique_ptr<VirtualResidency>> Records_{};
+        std::vector<size_t> Active_{};
+        
     };
 }

@@ -1,15 +1,6 @@
 #pragma once 
 #include "ConstructAndVerify.hpp"
 
-
-#if defined(SUPERNOVA_ENABLE_ADAPTIVECPP) && !defined(SN_ACPP_ENABLED)
-#define SN_ACPP_ENABLED
-#endif
-
-#if defined (SN_ACPP_ENABLED)
-    #include <sycl/sycl.hpp>
-#endif
-
 namespace BidirectionalInMemGraph
 {
     struct RawPackedCellAllocator final

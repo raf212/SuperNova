@@ -1,5 +1,5 @@
 #pragma once
-#include "ComputerRuntime/DeviceResources.hpp"
+#include "ComputerRuntime/NumericalResedency.hpp"
 
 namespace BidirectionalInMemGraph::ComputerDetail
 {
