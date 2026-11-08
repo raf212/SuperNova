@@ -90,8 +90,14 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         TransferStatics Statistics() const noexcept {return Stats_;}
 
-        // UNDEFINED
+        ///@brief Current implimentation dosent chack device memory size
         bool SetCacheBudget(uint64_t bytes) noexcept;
+
+        void CommitMappings() noexcept;
+
+        bool PublishResidency(Device& device, uint64_t stamp) noexcept;
+        // UNDEFINED
+
 
         bool Begin(BackendC backend) noexcept;
 

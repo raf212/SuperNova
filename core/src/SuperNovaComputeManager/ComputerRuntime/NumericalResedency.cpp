@@ -101,6 +101,52 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return used <= CacheBudget_ - bytes;
     }
 
+    bool NumericResidency::SetCacheBudget(uint64_t bytes) noexcept
+    {
+        if (Active() || UnpublishedWrites_ ||
+            !Empty() || bytes == UNSIGNED_ZERO
+        ) 
+        {
+            return false;
+        }
+        CacheBudget_ = bytes;
+        return true;
+    }
+
+    bool NumericResidency::Begin(BackendC backend) noexcept
+    {
+        if (Active() || Failed_) return false;
+        uint64_t id = NextEpoch_.load(std::memory_order_acquire);
+        do 
+        {
+            if (id == UINT64_MAX) return false;
+        }
+        while (!NextEpoch_.compare_exchange_strong(id, id +1, std::memory_order_acq_rel, std::memory_order_release));
+        CurEpoch_.store(id, std::memory_order_release);
+        Backend_ = backend;
+        Active_.clear();
+        return true;
+    }
+
+    void NumericResidency::CommitMappings() noexcept
+    {
+        for (const size_t idx : Active_) 
+        {
+            VirtualResidency& vr = *Records_[idx];
+            if (!vr.Pending_) continue;
+
+            ++vr.Version_.CommittedRevision;
+            UnpublishedWrites_ = true;
+            vr.Version_.HostRevision = vr.Version_.CommittedRevision;
+            vr.Version_.Location = (Backend_ == BackendC::GPU) ? 
+                MemoryLocation::GPU : MemoryLocation::HOST;
+            vr.Pending_ = false;
+        }
+    }
+
+
+
+
 
     // template<class T>
     // std::optional<NR<const T>> NumericResidency::RegisterDisk(
