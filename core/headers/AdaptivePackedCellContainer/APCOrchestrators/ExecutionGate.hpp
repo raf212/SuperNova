@@ -148,13 +148,13 @@ namespace BidirectionalInMemGraph
 
     class HostSession final
     {
-        ReadLease Pin_{};
+        ReadLease PinT{};
         FabricExecutionGate* Previous_{nullptr};
     public:
         explicit HostSession(FabricExecutionGate& gate) noexcept
-            : Pin_(gate.TryRead()), Previous_(FabricExecutionGate::ActiveHostSession_)
+            : PinT(gate.TryRead()), Previous_(FabricExecutionGate::ActiveHostSession_)
         {
-            if (Pin_) FabricExecutionGate::ActiveHostSession_ = &gate;
+            if (PinT) FabricExecutionGate::ActiveHostSession_ = &gate;
         }
         HostSession(const HostSession&) = delete;
         HostSession& operator=(const HostSession&) = delete;
@@ -162,13 +162,13 @@ namespace BidirectionalInMemGraph
         HostSession& operator=(HostSession&&) = delete;
         ~HostSession() noexcept
         {
-            if (Pin_)
+            if (PinT)
             {
                 FabricExecutionGate::ActiveHostSession_ = Previous_;
-                Pin_.Reset();
+                PinT.Reset();
             }
         }
-        explicit operator bool() const noexcept { return static_cast<bool>(Pin_); }
+        explicit operator bool() const noexcept { return static_cast<bool>(PinT); }
     };
 
 }

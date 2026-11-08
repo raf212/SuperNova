@@ -6,7 +6,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     bool T_NumericResidency<T>::EnsureDevice(Device& device, TransferStatics& stats) noexcept
     {
 #if defined (SN_ACPP_ENABLED)
-        if (Allocation_) return true;
+        if (Allocation) return true;
         try 
         {
             auto alloc_u_ptr = std::make_unique<ResidentDeviceRegion<T>>(device.AcquireRuntime());
@@ -14,7 +14,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             {
                 return false;
             }
-            Allocation_ = std::move(alloc_u_ptr);
+            Allocation = std::move(alloc_u_ptr);
             ++stats.Allocation;
             return true;
         }
@@ -32,12 +32,12 @@ namespace BidirectionalInMemGraph::ComputerDetail
     bool T_NumericResidency<T>::Upload(TransferStatics& stats) noexcept
     {
 #if defined (SN_ACPP_ENABLED)
-        std::optional<sycl::event> evnt = Allocation_->Download({
+        std::optional<sycl::event> evnt = Allocation->Download({
             static_cast<T*>(this->Host),
             UnitCount_()
         });
 
-        if (!evnt.has_value() || !Allocation_->Wait()) 
+        if (!evnt.has_value() || !Allocation->Wait()) 
         {
             return false;
         }
@@ -53,12 +53,12 @@ namespace BidirectionalInMemGraph::ComputerDetail
     bool T_NumericResidency<T>::Download(TransferStatics& stats) noexcept
     {
 #if defined (SN_ACPP_ENABLED)
-        std::optional<sycl::event> evnt = Allocation_->Download({
+        std::optional<sycl::event> evnt = Allocation->Download({
             static_cast<T*>(this->Host),
             UnitCount_()
         });
 
-        if (!evnt.has_value() || !Allocation_->Wait()) 
+        if (!evnt.has_value() || !Allocation->Wait()) 
         {
             return false;
         }
@@ -75,7 +75,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     void* T_NumericResidency<T>::DevicePtr() noexcept
     {
 #if defined (SN_ACPP_ENABLED)
-        return  Allocation_ ? Allocation_->Data() : nullptr;
+        return  Allocation ? Allocation->Data() : nullptr;
 #else
         return nullptr;
 #endif
@@ -85,6 +85,9 @@ namespace BidirectionalInMemGraph::ComputerDetail
 namespace BidirectionalInMemGraph::ComputerDetail 
 {
     namespace CMF = CheckpointFormat;
+    static constexpr unsigned Init_HC_Revision = 1u;
+    static constexpr unsigned Init_Device_Revision = UNSIGNED_ZERO;
+
 
     template<class T>
     using NR = Numerics::NumericalRegionRef<T>;
@@ -227,6 +230,135 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return true;
     }
 
+    template<class T>
+    std::optional<NR<const T>> NumericResidency::RegisterRegion(
+        Device& device,
+        SNTOComputerBridge<T>&& region,
+        const FabricRuntimeBinding& binding
+    ) noexcept
+    {
+        static_assert(ComputerScalarV<T> && !std::is_const_v<T>);
+
+        std::optional<std::span<T>> span = region.RawSpan();
+        std::optional<CDV::CDT> type = CDV::DataTypeOfSN<T>();
+
+        if (!Active() || Failed_ || !span.has_value() || !type.has_value() || span->empty()) 
+        {
+            return std::nullopt;
+        }
+
+        const std::optional<uint64_t> logical_offset = binding.LogicalByteOffset(
+            span->data(), span->size_bytes()
+        );
+        if (!logical_offset) return std::nullopt;
+
+        const uint64_t offset = *logical_offset;
+        CMF::RegionRef key
+        {
+            binding.Id,
+            offset,
+            span->size_bytes(),
+            region.Slot(),
+            region.Generation(),
+            region.RecordOrdinal(),
+            region.Height(),
+            region.CapacityWidth(),
+            region.Column(),
+            *type
+        };
+
+        for (const size_t idx : Active_) 
+        {
+            VirtualResidency& vr = *Records_[idx];
+            if (Memory::RangesOverlap(
+                vr.Host, vr.LogicalRef.ByteCount, 
+                span->data(), span->size_bytes()
+            )) 
+            {
+                return std::nullopt;
+            }
+        }
+
+        try 
+        {
+            size_t idx = UNSIGNED_ZERO;
+            for (; idx < Records_.size(); idx++)
+            {
+                if (
+                    !Records_[idx]->ReadOnly &&
+                    Records_[idx]->LogicalRef == key
+                ) 
+                {
+                    break;
+                }
+            }
+
+            if (idx == Records_.size()) 
+            {
+                if (!Reserve_(key.ByteCount)) return std::nullopt;
+                std::unique_ptr<T_NumericResidency<T>> rp = std::make_unique<T_NumericResidency<T>>();
+                rp->LogicalRef = key;
+                rp->Version = {
+                    Init_HC_Revision,
+                    Init_HC_Revision,
+                    Init_Device_Revision,
+                    MemoryLocation::HOST
+                };
+                Records_.push_back(std::move(rp));
+            }
+            else 
+            {
+                ++Stats_.CacheHits;
+            }
+
+            T_NumericResidency<T>* entry = static_cast<T_NumericResidency<T>*>(Records_[idx].get());
+            entry->Host = span->data();
+            entry->ActiveWidth = region.ActiveWidth();
+            if (
+                !entry->Pinned &&
+                entry->Stamp != binding.Gate->HostStamp()
+            ) 
+            {
+                if (entry->Version.Location == MemoryLocation::GPU) return std::nullopt;
+                ++entry->Version.CommittedRevision;
+                entry->Version.HostRevision = entry->Version.CommittedRevision;
+            }
+
+            entry->PinT.emplace(std::move(region));
+            entry->Pinned = true;
+            if (Backend_ == BackendC::GPU) 
+            {
+                if (!entry->EnsureDevice(device, Stats_)) 
+                {
+                    Failed_ = true;
+                    return std::nullopt;
+                }
+            }
+            else if (entry->Version.HostRevision != entry->Version.CommittedRevision) 
+            {
+                if (!entry->Download(Stats_)) 
+                {
+                    Failed_ = true;
+                    return std::nullopt;
+                }
+
+                entry->Version.HostRevision = entry->Version.CommittedRevision;
+                entry->Version.Location = MemoryLocation::HOST;
+            }
+
+            entry->Stamp = binding.Gate->HostStamp();
+            Active_.push_back(idx);
+            return Numerics::NumericalRegionRef<T>{
+                CurEpoch_.load(std::memory_order_acquire),
+                (Active_.size() - 1)
+            };
+
+        } catch (...) {
+            Failed_ = true;
+            return std::nullopt;
+        }
+
+    }
 
     template<class T>
     std::optional<NR<const T>> NumericResidency::RegisterDisk(
@@ -234,10 +366,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         const CheckpointFormat::FabricCheckpoint& image,
         const CheckpointFormat::RegionRef& ref
     ) noexcept
-    {
-        static constexpr unsigned Init_HC_Revision = 1u;
-        static constexpr unsigned Init_Device_Revision = UNSIGNED_ZERO;
-        
+    {   
         std::optional<CDV::CDT> type = CDV::DataTypeOfSN<T>();
         if (
             !Active() || Failed_ || !type.has_value() ||
@@ -278,16 +407,16 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 entry->ReadOnly = true;
                 entry->DiskRevision = image.Revision();
                 entry->DiskFingerPrint = image.Fingerprint();
-                entry->DiskStorage_.resize(entry->UnitCount_());
+                entry->DiskStorage.resize(entry->UnitCount_());
 
                 if (!image.ReadExtent(ref, UNSIGNED_ZERO, std::as_writable_bytes(
-                    std::span{entry->DiskStorage_}
+                    std::span{entry->DiskStorage}
                 ))) 
                 {
                     return std::nullopt;
                 }
 
-                entry->Host = entry->DiskStorage_.data();
+                entry->Host = entry->DiskStorage.data();
                 entry->Version = {
                     Init_HC_Revision, Init_HC_Revision, 
                     Init_Device_Revision, MemoryLocation::HOST

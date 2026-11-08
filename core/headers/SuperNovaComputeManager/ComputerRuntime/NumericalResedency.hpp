@@ -35,11 +35,11 @@ namespace BidirectionalInMemGraph::ComputerDetail
     template<class T>
     struct T_NumericResidency final : VirtualResidency
     {
-        std::optional<SNTOComputerBridge<T>> Pin_{};
-        std::vector<T> DiskStorage_{};
+        std::optional<SNTOComputerBridge<T>> PinT{};
+        std::vector<T> DiskStorage{};
 
     #if defined (SN_ACPP_ENABLED)
-        std::unique_ptr<ResidentDeviceRegion<T>> Allocation_{};
+        std::unique_ptr<ResidentDeviceRegion<T>> Allocation{};
     #endif
         
         bool EnsureDevice(Device& device, TransferStatics& stats) noexcept;
