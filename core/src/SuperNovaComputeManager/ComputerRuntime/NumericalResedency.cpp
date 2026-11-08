@@ -33,7 +33,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     {
 #if defined (SN_ACPP_ENABLED)
         std::optional<sycl::event> evnt = Allocation_->Download({
-            static_cast<T*>(this->Host_),
+            static_cast<T*>(this->Host),
             UnitCount_()
         });
 
@@ -41,7 +41,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         {
             return false;
         }
-        stats.UploadedBytes += this->LogicalRef_.ByteCount;
+        stats.UploadedBytes += this->LogicalRef.ByteCount;
         return true;
 #else
         (void) stats;
@@ -54,7 +54,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     {
 #if defined (SN_ACPP_ENABLED)
         std::optional<sycl::event> evnt = Allocation_->Download({
-            static_cast<T*>(this->Host_),
+            static_cast<T*>(this->Host),
             UnitCount_()
         });
 
@@ -63,7 +63,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return false;
         }
 
-        stats.DownloadedfBytes += this->LogicalRef_.ByteCount;
+        stats.DownloadedfBytes += this->LogicalRef.ByteCount;
         return true;
 #else
         (void) stats;
@@ -96,7 +96,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         for (std::unique_ptr<VirtualResidency>& rp : Records_) 
         {
-            used += rp->LogicalRef_.ByteCount;
+            used += rp->LogicalRef.ByteCount;
         }
         return used <= CacheBudget_ - bytes;
     }
@@ -133,19 +133,99 @@ namespace BidirectionalInMemGraph::ComputerDetail
         for (const size_t idx : Active_) 
         {
             VirtualResidency& vr = *Records_[idx];
-            if (!vr.Pending_) continue;
+            if (!vr.Pending) continue;
 
-            ++vr.Version_.CommittedRevision;
+            ++vr.Version.CommittedRevision;
             UnpublishedWrites_ = true;
-            vr.Version_.HostRevision = vr.Version_.CommittedRevision;
-            vr.Version_.Location = (Backend_ == BackendC::GPU) ? 
+            vr.Version.HostRevision = vr.Version.CommittedRevision;
+            vr.Version.Location = (Backend_ == BackendC::GPU) ? 
                 MemoryLocation::GPU : MemoryLocation::HOST;
-            vr.Pending_ = false;
+            vr.Pending = false;
         }
     }
 
+    bool NumericResidency::PublishResidency(Device& device, uint64_t stamp) noexcept
+    {
+        if (Failed_ || !device.Sync()) return false;
+        for (std::unique_ptr<VirtualResidency>& rp : Records_) 
+        {
+            VirtualResidency& vr = *rp;
+            if (!vr.Pinned) continue;
+
+            if (
+                vr.Version.Location == MemoryLocation::GPU &&
+                vr.Version.HostRevision != vr.Version.CommittedRevision
+            ) 
+            {
+                if (!vr.Download(Stats_)) 
+                {
+                    Failed_ = true;
+                    return false;
+                }
+                vr.Version.HostRevision = vr.Version.CommittedRevision;
+            }
+            vr.Version.Location = MemoryLocation::HOST;
+            vr.Stamp = stamp;
+            vr.Unpin();
+        }
+        UnpublishedWrites_ = false;
+        return true;
+    }
+
+    bool NumericResidency::Finish(Device& device, bool publish, uint64_t stamp) noexcept
+    {
+        if (!Active()) return true;
+        if (Failed_ || !device.Sync()) 
+        {
+            Failed_ = true;
+            return false;
+        }
+
+        if (publish && !PublishResidency(device, stamp)) 
+        {
+            return false;
+        }
+        Active_.clear();
+        CurEpoch_.store(UNSIGNED_ZERO, std::memory_order_release);
+        return true;
+    }
 
 
+    bool NumericResidency::Dirty() const noexcept
+    {
+        if (UnpublishedWrites_) return true;
+        for (const std::unique_ptr<VirtualResidency>& rp : Records_) 
+        {
+            if (rp->Pending) return true;
+        }
+        return false;
+    }
+
+    bool NumericResidency::Discard(Device& device) noexcept
+    {
+        if (!device.Drain()) return false;
+        Records_.clear();
+        Active_.clear();
+        CurEpoch_.store(UNSIGNED_ZERO, std::memory_order_release);
+        Failed_ = false;
+        return true;
+    }
+
+    bool NumericResidency::EvictRegion(Device& device, const CheckpointFormat::RegionRef& ref) noexcept
+    {
+        if (Active() || !device.Drain()) return false;
+        for (auto i = Records_.begin(); i != Records_.end(); i++) 
+        {
+            if ((*i)->LogicalRef != ref) continue;
+            if ((*i)->Pinned || (*i)->Version.Location == MemoryLocation::GPU)
+            {
+                return false;
+            }
+            Records_.erase(i);
+            return true;
+        }
+        return true;
+    }
 
 
     // template<class T>

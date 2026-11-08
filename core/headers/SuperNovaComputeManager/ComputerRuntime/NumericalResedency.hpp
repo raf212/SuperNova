@@ -6,12 +6,12 @@ namespace BidirectionalInMemGraph::ComputerDetail
 {
     struct VirtualResidency
     {
-        CheckpointFormat::RegionRef LogicalRef_{};
-        void* Host_{};
-        ResidencyInfo Version_{};
-        uint64_t Stamp_{};
-        uint32_t ActiveWidth_{};
-        bool Pending_{false};
+        CheckpointFormat::RegionRef LogicalRef{};
+        void* Host{};
+        ResidencyInfo Version{};
+        uint64_t Stamp{};
+        uint32_t ActiveWidth{};
+        bool Pending{false};
         bool Pinned{false};
         bool ReadOnly{false};
         uint64_t DiskRevision{};
@@ -53,7 +53,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     protected:
         size_t UnitCount_() const noexcept
         {
-            return this->LogicalRef_.ByteCount / sizeof(T);
+            return this->LogicalRef.ByteCount / sizeof(T);
         }
     };
 
@@ -96,10 +96,24 @@ namespace BidirectionalInMemGraph::ComputerDetail
         void CommitMappings() noexcept;
 
         bool PublishResidency(Device& device, uint64_t stamp) noexcept;
-        // UNDEFINED
 
+        bool Finish(Device& device, bool publish, uint64_t stamp) noexcept;
+
+        bool Dirty() const noexcept;
+
+        bool Discard(Device& device) noexcept;
 
         bool Begin(BackendC backend) noexcept;
+
+        bool EvictRegion(Device& device, const CheckpointFormat::RegionRef& ref) noexcept;
+
+        ///UNDEFINED
+        template<class T>
+        std::optional<NR<const T>> RegisterRegion(
+            Device& device,
+            SNTOComputerBridge<T>&& region,
+            const FabricRuntimeBinding& binding
+        ) noexcept;
 
         template<class T>
         std::optional<NR<const T>> RegisterDisk(

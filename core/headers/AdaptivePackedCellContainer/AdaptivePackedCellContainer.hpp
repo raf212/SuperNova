@@ -153,7 +153,7 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
             Cache cache{};
             cache.Data_ = reinterpret_cast<DT*>(resolved.Bytes.data());
             cache.Height_ = resolved.Schema->MatrixHeight;
-            cache.ActiveWidth_ = resolved.Schema->MatrixWidth;
+            cache.ActiveWidth = resolved.Schema->MatrixWidth;
             cache.CapacityWidth_ = resolved.Schema->MatrixWidth;
             cache.Slot_ = APCCache_.APCSlotIdx_;
             cache.Generation_ = APCCache_.CurrentGeneration_;
