@@ -268,4 +268,4 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
 }
 
-#include "../templates/SuperNovaComputeManager/DeviceResources.tpp"
+#include "../../../templates/SuperNovaComputeManager/DeviceResources.tpp"

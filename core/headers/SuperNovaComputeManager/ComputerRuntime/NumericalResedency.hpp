@@ -123,3 +123,5 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     };
 }
+
+#include "../../../templates/SuperNovaComputeManager/NumericalResedency.tpp"
