@@ -60,6 +60,9 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     class NumericResidency final
     {
+        template<class T>
+        using NR = Numerics::NumericalRegionRef<T>;
+
         std::vector<std::unique_ptr<VirtualResidency>> Records_{};
         std::vector<size_t> Active_{};
         uint64_t CacheBudget_{PER_REGION_DEVICE_CACHE_IN_MB * MB_TO_BYTE_MULTIPLYER};
@@ -84,5 +87,20 @@ namespace BidirectionalInMemGraph::ComputerDetail
         void SetFail() noexcept {Failed_ = true;}
 
         bool Empty() const noexcept {return Records_.empty();}
+
+        TransferStatics Statistics() const noexcept {return Stats_;}
+
+        // UNDEFINED
+        bool SetCacheBudget(uint64_t bytes) noexcept;
+
+        bool Begin(BackendC backend) noexcept;
+
+        template<class T>
+        std::optional<NR<const T>> RegisterDisk(
+            Device& device,
+            const CheckpointFormat::FabricCheckpoint& image,
+            const CheckpointFormat::RegionRef& ref
+        ) noexcept;
+
     };
 }

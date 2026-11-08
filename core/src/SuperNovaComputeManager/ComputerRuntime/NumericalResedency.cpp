@@ -81,3 +81,34 @@ namespace BidirectionalInMemGraph::ComputerDetail
 #endif
     }
 }
+
+namespace BidirectionalInMemGraph::ComputerDetail 
+{
+    namespace CMF = CheckpointFormat;
+
+    template<class T>
+    using NR = Numerics::NumericalRegionRef<T>;
+
+    bool NumericResidency::Reserve_(uint64_t bytes) noexcept
+    {
+        if (bytes > CacheBudget_) return false;
+        uint64_t used = UNSIGNED_ZERO;
+
+        for (std::unique_ptr<VirtualResidency>& rp : Records_) 
+        {
+            used += rp->LogicalRef_.ByteCount;
+        }
+        return used <= CacheBudget_ - bytes;
+    }
+
+
+    // template<class T>
+    // std::optional<NR<const T>> NumericResidency::RegisterDisk(
+    //     Device& device,
+    //     const CheckpointFormat::FabricCheckpoint& image,
+    //     const CheckpointFormat::RegionRef& ref
+    // ) noexcept
+    // {
+        
+    // }
+}
