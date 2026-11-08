@@ -343,9 +343,11 @@ namespace BidirectionalInMemGraph :: ComputerDetail
     template<class T> using _Legion_ = SNTOComputerBridge<T>;
     template<class T> concept ComputerScalar = ComputerScalarV<T>;
     template<class... Ts> using DefaultAccumulatorC = DefaultAccumulatorSN<Ts...>;
-    template<class T> constexpr auto ComputerDataTypeOf() noexcept {
-        return ComputerDefAndVect::DataTypeOfSN<T>();
-    }
+    // template<class T> constexpr 
+    // std::optional<ComputerDefAndVect::CDT> ComputerDataTypeOf() noexcept 
+    // {
+    //     return ComputerDefAndVect::DataTypeOfSN<T>();
+    // }
 
     template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
 

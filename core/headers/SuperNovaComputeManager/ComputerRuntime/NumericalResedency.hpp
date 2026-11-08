@@ -107,7 +107,6 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool EvictRegion(Device& device, const CheckpointFormat::RegionRef& ref) noexcept;
 
-        ///UNDEFINED
         template<class T>
         std::optional<NR<const T>> RegisterRegion(
             Device& device,

@@ -228,13 +228,107 @@ namespace BidirectionalInMemGraph::ComputerDetail
     }
 
 
-    // template<class T>
-    // std::optional<NR<const T>> NumericResidency::RegisterDisk(
-    //     Device& device,
-    //     const CheckpointFormat::FabricCheckpoint& image,
-    //     const CheckpointFormat::RegionRef& ref
-    // ) noexcept
-    // {
+    template<class T>
+    std::optional<NR<const T>> NumericResidency::RegisterDisk(
+        Device& device,
+        const CheckpointFormat::FabricCheckpoint& image,
+        const CheckpointFormat::RegionRef& ref
+    ) noexcept
+    {
+        static constexpr unsigned Init_HC_Revision = 1u;
+        static constexpr unsigned Init_Device_Revision = UNSIGNED_ZERO;
         
-    // }
+        std::optional<CDV::CDT> type = CDV::DataTypeOfSN<T>();
+        if (
+            !Active() || Failed_ || !type.has_value() ||
+            type.value() != ref.Type ||
+            ref.ByteCount % sizeof(T) != UNSIGNED_ZERO
+        ) 
+        {
+            return std::nullopt;
+        }
+
+        try 
+        {
+            size_t idx = 0;
+            for (; idx < Records_.size(); idx++) 
+            {
+                if (
+                    Records_[idx]->ReadOnly && 
+                    Records_[idx]->LogicalRef == ref &&
+                    Records_[idx]->DiskRevision == image.Revision() &&
+                    Records_[idx]->DiskFingerPrint == image.Fingerprint()
+                ) 
+                {
+                    break;
+                }
+            }
+
+            for (const size_t a : Active_) 
+            {
+                if (a == idx) return std::nullopt;
+            }
+
+            if (idx == Records_.size()) 
+            {
+                if (!Reserve_(ref.ByteCount)) return std::nullopt;
+
+                std::unique_ptr<T_NumericResidency<T>> entry = std::make_unique<T_NumericResidency<T>>();
+                entry->LogicalRef = ref;
+                entry->ReadOnly = true;
+                entry->DiskRevision = image.Revision();
+                entry->DiskFingerPrint = image.Fingerprint();
+                entry->DiskStorage_.resize(entry->UnitCount_());
+
+                if (!image.ReadExtent(ref, UNSIGNED_ZERO, std::as_writable_bytes(
+                    std::span{entry->DiskStorage_}
+                ))) 
+                {
+                    return std::nullopt;
+                }
+
+                entry->Host = entry->DiskStorage_.data();
+                entry->Version = {
+                    Init_HC_Revision, Init_HC_Revision, 
+                    Init_Device_Revision, MemoryLocation::HOST
+                };
+                entry->ActiveWidth = ref.Width;
+                Records_.pop_back(std::move(entry));
+            }
+            else 
+            {
+                if (!image.Validate(ref)) return std::nullopt;
+                ++Stats_.CacheHits;
+            }
+
+            VirtualResidency& vr = *Records_[idx];
+            vr.Pinned = true;
+            if (Backend_ == BackendC::GPU) 
+            {
+                if (
+                    !vr.EnsureDevice(device, Stats_) ||
+                    (
+                        vr.Version.DeviceRevision != vr.Version.CommittedRevision &&
+                        !vr.Upload(Stats_)
+                    )
+                ) 
+                {
+                    Failed_ = true;
+                    return std::nullopt;
+                }
+                vr.Version.DeviceRevision = vr.Version.CommittedRevision;
+            }
+            Active_.push_back(idx);
+
+            return Numerics::NumericalRegionRef<class T>{
+                CurEpoch_.load(std::memory_order_acquire),
+                (Active_.size() - 1)
+            };
+        }
+        catch (...)
+        {
+            Failed_ = true;
+            return std::nullopt;
+        }
+    }
 }
