@@ -4,7 +4,9 @@
 /// WORK - MEMORY - COMPUTER 
 namespace BidirectionalInMemGraph::ComputerDetail
 {
-
+    //Later It can be optimized based on runtime availavlity
+    static constexpr unsigned PER_REGION_DEVICE_CACHE_IN_MB = 256u;
+    static constexpr unsigned MB_TO_BYTE_MULTIPLYER = 1024 * 1024;
     enum class MemoryLocation : uint8_t
     {
         HOST = 0,

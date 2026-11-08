@@ -62,6 +62,27 @@ namespace BidirectionalInMemGraph::ComputerDetail
     {
         std::vector<std::unique_ptr<VirtualResidency>> Records_{};
         std::vector<size_t> Active_{};
-        
+        uint64_t CacheBudget_{PER_REGION_DEVICE_CACHE_IN_MB * MB_TO_BYTE_MULTIPLYER};
+        inline static std::atomic<uint64_t> NextEpoch_{1};
+        std::atomic<uint64_t> CurEpoch_{0};
+        BackendC Backend_{BackendC::CPU};
+        bool Failed_{false};
+        bool UnpublishedWrites_{false};
+        TransferStatics Stats_{};
+
+        bool Reserve_(uint64_t bytes) noexcept;
+
+    public: 
+        bool Active() const noexcept {return CurEpoch_ != UNSIGNED_ZERO;}
+
+        bool Faild() const noexcept {return Failed_;}
+
+        bool UnpublishedWrites() const noexcept {return UnpublishedWrites_;}
+
+        BackendC Backend() const noexcept {return Backend_;}
+
+        void SetFail() noexcept {Failed_ = true;}
+
+        bool Empty() const noexcept {return Records_.empty();}
     };
 }
