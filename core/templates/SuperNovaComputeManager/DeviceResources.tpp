@@ -1,4 +1,5 @@
-#include <SuperNova>
+#pragma once
+
 #if defined (SN_ACPP_ENABLED)
 namespace BidirectionalInMemGraph::ComputerDetail 
 {
