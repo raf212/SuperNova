@@ -306,7 +306,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
             Active_.push_back(idx);
 
-            return Numerics::NumericalRegionRef<class T>{
+            return Numerics::NumericalRegionRef<T>{
                 CurEpoch_.load(std::memory_order_acquire),
                 (Active_.size() - 1)
             };
@@ -387,7 +387,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
 
     template<class T>
-    WindowInfo<VirtualResidency> NumericResidency::FindActiveRange(
+    WindowInfo<VirtualResidency> NumericResidency::FindActiveRange_(
         const T* host,
         uint64_t count
     ) const noexcept
@@ -437,7 +437,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         OpenAccess access
     ) noexcept
     {
-        WindowInfo<VirtualResidency> info = FindActiveRange(host, count);
+        WindowInfo<VirtualResidency> info = FindActiveRange_(host, count);
         if (!info) return nullptr;
         if constexpr (std::is_const_v<T>) 
         {

@@ -74,6 +74,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     {
         template<class T>
         using NR = Numerics::NumericalRegionRef<T>;
+        using RR = CheckpointFormat::RegionRef;
         ///vrp means VirtualResidency pointer of an entry
 
         std::vector<std::unique_ptr<VirtualResidency>> Records_{};
@@ -98,7 +99,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ) noexcept;
 
         template<class T>
-        WindowInfo<VirtualResidency> FindActiveRange(
+        WindowInfo<VirtualResidency> FindActiveRange_(
             const T* host,
             uint64_t count
         ) const noexcept;
@@ -133,7 +134,9 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool Begin(BackendC backend) noexcept;
 
-        bool EvictRegion(Device& device, const CheckpointFormat::RegionRef& ref) noexcept;
+        bool EvictRegion(Device& device, const RR& ref) noexcept;
+        
+        std::optional<ResidencyInfo> InspectResidency(const RR& ref) const noexcept;
 
         template<class T>
         std::optional<NR<const T>> RegisterRegion(
@@ -146,7 +149,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         std::optional<NR<const T>> RegisterDisk(
             Device& device,
             const CheckpointFormat::FabricCheckpoint& image,
-            const CheckpointFormat::RegionRef& ref
+            const RR& ref
         ) noexcept;
 
         template<class T>
@@ -162,6 +165,50 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 OpenAccess::READ : OpenAccess::READ_WRITE
         ) noexcept;
 
+        template<class T>
+        std::optional<RR> Reference(NR<T> ref) noexcept
+        {
+            VirtualResidency* vr = Find(ref);
+            return vr ? std::optional<RR>(vr->LogicalRef) :
+                std::nullopt;
+        }
+
+        template<class T>
+        WindowInfo<T> HostMatrix(Numerics::NumericalMetrixOperand<T> matrix) noexcept
+        {
+            return ResolveWindow_(
+                matrix.Region, matrix.FirstRow, matrix.Rows,
+                matrix.FirstColumn, matrix.Columns
+            );
+        }
+
+        template<class T>
+        T* HostOperand(Numerics::NumericOperand<T> op) noexcept
+        {
+            return ResolveWindow_(
+                op.Region, op.FirstRow, op.Rows,
+                op.FirstColumn, op.Columns
+            ).DataPtr;
+        }
+
+        template<class T>
+        bool Contains(const T* host, uint64_t count) const noexcept
+        {
+            return FindActiveRange_(host, count) != nullptr;
+        }
+
+        void CancelMapping() noexcept
+        {
+            for (const size_t idx : Active_) 
+            {
+                Records_[idx]->Pending = false;
+            }
+        }
+
+        bool Evict(Device& device) noexcept
+        {
+            return !Active() && Discard(device);
+        }
     };
 }
 

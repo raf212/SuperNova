@@ -140,4 +140,13 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return true;
     }
 
+    std::optional<ResidencyInfo> NumericResidency::InspectResidency(const RR& ref) const noexcept
+    {
+        for (const std::unique_ptr<VirtualResidency>& vrpa : Records_) 
+        {
+            if (vrpa->LogicalRef == ref) return vrpa->Version;
+        }
+        return {};
+    }
+
 }
