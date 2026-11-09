@@ -193,6 +193,31 @@ namespace BidirectionalInMemGraph::ComputerDetail::Memory
         return true;
     }
 
+    static constexpr std::optional<size_t> StrideElementCount(uint32_t rows, uint32_t columns, uint32_t stride) noexcept
+    {
+        if (
+            rows == UNSIGNED_ZERO ||
+            columns == UNSIGNED_ZERO ||
+            stride < columns
+        ) 
+        {
+            return std::nullopt;
+        }
+
+        const size_t row_offset = static_cast<size_t>(rows - 1);
+        if (row_offset > SIZE_MAX / static_cast<size_t>(stride)) 
+        {
+            return std::nullopt;
+        }
+
+        const size_t base = row_offset * static_cast<size_t>(stride);
+        if (base > (SIZE_MAX - static_cast<size_t>(stride))) 
+        {
+            return std::nullopt;
+        }
+
+        return base + static_cast<size_t>(columns);
+    }
 
 }
 
