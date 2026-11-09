@@ -28,8 +28,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         virtual void* DevicePtr() noexcept = 0;
 
-    protected:
-        virtual size_t UnitCount_() const noexcept = 0;
+        virtual size_t UnitCount() const noexcept = 0;
     };
 
     template<class T>
@@ -50,8 +49,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         void* DevicePtr() noexcept;
 
-    protected:
-        size_t UnitCount_() const noexcept
+        size_t UnitCount() const noexcept
         {
             return this->LogicalRef.ByteCount / sizeof(T);
         }
@@ -61,12 +59,12 @@ namespace BidirectionalInMemGraph::ComputerDetail
     template<class T>
     struct WindowInfo
     {
-        T* Data{nullptr};
+        T* DataPtr{nullptr};
         uint32_t Stride{ADS::APC_INDEX_BOUND_SENTINAL};
 
         explicit operator bool () const noexcept
         {
-            return Data != nullptr &&
+            return DataPtr != nullptr &&
                 Stride < ADS::APC_INDEX_BOUND_SENTINAL;
         }
     };
@@ -76,6 +74,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     {
         template<class T>
         using NR = Numerics::NumericalRegionRef<T>;
+        ///vrp means VirtualResidency pointer of an entry
 
         std::vector<std::unique_ptr<VirtualResidency>> Records_{};
         std::vector<size_t> Active_{};
@@ -99,7 +98,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ) noexcept;
 
         template<class T>
-        std::pair<VirtualResidency*, uint64_t> FindActiveRange(
+        WindowInfo<VirtualResidency> FindActiveRange(
             const T* host,
             uint64_t count
         ) const noexcept;

@@ -16,7 +16,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         try 
         {
             auto alloc_u_ptr = std::make_unique<ResidentDeviceRegion<T>>(device.AcquireRuntime());
-            if (!alloc_u_ptr->Allocate(UnitCount_())) 
+            if (!alloc_u_ptr->Allocate(UnitCount())) 
             {
                 return false;
             }
@@ -40,7 +40,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 #if defined (SN_ACPP_ENABLED)
         std::optional<sycl::event> evnt = Allocation->Download({
             static_cast<T*>(this->Host),
-            UnitCount_()
+            UnitCount()
         });
 
         if (!evnt.has_value() || !Allocation->Wait()) 
@@ -61,7 +61,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 #if defined (SN_ACPP_ENABLED)
         std::optional<sycl::event> evnt = Allocation->Download({
             static_cast<T*>(this->Host),
-            UnitCount_()
+            UnitCount()
         });
 
         if (!evnt.has_value() || !Allocation->Wait()) 
@@ -264,7 +264,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 entry->ReadOnly = true;
                 entry->DiskRevision = image.Revision();
                 entry->DiskFingerPrint = image.Fingerprint();
-                entry->DiskStorage.resize(entry->UnitCount_());
+                entry->DiskStorage.resize(entry->UnitCount());
 
                 if (!image.ReadExtent(ref, UNSIGNED_ZERO, std::as_writable_bytes(
                     std::span{entry->DiskStorage}
@@ -372,6 +372,107 @@ namespace BidirectionalInMemGraph::ComputerDetail
             static_cast<T*>(vrp->Host) + offset,
             vrp->LogicalRef.Width
         };
+    }
+
+    template<class T>
+    std::span<T> NumericResidency::Row(NR<T> ref, uint32_t row) noexcept
+    {
+        VirtualResidency* vrp = Find(ref);
+        if (!vrp) return {};
+
+        WindowInfo<T> info = ResolveWindow_(ref, row, 1, UNSIGNED_ZERO, vrp->ActiveWidth);
+        
+        return info ? std::span<T>{info.DataPtr, vrp->ActiveWidth} : std::span<T>{};
+    }
+
+
+    template<class T>
+    WindowInfo<VirtualResidency> NumericResidency::FindActiveRange(
+        const T* host,
+        uint64_t count
+    ) const noexcept
+    {
+        const std::optional<uint64_t> bytes = Memory::ByteCount<T>(count);
+        std::optional<CDV::CDT> type = CDV::DataTypeOfSN<T>();
+        if (
+            !Active() || Failed_ || !host ||
+            count == UNSIGNED_ZERO ||
+            !bytes.has_value() ||
+            !type.has_value()
+        ) 
+        {
+            return {};
+        }
+
+        const uintptr_t address = reinterpret_cast<uintptr_t>(host);
+        for (const size_t idx  : Active_) 
+        {
+            VirtualResidency& vr = *Records_[idx];
+            const std::uintptr_t begin = reinterpret_cast<uintptr_t>(vr.Host);
+            if (
+                address < begin ||
+                type.value() != vr.LogicalRef.Type
+            ) 
+            {
+                continue;
+            }
+
+            const uint64_t offset = (address - begin);
+            if (
+                offset <= vr.LogicalRef.ByteCount &&
+                bytes.value() <= (vr.LogicalRef.ByteCount - offset)
+            ) 
+            {
+                return {&vr, offset};
+            }
+        }
+
+        return {};
+    }
+
+    template<class T>
+    T* NumericResidency::Map(
+        const T* host, 
+        uint64_t count,
+        OpenAccess access
+    ) noexcept
+    {
+        WindowInfo<VirtualResidency> info = FindActiveRange(host, count);
+        if (!info) return nullptr;
+        if constexpr (std::is_const_v<T>) 
+        {
+            if (access != OpenAccess::READ) return nullptr;
+        }
+        const bool overwrite_all = access == OpenAccess::WRITE &&
+            info.Stride == UNSIGNED_ZERO && count == info.DataPtr->UnitCount();
+
+        if (
+            Backend_ == BackendC::GPU &&
+            !overwrite_all &&
+            info.DataPtr->DiskRevision != info.DataPtr->Version.CommittedRevision
+        ) 
+        {
+            if (
+                info.DataPtr->Version.HostRevision != info.DataPtr->Version.CommittedRevision ||
+                !info.DataPtr->Upload(Stats_)
+            ) 
+            {
+                Failed_ = true;
+                return nullptr;
+            }
+            info.DataPtr->Version.DeviceRevision = info.DataPtr->Version.CommittedRevision;
+        }
+
+        if (access != OpenAccess::READ) info.DataPtr->Pending = true;
+
+        if(Backend_ == BackendC::GPU)
+        {
+            return reinterpret_cast<T*>(
+                static_cast<std::byte*>(info.DataPtr->DevicePtr()) + 
+                info.Stride
+            );
+        }
+        return host;
     }
 
 }
