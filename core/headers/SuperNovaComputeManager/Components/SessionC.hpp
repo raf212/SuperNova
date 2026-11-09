@@ -7,6 +7,8 @@ namespace BidirectionalInMemGraph::ComputerDetail
     class SessionCompute 
     {
     private:
+        using FabricId = CheckpointFormat::FabricId;
+
         friend class RegionCompute;
         friend class ArithmeticCompute;
         friend class CheckpointCompute;
@@ -75,13 +77,81 @@ namespace BidirectionalInMemGraph::ComputerDetail
         SessionCompute& operator = (const SessionCompute&) = delete;
         ~SessionCompute() noexcept
         {
-            if (!Close() || !DiscardNumericEpoch()) 
+            if (!Close() || !DiscardEpoch()) 
             {
                 std::terminate();
             }
         }
+
+        ///FUNCTIONS
+        bool BindFabric(APCFinilizer& owner, FabricId id = {}) noexcept;
+
+        bool BindFabric(FabricRuntimeBinding binding) noexcept;
+
+        bool BindNumericStorage(
+            std::span<uint64_t> cells, 
+            FabricExecutionGate& gate, 
+            FabricId id ={}
+        ) noexcept;
+
+        bool ReleseNumericalStorage() noexcept;
+
+        void NotifyExternalWrite() noexcept;
+
+        FabricId Identity() const noexcept;
+
+        bool SetRegisteredRegionBudget(uint64_t bytes) noexcept;
+
+        TransferStatics TransferStats() const noexcept;
+
+        std::optional<ResidencyInfo> InspectResidency(const CheckpointFormat::RegionRef& ref) const noexcept;
+
+        bool SessionActive() const noexcept;
+
+        bool BeginSession(size_t work, ExecutionPolicyC policy = {}, ExclusiveLease lease = {}) const noexcept;
+
+        bool EndSession() noexcept;
+
         bool Close() noexcept;
 
-        bool DiscardNumericEpoch() noexcept;
+        bool NumericEpochActive() noexcept;
+
+        bool BeginEpoch(size_t expected_work, ExecutionPolicyC policy = {}, ExclusiveLease lease = {}) noexcept;
+
+        bool EndEpoch(uint64_t* published_stamp = nullptr) noexcept;
+
+        bool DiscardEpoch() noexcept;
+
+        bool RecoveryRequired() noexcept;
+
+        bool Prepare() const noexcept;
+
+        bool Configure(const ConfigC& config) noexcept;
+
+        void SetOptimizedPremetives(const OptimizedPrimitivesC& premitive) noexcept;
+
+        OptimizedPrimitivesC GetOptimizedPremetives() const noexcept;
+
+        bool Syncronize() noexcept;
+
+        ConfigC GetConfig() const noexcept;
+
+        ErrorC LastError() const noexcept;
+
+        bool SyncCompute() noexcept;
+
+        bool SyncControl() noexcept;
+
+        RuntimeInfoC GetRuntimeInfo() const noexcept;
+
+    #if defined (SN_ACPP_ENABLED)
+
+        template<class T>
+        std::unique_ptr<ResidentDeviceRegion<T>> CtrateResidentRegion(size_t count) noexcept;
+
+        template<class Record>
+        std::unique_ptr<DevicePlanDoubleBuffer<Record>> CreateDevicePlan(size_t capacity) noexcept;
+    #endif
+
     };
 }
