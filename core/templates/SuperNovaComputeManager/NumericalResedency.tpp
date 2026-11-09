@@ -38,7 +38,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     bool T_NumericResidency<T>::Upload(TransferStatics& stats) noexcept
     {
 #if defined (SN_ACPP_ENABLED)
-        std::optional<sycl::event> evnt = Allocation->Download({
+        std::optional<sycl::event> evnt = Allocation->PrepareStage({
             static_cast<T*>(this->Host),
             UnitCount()
         });
@@ -88,7 +88,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     }
 
     template<class T>
-    std::optional<NR<const T>> NumericResidency::RegisterRegion(
+    std::optional<NR<T>> NumericResidency::RegisterRegion(
         Device& device,
         SNTOComputerBridge<T>&& region,
         const FabricRuntimeBinding& binding
@@ -279,7 +279,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                     Init_Device_Revision, MemoryLocation::HOST
                 };
                 entry->ActiveWidth = ref.Width;
-                Records_.pop_back(std::move(entry));
+                Records_.push_back(std::move(entry));
             }
             else 
             {
@@ -306,7 +306,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
             Active_.push_back(idx);
 
-            return Numerics::NumericalRegionRef<T>{
+            return Numerics::NumericalRegionRef<const T>{
                 CurEpoch_.load(std::memory_order_acquire),
                 (Active_.size() - 1)
             };
@@ -351,7 +351,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return WindowInfo<T>{};
         }
 
-        if constexpr (std::is_const_v<T>) 
+        if constexpr (!std::is_const_v<T>) 
         {
             if (vrp->ReadOnly) return WindowInfo<T>{};
         }
@@ -432,7 +432,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     template<class T>
     T* NumericResidency::Map(
-        const T* host, 
+        T* host, 
         uint64_t count,
         OpenAccess access
     ) noexcept
@@ -449,7 +449,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         if (
             Backend_ == BackendC::GPU &&
             !overwrite_all &&
-            info.DataPtr->DiskRevision != info.DataPtr->Version.CommittedRevision
+            info.DataPtr->Version.DeviceRevision != info.DataPtr->Version.CommittedRevision
         ) 
         {
             if (

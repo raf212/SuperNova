@@ -53,6 +53,12 @@ namespace BidirectionalInMemGraph::ComputerDetail
         {
             return this->LogicalRef.ByteCount / sizeof(T);
         }
+
+        void Unpin() noexcept override 
+        {
+            PinT.reset();
+            this->Pinned = false;
+        }
     };
 
 
@@ -60,12 +66,11 @@ namespace BidirectionalInMemGraph::ComputerDetail
     struct WindowInfo
     {
         T* DataPtr{nullptr};
-        uint32_t Stride{ADS::APC_INDEX_BOUND_SENTINAL};
+        uint64_t Stride{};
 
         explicit operator bool () const noexcept
         {
-            return DataPtr != nullptr &&
-                Stride < ADS::APC_INDEX_BOUND_SENTINAL;
+            return DataPtr != nullptr;
         }
     };
 
@@ -139,7 +144,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         std::optional<ResidencyInfo> InspectResidency(const RR& ref) const noexcept;
 
         template<class T>
-        std::optional<NR<const T>> RegisterRegion(
+        std::optional<NR<T>> RegisterRegion(
             Device& device,
             SNTOComputerBridge<T>&& region,
             const FabricRuntimeBinding& binding
@@ -160,7 +165,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         template<class T>
         T* Map(
-            const T* host, uint64_t count,
+            T* host, uint64_t count,
             OpenAccess access = std::is_const_v<T>() ? 
                 OpenAccess::READ : OpenAccess::READ_WRITE
         ) noexcept;
@@ -186,15 +191,15 @@ namespace BidirectionalInMemGraph::ComputerDetail
         T* HostOperand(Numerics::NumericOperand<T> op) noexcept
         {
             return ResolveWindow_(
-                op.Region, op.FirstRow, op.Rows,
-                op.FirstColumn, op.Columns
+                op.Region, op.FirstRow, 1,
+                op.Offset, op.Count
             ).DataPtr;
         }
 
         template<class T>
         bool Contains(const T* host, uint64_t count) const noexcept
         {
-            return FindActiveRange_(host, count) != nullptr;
+            return static_cast<bool>(FindActiveRange_(host, count));
         }
 
         void CancelMapping() noexcept
