@@ -34,7 +34,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         void SetError_(ErrorC error) noexcept;
 
-        void ClearError_() noexcept;
+        void ClearError_() noexcept {SetError_(ErrorC::NONE);}
 
         ReadLease AdmitNumeric_() noexcept;
 
@@ -42,11 +42,11 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool EnsureConfigured_() noexcept;
 
-        uint64_t SlabCellCount_() noexcept;
+        uint64_t SlabCellCount_() noexcept {return Binding_.NumericalCells().size();}
 
         BackendC Resolve_(size_t work_units, const ExecutionPolicyC& policy) noexcept; 
 
-        bool ValidateBackend_(BackendC backend, const ExecutionPolicyC& policy) noexcept;
+        bool ValidateResolvedBackend_(BackendC backend, const ExecutionPolicyC& policy) noexcept;
 
     //Functions - Template
         template<class... Ts>
@@ -69,8 +69,8 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     public:
         using SD = SchemaDefinition;
-        template<class T>
-        using RegionT = SNTOComputerBridge<T>;
+        // template<class T>
+        // using RegionT = SNTOComputerBridge<T>;
 
         SessionCompute() noexcept = default;
         SessionCompute(const SessionCompute&) = delete;
