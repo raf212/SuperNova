@@ -2,7 +2,6 @@
 
 // ============================================================
 // C++ STANDARD LIBRARY (core runtime, storage, numerical code)
-// Includes are centralized by project convention.
 // ============================================================
 #include <algorithm>
 #include <array>
@@ -42,6 +41,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <tuple>
 
 // ============================================================
 // WINDOWS (only when compiling for Windows)

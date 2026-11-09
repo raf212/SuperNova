@@ -1,5 +1,5 @@
 #pragma once
-#include "../ComputerDefinition/CheckpointAccessDefinition.hpp"
+#include "../Definition/CheckpointAccessDefinition.hpp"
 
 
 namespace BidirectionalInMemGraph::CheckpointFormat 
