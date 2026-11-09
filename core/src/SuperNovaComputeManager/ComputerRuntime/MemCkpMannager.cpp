@@ -30,7 +30,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
 
         auto HashPageMatches___ = [&]() noexcept -> bool
         {
-            return PageHash({Page_.data(), PageLength_}) != Image_.CCache_->Hashes_[page];
+            return PageHash({Page_.data(), PageLength_}) == Image_.CCache_->Hashes_[page];
         };
         if (!HashPageMatches___()) return false;
         if (RStatics_) ++RStatics_->PageReads;
@@ -95,6 +95,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
                 (PageLength_ - within), (output.size() - copied) 
             );
             std::copy_n((Page_.data() + within), count, (output.data() + copied));
+            copied += count;
         }
         return true;
     }
@@ -210,7 +211,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
     {
         if (
             !CCache_ || first > CellCountFromHeader() ||
-            cells.size() > CellCountFromHeader()
+            cells.size() > (CellCountFromHeader() - first)
         ) 
         {
             return false;
@@ -241,7 +242,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         uint64_t relative,
         std::span<std::byte> destination,
         ReadStatistics* read_static
-    ) noexcept
+    ) const noexcept
     {
         if (
             relative > ref.ByteCount ||
@@ -320,7 +321,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
                 schema.Dtype != ref.Type ||
                 schema.MatrixHeight != ref.Height ||
                 schema.MatrixWidth != ref.Width ||
-                SD::ValidateStortedRegionSchema(
+                !SD::ValidateStortedRegionSchema(
                     schema, CCache_->SlabCache_.PerAPCRuntimeCellCount_, 
                     CCache_->SlabCache_.MatrixBatchCapacity_
                 )

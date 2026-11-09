@@ -57,8 +57,8 @@ namespace BidirectionalInMemGraph::CheckpointFormat
         FabricId Identity() const noexcept
         {
             return {
-                HeaderValue_(PageHeader::FABRICLOW),
-                HeaderValue_(PageHeader::FABRICLOW)
+                HeaderValue_(PageHeader::FABRIC_HIGH),
+                HeaderValue_(PageHeader::FABRIC_LOW)
             };
         }
 
@@ -92,7 +92,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             uint64_t relative,
             std::span<std::byte> destination,
             ReadStatistics* read_static = nullptr
-        ) noexcept;
+        ) const noexcept;
     };
 
 }

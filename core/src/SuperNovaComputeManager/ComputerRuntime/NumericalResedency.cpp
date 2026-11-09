@@ -34,7 +34,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         {
             if (id == UINT64_MAX) return false;
         }
-        while (!NextEpoch_.compare_exchange_strong(id, id +1, std::memory_order_acq_rel, std::memory_order_release));
+        while (!NextEpoch_.compare_exchange_strong(id, id +1, std::memory_order_acq_rel, std::memory_order_acquire));
         CurEpoch_.store(id, std::memory_order_release);
         Backend_ = backend;
         Active_.clear();
@@ -50,7 +50,14 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
             ++vr.Version.CommittedRevision;
             UnpublishedWrites_ = true;
-            vr.Version.HostRevision = vr.Version.CommittedRevision;
+            if (Backend_ == BackendC::GPU) 
+            {
+                vr.Version.DeviceRevision = vr.Version.CommittedRevision;
+            }
+            else 
+            {
+                vr.Version.HostRevision = vr.Version.CommittedRevision;
+            }
             vr.Version.Location = (Backend_ == BackendC::GPU) ? 
                 MemoryLocation::GPU : MemoryLocation::HOST;
             vr.Pending = false;
@@ -121,6 +128,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         Active_.clear();
         CurEpoch_.store(UNSIGNED_ZERO, std::memory_order_release);
         Failed_ = false;
+        UnpublishedWrites_ = false;
         return true;
     }
 
