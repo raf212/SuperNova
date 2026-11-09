@@ -255,17 +255,6 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         typename ComputerDefAndVect::SmallScalarPromotion<std::remove_cv_t<Ts>>::Type...
     >;
 
-    //POST DEFINATION OF FLOAT16 when Acpp
-#if defined (SN_ACPP_ENABLED)
-    template<>
-    inline constexpr std::optional<SchemaValidator::DataTypeOfMacroColumn>
-    SchemaValidator::CppTypeToRegionDType<sycl::half>() noexcept
-    {
-        return SchemaValidator::DataTypeOfMacroColumn::FLOAT16_T;
-    }
-#endif
-    //
-
     struct ComputerMath
     {
         template<ComputerFloating DT>
@@ -381,4 +370,18 @@ namespace BidirectionalInMemGraph :: ComputerDetail
             std::is_same_v<U,float> || std::is_same_v<U,double>);
     }
 
+}
+
+namespace BidirectionalInMemGraph 
+{
+    //POST DEFINATION OF FLOAT16 when Acpp
+#if defined (SN_ACPP_ENABLED)
+    template<>
+    inline constexpr std::optional<SchemaValidator::DataTypeOfMacroColumn>
+    SchemaValidator::CppTypeToRegionDType<sycl::half>() noexcept
+    {
+        return SchemaValidator::DataTypeOfMacroColumn::FLOAT16_T;
+    }
+#endif
+    //
 }

@@ -57,7 +57,7 @@ namespace BidirectionalInMemGraph::CheckpointFormat
             }
 
             const uint64_t directory_bytes = pages * IV::BYTES_PER_CELL + meta_data.size();
-            const uint64_t payload_offset = IV::HEADER_BYTES * directory_bytes;
+            const uint64_t payload_offset = IV::HEADER_BYTES + directory_bytes;
             if (total_bytes > (UINT64_MAX - payload_offset)) return false;
 
             uint64_t directory_hash = IV::FnvOffsetBasis;
