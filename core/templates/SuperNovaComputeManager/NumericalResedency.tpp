@@ -317,4 +317,61 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return std::nullopt;
         }
     }
+
+    template<class T>
+    VirtualResidency* NumericResidency::Find(NR<T> ref) noexcept
+    {
+        if (
+            !Active() || Failed_ || ref.Epoch != CurEpoch_ ||
+            ref.Index >= Active_.size()
+        )
+        {
+            return nullptr;
+        }
+
+        VirtualResidency* vrp = Records_[Active_[ref.Index]].get();
+        std::optional<CDV::CDT> type = CDV::DataTypeOfSN<T>();
+
+        return type.has_value() && 
+            type.value() == vrp->LogicalRef.Type ? vrp : nullptr;
+    }
+
+    template<class T>
+    WindowInfo<T> NumericResidency::ResolveWindow_(
+        NR<T> ref,
+        uint32_t first_row,
+        uint32_t rows,
+        uint64_t first_column,
+        uint64_t columns
+    ) noexcept
+    {
+        VirtualResidency* vrp = Find(ref);
+        if (!vrp || rows == UNSIGNED_ZERO || columns == UNSIGNED_ZERO) 
+        {
+            return WindowInfo<T>{};
+        }
+
+        if constexpr (std::is_const_v<T>) 
+        {
+            if (vrp->ReadOnly) return WindowInfo<T>{};
+        }
+
+        if (
+            first_row >= vrp->LogicalRef.Height ||
+            rows > (vrp->LogicalRef.Height - first_row) ||
+            first_column > vrp->ActiveWidth ||
+            columns > (vrp->ActiveWidth - first_column)
+        ) 
+        {
+            return WindowInfo<T>{};
+        }
+
+        const uint64_t offset = (uint64_t{first_row} * vrp->LogicalRef.Width) + first_column;
+
+        return {
+            static_cast<T*>(vrp->Host) + offset,
+            vrp->LogicalRef.Width
+        };
+    }
+
 }

@@ -58,6 +58,20 @@ namespace BidirectionalInMemGraph::ComputerDetail
     };
 
 
+    template<class T>
+    struct WindowInfo
+    {
+        T* Data{nullptr};
+        uint32_t Stride{ADS::APC_INDEX_BOUND_SENTINAL};
+
+        explicit operator bool () const noexcept
+        {
+            return Data != nullptr &&
+                Stride < ADS::APC_INDEX_BOUND_SENTINAL;
+        }
+    };
+
+
     class NumericResidency final
     {
         template<class T>
@@ -74,6 +88,21 @@ namespace BidirectionalInMemGraph::ComputerDetail
         TransferStatics Stats_{};
 
         bool Reserve_(uint64_t bytes) noexcept;
+
+        template<class T>
+        WindowInfo<T> ResolveWindow_(
+            NR<T> ref,
+            uint32_t first_row,
+            uint32_t rows,
+            uint64_t first_column,
+            uint64_t columns
+        ) noexcept;
+
+        template<class T>
+        std::pair<VirtualResidency*, uint64_t> FindActiveRange(
+            const T* host,
+            uint64_t count
+        ) const noexcept;
 
     public: 
         bool Active() const noexcept {return CurEpoch_ != UNSIGNED_ZERO;}
@@ -119,6 +148,19 @@ namespace BidirectionalInMemGraph::ComputerDetail
             Device& device,
             const CheckpointFormat::FabricCheckpoint& image,
             const CheckpointFormat::RegionRef& ref
+        ) noexcept;
+
+        template<class T>
+        VirtualResidency* Find(NR<T> ref) noexcept;
+
+        template<class T>
+        std::span<T> Row(NR<T> ref, uint32_t row) noexcept;
+
+        template<class T>
+        T* Map(
+            const T* host, uint64_t count,
+            OpenAccess access = std::is_const_v<T>() ? 
+                OpenAccess::READ : OpenAccess::READ_WRITE
         ) noexcept;
 
     };
