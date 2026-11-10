@@ -255,4 +255,73 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return true;
     }
 
+    bool SessionCompute::EndSession() noexcept
+    {
+        if (!Session_) return EndEpoch();
+        if (!OwnsEpoch_() || EpochActive()) return false;
+        if (Residency_.UnpublishedWrites()) 
+        {
+            NumericGate_().NotifyHostChange();
+        }
+        if (!Residency_.PublishResidency(Device_, NumericGate_().HostStamp())) 
+        {
+            NumericGate_().Poison();
+            return false;
+        }
+        Session_ = false;
+        EpochLease_.Reset();
+        return true;
+    }
+
+    bool SessionCompute::BeginEpoch(size_t expected_work, ExecutionPolicyC policy, ExclusiveLease lease) noexcept
+    {
+        if (!lease || !Session_) 
+        {
+            lease = NumericGate_().TryEpoch();
+        }
+        
+        if (lease && !lease.Owns(NumericGate_())) return false;
+        if (
+            (!lease && !Session_) ||
+            (Session_ && !OwnsEpoch_()) ||
+            Residency_.Active() || !NumericalBase_() || !EnsureConfigured()
+        ) 
+        {
+            return false;
+        }
+
+        const BackendC backend = Session_ ? SessionBackend_ : Resolve_(expected_work, policy);
+        if (!ValidateResolvedBackend_(backend, policy)) return false;
+        if (!Session_) EpochLease_ = std::move(lease);
+        return true;
+    }
+
+    bool SessionCompute::EndEpoch(uint64_t* published_stamp) noexcept
+    {
+        if (
+            (Residency_.Active() || Session_) &&
+            OwnsEpoch_()
+        ) 
+        {   
+            return false;
+        }
+
+        if (!Session_ && Residency_.Active() && Residency_.UnpublishedWrites()) 
+        {
+            NumericGate_().NotifyHostChange();
+        }
+
+        if (!Residency_.Finish(Device_, !Session_, NumericGate_().HostStamp())) 
+        {
+            NumericGate_().Poison();
+            SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+            return false;
+        }
+
+        if (published_stamp) *published_stamp = NumericGate_().HostStamp();
+        if (!Session_) EpochLease_.Reset();
+        ClearError_();
+        return true;
+    }
+
 }

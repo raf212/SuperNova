@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool Close() noexcept;
 
-        bool NumericEpochActive() noexcept;
+        bool EpochActive() noexcept {return Residency_.Active();}
 
         bool BeginEpoch(size_t expected_work, ExecutionPolicyC policy = {}, ExclusiveLease lease = {}) noexcept;
 
