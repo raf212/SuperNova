@@ -136,11 +136,11 @@ namespace BidirectionalInMemGraph::ComputerDetail
                         operation(begin + static_cast<size_t>(id[0]));
                     }
                 );
-                return device.Sync();
+                return device.Synchronize();
             }
             catch(...)
             {
-                (void)device.Sync();
+                (void)device.Synchronize();
                 return false;
             }
         }

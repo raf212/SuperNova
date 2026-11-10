@@ -73,7 +73,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     void Device::Reset()
     {
-        (void)Sync();
+        (void)Synchronize();
     #if defined (SN_ACPP_ENABLED)
         Runtime_.reset();
     #endif
@@ -136,7 +136,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     #endif
     }
 
-    bool Device::Sync() noexcept
+    bool Device::Synchronize() noexcept
     {
         const bool compute = SyncComputeQ();
         const bool control = SyncControlQ();

@@ -26,7 +26,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     ReadLease SessionCompute::AdmitNumeric_() noexcept
     {
-        if (!Binding_ || !EnsureConfigured_()) return {};
+        if (!Binding_ || !EnsureConfigured()) return {};
         if (Session_ && !Residency_.Active()) 
         {
             SetError_(ErrorC::INVALID_CONF);
@@ -43,7 +43,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return Scheduler::FallbackAllowed(Config_, policy);
     }
 
-    bool SessionCompute::EnsureConfigured_() noexcept
+    bool SessionCompute::EnsureConfigured() noexcept
     {
         if (Configured_) return true;
         return Configure(Config_);
@@ -205,6 +205,54 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return BindFabric({
             nullptr, cells, &gate, id
         });
+    }
+
+    bool SessionCompute::ReleseNumericalStorage() noexcept
+    {
+        if (!Close()) return false;
+        Binding_ = {};
+        return true;
+    }
+
+    bool SessionCompute::SetRegisteredRegionBudget(uint64_t bytes) noexcept
+    {
+        ExclusiveLease admission = NumericGate_().TryMaintenance();
+        return admission && Residency_.SetCacheBudget(bytes);
+    }
+
+    bool SessionCompute::ConfirmRecovery() noexcept
+    {
+        if (Residency_.Active() || Session_) return false;
+        ExclusiveLease restore = NumericGate_().TryMaintenance();
+        return restore && NumericGate_().ConfirmedRestored();
+    }
+
+    bool SessionCompute::Synchronize() noexcept
+    {
+        if (!Device_.Synchronize()) 
+        {
+            SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+            return false;
+        }
+        return true;
+    }
+
+    bool SessionCompute::BeginSession(size_t work, ExecutionPolicyC policy, ExclusiveLease lease) noexcept
+    {
+        if (Session_ || Residency_.Active()) return false;
+        if (!lease) lease = NumericGate_().TryEpoch();
+        if (
+            !lease || !lease.Owns(NumericGate_()) ||
+            !Binding_ || !EnsureConfigured()
+        ) 
+        {
+            return false;
+        }
+        SessionBackend_ = Resolve_(work, policy);
+        if (!ValidateResolvedBackend_(SessionBackend_, policy)) return false;
+        EpochLease_ = std::move(lease);
+        Session_ = true;
+        return true;
     }
 
 }

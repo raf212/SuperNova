@@ -74,7 +74,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool SyncControlQ() noexcept;
 
-        bool Sync() noexcept;
+        bool Synchronize() noexcept;
 
         bool Available() const noexcept;
 
@@ -85,12 +85,6 @@ namespace BidirectionalInMemGraph::ComputerDetail
         bool NumericReady() const noexcept;
         
         bool Drain() noexcept;
-
-        bool SynchronizeCompute() noexcept {return SyncComputeQ();}
-
-        bool SynchronizeControl() noexcept {return SyncControlQ();}
-
-        bool Synchronize() noexcept {return Sync();}
 
         const std::string& Name() const noexcept {return Name_;}
 

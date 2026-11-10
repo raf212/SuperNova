@@ -66,7 +66,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     bool NumericResidency::PublishResidency(Device& device, uint64_t stamp) noexcept
     {
-        if (Failed_ || !device.Sync()) return false;
+        if (Failed_ || !device.Synchronize()) return false;
         for (std::unique_ptr<VirtualResidency>& rp : Records_) 
         {
             VirtualResidency& vr = *rp;
@@ -95,7 +95,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     bool NumericResidency::Finish(Device& device, bool publish, uint64_t stamp) noexcept
     {
         if (!Active()) return true;
-        if (Failed_ || !device.Sync()) 
+        if (Failed_ || !device.Synchronize()) 
         {
             Failed_ = true;
             return false;

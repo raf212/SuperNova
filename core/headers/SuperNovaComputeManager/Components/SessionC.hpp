@@ -40,8 +40,6 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool FallbackAllowed_(const ExecutionPolicyC& policy) const noexcept;
 
-        bool EnsureConfigured_() noexcept;
-
         uint64_t SlabCellCount_() noexcept {return Binding_.NumericalCells().size();}
 
         BackendC Resolve_(size_t work_units, const ExecutionPolicyC& policy) noexcept; 
@@ -96,19 +94,22 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool ReleseNumericalStorage() noexcept;
 
-        void NotifyExternalWrite() noexcept;
+        void NotifyExternalWrite() noexcept {NumericGate_().NotifyHostChange();}
 
-        FabricId Identity() const noexcept;
+        FabricId Identity() const noexcept {return Binding_.Id;}
 
         bool SetRegisteredRegionBudget(uint64_t bytes) noexcept;
 
-        TransferStatics TransferStats() const noexcept;
+        TransferStatics TransferStats() const noexcept {return Residency_.Statistics();}
 
-        std::optional<ResidencyInfo> InspectResidency(const CheckpointFormat::RegionRef& ref) const noexcept;
+        std::optional<ResidencyInfo> InspectResidency(const CheckpointFormat::RegionRef& ref) const noexcept
+        {
+            return Residency_.InspectResidency(ref);
+        }
 
-        bool SessionActive() const noexcept;
+        bool SessionActive() const noexcept {return Session_;}
 
-        bool BeginSession(size_t work, ExecutionPolicyC policy = {}, ExclusiveLease lease = {}) const noexcept;
+        bool BeginSession(size_t work, ExecutionPolicyC policy = {}, ExclusiveLease lease = {}) noexcept;
 
         bool EndSession() noexcept;
 
@@ -122,25 +123,30 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         bool DiscardEpoch() noexcept;
 
-        bool RecoveryRequired() noexcept;
+        bool RecoveryRequired() noexcept {return NumericGate_().IsPoisoned();}
 
-        bool Prepare() const noexcept;
+        bool ConfirmRecovery() noexcept;
+
+        bool EnsureConfigured() noexcept;
 
         bool Configure(const ConfigC& config) noexcept;
 
-        void SetOptimizedPremetives(const OptimizedPrimitivesC& premitive) noexcept;
+        void SetOptimizedPremetives(const OptimizedPrimitivesC& premitive) noexcept
+        {
+            OptimizedPrm_ = premitive;
+        }
 
-        OptimizedPrimitivesC GetOptimizedPremetives() const noexcept;
+        OptimizedPrimitivesC GetOptimizedPremetives() const noexcept {return OptimizedPrm_;}
 
-        bool Syncronize() noexcept;
+        bool Synchronize() noexcept;
 
-        ConfigC GetConfig() const noexcept;
+        ConfigC GetConfig() const noexcept {return Config_;}
 
         ErrorC LastError() const noexcept;
 
-        bool SyncCompute() noexcept;
+        bool SyncCompute() noexcept {return Device_.SyncComputeQ();}
 
-        bool SyncControl() noexcept;
+        bool SyncControl() noexcept {return Device_.SyncControlQ();}
 
         RuntimeInfoC GetRuntimeInfo() const noexcept;
 
