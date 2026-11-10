@@ -68,6 +68,18 @@ namespace BidirectionalInMemGraph::ComputerDetail
         {
             return !Cells.empty() && Gate && static_cast<bool>(Id);
         }
+
+        constexpr bool operator==(const FabricRuntimeBinding& other) const noexcept
+        {
+            return Owner == other.Owner &&
+                Gate == other.Gate &&
+                Cells.data() == other.Cells.data() &&
+                Cells.size() == other.Cells.size() &&
+                Id == other.Id &&
+                Numerics.data() == other.Numerics.data() &&
+                Numerics.size() == other.Numerics.size() &&
+                NumericalBegainCell == other.NumericalBegainCell;
+        }
     };
 }
 
