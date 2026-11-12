@@ -161,3 +161,5 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     };
 }
+
+#include "../../../templates/SuperNovaComputeManager/SessionC.tpp"

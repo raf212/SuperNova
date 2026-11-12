@@ -604,7 +604,7 @@ cmake "${CMAKE_ARGS[@]}"
 
 # Keep a separate clangd compilation database. This never touches Windows or
 # the real Linux build database. IntelliSense failures must not block builds.
-if ! python3 "$ROOT/Make-IntelliSenseCompDB-linux.py"; then
+if ! python3 "$ROOT/build-IntelliSenseCompDB.py" --platform linux; then
   warn "Linux IntelliSense database generation failed; SuperNova build continues."
 fi
 

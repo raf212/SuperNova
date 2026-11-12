@@ -616,6 +616,29 @@ if ($LASTEXITCODE -ne 0) {
     throw "SuperNova configure failed."
 }
 
+# Generate a clangd database using the actual CMake compile commands.
+# IntelliSense is editor-only and must never block a successful build.
+$IntelliSenseScript = Join-Path $Root "build-IntelliSenseCompDB.py"
+$PythonCommand = Get-Command python -ErrorAction SilentlyContinue
+if ($null -ne $PythonCommand) {
+    & $PythonCommand.Source $IntelliSenseScript --platform windows
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "SuperNova IntelliSense generation failed; build continues."
+    }
+}
+else {
+    $PyLauncher = Get-Command py -ErrorAction SilentlyContinue
+    if ($null -ne $PyLauncher) {
+        & $PyLauncher.Source -3 $IntelliSenseScript --platform windows
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "SuperNova IntelliSense generation failed; build continues."
+        }
+    }
+    else {
+        Write-Warning "Python 3 not found; skipping IntelliSense generation."
+    }
+}
+
 Write-Step "Building SuperNova"
 
 if ($BuildPython) {
