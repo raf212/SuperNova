@@ -324,4 +324,75 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return true;
     }
 
+    bool SessionCompute::DiscardEpoch() noexcept
+    {
+        if ((Residency_.Active() || Session_) && !OwnsEpoch_()) return false;
+        if (
+            (Residency_.Active() || Session_) &&
+            (Residency_.Dirty() || Residency_.Faild())
+        ) 
+        {
+            NumericGate_().Poison();
+        }
+        if (!Residency_.Discard(Device_)) return false;
+        Session_ = false;
+        EpochLease_.Reset();
+        return true;
+    }
+
+    bool SessionCompute::Configure(const ConfigC& config) noexcept
+    {
+        if (!Residency_.Active() || Session_ || !Residency_.Empty()) 
+        {
+            SetError_(ErrorC::CONFIGIRED_AFTER_FABRIC_INIT);
+            return false;
+        }
+
+        if (
+            !CDV::ValidBackend(config.DefaultBackend) ||
+            config.GPUWorkThreshold == UNSIGNED_ZERO ||
+            config.GPUWorkThreshold > SIZE_MAX
+        ) 
+        {
+            SetError_(ErrorC::INVALID_CONF);
+            return false;
+        }
+
+        Config_ = config;
+        Configured_ = false;
+        (void)Device_.ConfigureGPU();
+        if (
+            !config.AllowCPUFallback &&
+            config.DefaultBackend == BackendC::GPU &&
+            !Device_.NumericReady()
+        ) 
+        {
+            SetError_(ErrorC::ACCELERATOR_UNAVAILAVLE);
+            return false;
+        }
+
+        Configured_ = true;
+        ClearError_();
+        return true;
+    }
+
+    RuntimeInfoC SessionCompute::GetRuntimeInfo() const noexcept
+    {
+        RuntimeInfoC info{};
+        info.DefaultBackend = Config_.DefaultBackend;
+    #if defined(SN_ACPP_ENABLED)
+        info.AdaptiveCppCompiled = true;
+    #else
+        info.AdaptiveCppCompiled = false;
+    #endif
+        info.AcceleratorAvailable = Device_.Available();
+        info.DeviceUSMAvailable = Device_.NumericReady();
+        info.DualQueueAvailable = Device_.Available();
+        info.Configured = Configured_;
+        info.DeviceName = Device_.Name();
+        return info;
+    }
+
+    
+
 }

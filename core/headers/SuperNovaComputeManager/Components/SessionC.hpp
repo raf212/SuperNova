@@ -142,7 +142,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         ConfigC GetConfig() const noexcept {return Config_;}
 
-        ErrorC LastError() const noexcept;
+        ErrorC LastError() const noexcept {return LastError_.load(std::memory_order_acquire);}
 
         bool SyncCompute() noexcept {return Device_.SyncComputeQ();}
 

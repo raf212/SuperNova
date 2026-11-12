@@ -234,7 +234,11 @@ namespace BidirectionalInMemGraph :: ComputerDetail
             return {pointer, count};
         }
 
-
+        static constexpr bool ValidBackend(ComputerBackend backend)
+        {
+            return backend == ComputerBackend::CPU ||
+                backend == ComputerBackend::GPU || backend == ComputerBackend::AUTOMATIC;
+        }
 
     };
 
