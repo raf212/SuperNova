@@ -9,7 +9,7 @@
     - Builds only SuperNova.
 
   EXPLICIT TOOLCHAIN REBUILD MODE:
-    .\build-windows.ps1 -accp_rebuild
+    powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild
 
     - Rebuilds the LLVM bootstrap compiler.
     - Rebuilds/reinstalls integrated LLVM + AdaptiveCpp.
@@ -22,13 +22,13 @@
   GPU vendor drivers/SDKs are intentionally NOT installed automatically.
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
+  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -accp_rebuild -Jobs 4
+  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild -Jobs 4
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File .\build-windows.ps1 -BuildPython
+  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -BuildPython
 #>
 
 [CmdletBinding()]
@@ -316,7 +316,7 @@ Missing:
 
 Normal mode never rebuilds the toolchain.
 Run:
-  .\build-windows.ps1 -accp_rebuild
+  powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild
 "@
         }
     }
@@ -330,7 +330,7 @@ No AdaptiveCpp CMake package was found. Checked:
 
 Normal mode never rebuilds the toolchain.
 Run:
-  .\build-windows.ps1 -accp_rebuild
+  powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild
 "@
     }
 
@@ -677,7 +677,7 @@ Write-Host ""
 Write-Host "Normal mode never rebuilds LLVM/AdaptiveCpp."
 Write-Host ""
 Write-Host "Force toolchain rebuild:"
-Write-Host "  .\build-windows.ps1 -accp_rebuild"
+Write-Host "  powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild"
 Write-Host ""
 Write-Host "Run:"
 Write-Host "  & `"$SuperNovaExe`""
