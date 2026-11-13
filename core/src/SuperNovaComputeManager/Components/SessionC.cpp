@@ -38,7 +38,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return admission;
     }
 
-    bool SessionCompute::FallbackAllowed_(const ExecutionPolicyC& policy) const noexcept
+    bool SessionCompute::CpuFallbackAllowed_(const ExecutionPolicyC& policy) const noexcept
     {
         return Scheduler::FallbackAllowed(Config_, policy);
     }

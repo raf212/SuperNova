@@ -38,7 +38,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         ReadLease AdmitNumeric_() noexcept;
 
-        bool FallbackAllowed_(const ExecutionPolicyC& policy) const noexcept;
+        bool CpuFallbackAllowed_(const ExecutionPolicyC& policy) const noexcept;
 
         uint64_t SlabCellCount_() noexcept {return Binding_.NumericalCells().size();}
 
