@@ -72,7 +72,7 @@ The scripts initialize the AdaptiveCpp submodule automatically.
 ### Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1
 ```
 
 Run:
@@ -84,7 +84,7 @@ Run:
 ### Linux / WSL
 
 ```bash
-chmod +x build-linux.sh && ./build-linux.sh
+chmod +x SuperNova-Linux-Install.sh && ./SuperNova-Linux-Install.sh
 ```
 
 Run:
@@ -119,17 +119,17 @@ CPU execution does not require a GPU SDK.
 Windows:
 
 ```powershell
-.\build-windows.ps1 -CpuOnly
-.\build-windows.ps1 -BuildPython
-.\build-windows.ps1 -RebuildAdaptiveCpp
+.\SuperNova-Windows-Install.ps1 -CpuOnly
+.\SuperNova-Windows-Install.ps1 -BuildPython
+.\SuperNova-Windows-Install.ps1 -RebuildAdaptiveCpp
 ```
 
 Linux:
 
 ```bash
-./build-linux.sh --python
-./build-linux.sh --native-cpu
-./build-linux.sh --rebuild-acpp
+./SuperNova-Linux-Install.sh --python
+./SuperNova-Linux-Install.sh --native-cpu
+./SuperNova-Linux-Install.sh --rebuild-acpp
 ```
 
 ## Manual installation
@@ -140,6 +140,6 @@ For full manual build instructions and troubleshooting, see:
 
 ## Build scripts
 
-- `build-windows.ps1` — automatic Windows build
-- `build-linux.sh` — automatic Linux / WSL build
+- `SuperNova-Windows-Install.ps1` — automatic Windows build
+- `SuperNova-Linux-Install.sh` — automatic Linux / WSL build
 - `MenualBuild.md` — complete manual installation documentation

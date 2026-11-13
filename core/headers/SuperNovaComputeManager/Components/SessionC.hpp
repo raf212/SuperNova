@@ -60,6 +60,9 @@ namespace BidirectionalInMemGraph::ComputerDetail
         bool Dispatch_(size_t element_count, size_t work_units, OP operation, const ExecutionPolicyC& policy) noexcept;
 
         template<class FN, class... Ts>
+        bool __ResolveActiveResidency__(ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept;
+
+        template<class FN, class... Ts>
         bool WithNumericRanges_(size_t work_units, ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept;
 
         template<class OP> 
