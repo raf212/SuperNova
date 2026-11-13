@@ -219,8 +219,6 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }
     }
 
-
-
     template<class FN, class... Ts>
     bool SessionCompute::WithNumericRanges_(size_t work_units, ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept
     {
@@ -251,5 +249,23 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return ok;
     }
 
+#if defined (SN_ACPP_ENABLED)
+    template<class PLAN>
+    std::unique_ptr<PLAN> SessionCompute::__DevicePlanner__(size_t value) noexcept
+    {
+        try 
+        {
+            std::unique_ptr result = std::make_unique<PLAN>(
+                Device_.AcquireRuntime()
+            );
+            if (!result->Allocate(value)) return nullptr;
+            return result;
+        }
+        catch (...)
+        {
+            return nullptr;
+        }
+    }
+#endif
 
 }

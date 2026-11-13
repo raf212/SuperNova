@@ -159,12 +159,20 @@ namespace BidirectionalInMemGraph::ComputerDetail
         RuntimeInfoC GetRuntimeInfo() const noexcept;
 
     #if defined (SN_ACPP_ENABLED)
+        template<class PLAN>
+        std::unique_ptr<PLAN> __DevicePlanner__(size_t value) noexcept;
 
         template<class T>
-        std::unique_ptr<ResidentDeviceRegion<T>> CtrateResidentRegion(size_t count) noexcept;
+        std::unique_ptr<ResidentDeviceRegion<T>> CreateResidentRegion(size_t count) noexcept
+        {
+            return __DevicePlanner__<ResidentDeviceRegion<T>>(count);
+        }
 
         template<class Record>
-        std::unique_ptr<DevicePlanDoubleBuffer<Record>> CreateDevicePlan(size_t capacity) noexcept;
+        std::unique_ptr<DevicePlanDoubleBuffer<Record>> CreateDevicePlan(size_t capacity) noexcept
+        {
+            return __DevicePlanner__<DevicePlanDoubleBuffer<Record>>(capacity);
+        }
     #endif
 
     };
