@@ -1,4 +1,4 @@
-#include "NeuromorphicTimeSpace/SlabToFabricConverterAndCordinator.h"
+#include <SuperNova>
 
 namespace BidirectionalInMemGraph
 {
@@ -59,7 +59,7 @@ namespace BidirectionalInMemGraph
     bool APCHandleAndRetirement::InitializeStructHotRowApcHandleTable_() noexcept
     {
         if (
-            !SlabBasePtr_ ||
+            !DisposableFCache___.SlabBasePtr_ ||
             !FabCache_
         )
         {
@@ -93,7 +93,7 @@ namespace BidirectionalInMemGraph
             initial.VolatileChildTail = EdgeBuilder::RELATION_NULL;
 
             std::construct_at(
-                reinterpret_cast<HAS::StructuralHotRow*>(SlabBasePtr_ + begin),
+                reinterpret_cast<HAS::StructuralHotRow*>(DisposableFCache___.SlabBasePtr_ + begin),
                 initial
             );
         }
@@ -213,7 +213,7 @@ namespace BidirectionalInMemGraph
 
         const uint32_t first_free = std::atomic_ref<const uint32_t>(FabCache_->FirstFreeIdx_).load(std::memory_order_acquire);
 
-        if (!ADS::IsValid32BitAPCUnit(first_free))
+        if (!ADS::ValidateSlotIdx(first_free))
         {
             return std::nullopt;
         }
@@ -238,7 +238,7 @@ namespace BidirectionalInMemGraph
 
     HAS::StructuralHotRow* APCHandleAndRetirement::GetStructuralHotRow_(uint32_t slot) noexcept
     {
-        if (!SlabBasePtr_ || !FabCache_ || slot >= FabCache_->CountOfAPC_)
+        if (!DisposableFCache___.SlabBasePtr_ || !FabCache_ || slot >= FabCache_->CountOfAPC_)
         {
             return nullptr;
         }
@@ -252,7 +252,7 @@ namespace BidirectionalInMemGraph
             return nullptr;
         }
 
-        return std::launder(reinterpret_cast<HAS::StructuralHotRow*>(SlabBasePtr_ + begin));
+        return std::launder(reinterpret_cast<HAS::StructuralHotRow*>(DisposableFCache___.SlabBasePtr_ + begin));
     }
 
 

@@ -27,6 +27,9 @@
 #include "Models/GHGF/GHGFNode.hpp"
 #include "Models/GHGF/GHGFModelOfAPC.hpp"
 
+//COMPUTER
+#include "SuperNovaComputeManager/Computer.hpp"
+
 // Transitional public namespace facade.
 //
 // Existing implementation code remains in BidirectionalInMemGraph, so this is

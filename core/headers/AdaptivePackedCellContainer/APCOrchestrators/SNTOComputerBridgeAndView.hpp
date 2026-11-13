@@ -1,11 +1,9 @@
 #pragma once
-#include "HeaderOrchestrator.hpp"
-#include <span>
+#include "SchemaOrchestratorForRegion.hpp"
 
 
 namespace BidirectionalInMemGraph
 {
-
     struct ResolveRegionBiteView
     {
         std::span<std::byte> Bytes{};
@@ -72,7 +70,7 @@ namespace BidirectionalInMemGraph
         static constexpr bool CanInstallTypedSpan(const ResolveRegionBiteView& region) noexcept
         {
             const std::optional<SD::DataTypeOfMacroColumn> expected_dtype = SD::CppTypeToRegionDType<DType>();
-            return CanInstallTypedSpan<DType>(region, expected_dtype.value());
+            return expected_dtype.has_value() && CanInstallTypedSpan<DType>(region, expected_dtype.value());
         }
 
         template<class DType>
@@ -135,8 +133,10 @@ namespace BidirectionalInMemGraph
             DT* Data_{nullptr};
             uint32_t Height_{UNSIGNED_ZERO};
             uint32_t CapacityWidth_{UNSIGNED_ZERO};
-            uint32_t ActiveWidth_{UNSIGNED_ZERO};
+            uint32_t ActiveWidth{UNSIGNED_ZERO};
             uint32_t Slot_{UNSIGNED_ZERO};
+            uint32_t Generation_{UNSIGNED_ZERO};
+            uint32_t RecordOrdinal_{UNSIGNED_ZERO};
             MacroColumnOfAPC Column_{MacroColumnOfAPC::FREE_SLOT};
             SD::SchemaProtocols Protocol_{SD::SchemaProtocols::PRIVATE_REGION};
             APCUseScope Use_{};
@@ -178,8 +178,8 @@ namespace BidirectionalInMemGraph
             return static_cast<bool>(SNCBCache_.Use_) &&
                 SNCBCache_.Height_ != UNSIGNED_ZERO &&
                 SNCBCache_.CapacityWidth_ != UNSIGNED_ZERO &&
-                SNCBCache_.ActiveWidth_ != UNSIGNED_ZERO &&
-                SNCBCache_.ActiveWidth_ <= SNCBCache_.CapacityWidth_;
+                SNCBCache_.ActiveWidth != UNSIGNED_ZERO &&
+                SNCBCache_.ActiveWidth <= SNCBCache_.CapacityWidth_;
         }
 
         bool IsValid() const noexcept
@@ -189,8 +189,10 @@ namespace BidirectionalInMemGraph
 
         uint32_t Height() const noexcept {return SNCBCache_.Height_; }
         uint32_t CapacityWidth() const noexcept { return SNCBCache_.CapacityWidth_; }
-        uint32_t ActiveWidth() const noexcept { return SNCBCache_.ActiveWidth_; }
+        uint32_t ActiveWidth() const noexcept { return SNCBCache_.ActiveWidth; }
         uint32_t Slot() const noexcept { return SNCBCache_.Slot_; }
+        uint32_t Generation() const noexcept {return SNCBCache_.Generation_;}
+        uint32_t RecordOrdinal() const noexcept {return SNCBCache_.RecordOrdinal_;}
         MacroColumnOfAPC Column() const noexcept { return SNCBCache_.Column_; }
         SD::SchemaProtocols GetProtocol() const noexcept { return SNCBCache_.Protocol_; }
 
@@ -214,11 +216,11 @@ namespace BidirectionalInMemGraph
                 return UNSIGNED_ZERO;
             }
 
-            if (SNCBCache_.Height_ > UINT64_MAX / static_cast<uint64_t>(SNCBCache_.ActiveWidth_)) {
+            if (SNCBCache_.Height_ > UINT64_MAX / static_cast<uint64_t>(SNCBCache_.ActiveWidth)) {
                 return UNSIGNED_ZERO;
             }
 
-            return static_cast<uint64_t>(SNCBCache_.Height_) * static_cast<uint64_t>(SNCBCache_.ActiveWidth_);
+            return static_cast<uint64_t>(SNCBCache_.Height_) * static_cast<uint64_t>(SNCBCache_.ActiveWidth);
         }
 
         std::span<DT> Row(uint32_t row) noexcept
@@ -229,7 +231,7 @@ namespace BidirectionalInMemGraph
 
             return std::span<DT>(
                 SNCBCache_.Data_ + static_cast<uint64_t>(row) * static_cast<uint64_t>(SNCBCache_.CapacityWidth_),
-                SNCBCache_.ActiveWidth_
+                SNCBCache_.ActiveWidth
             );
         }
 
@@ -241,7 +243,7 @@ namespace BidirectionalInMemGraph
 
             return std::span<DT>(
                 SNCBCache_.Data_ + static_cast<uint64_t>(row) * static_cast<uint64_t>(SNCBCache_.CapacityWidth_),
-                SNCBCache_.ActiveWidth_
+                SNCBCache_.ActiveWidth
             );
         }
 

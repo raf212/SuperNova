@@ -1,9 +1,16 @@
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
-#include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "NeuromorphicTimeSpace/SlabToFabricConverterAndCordinator.h"
-
+#include <SuperNova>
 namespace BidirectionalInMemGraph
 {
+    void APCFinilizer::NotifyExternalStructuralCommits(uint64_t count) noexcept
+    {
+        if (
+            ExecutionGate().EpochOwnedByCaller() &&
+            DisposableFCache___.TrackDAGRevision_.load(std::memory_order_relaxed)
+        ) 
+        {
+            DisposableFCache___.SealedDAGRevision_.fetch_add(count, std::memory_order_release);
+        }
+    }
 
     bool APCFinilizer::BindExistingAPCSnapshot_(
         uint32_t slot,
@@ -11,6 +18,9 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> expected_generation 
     ) noexcept
     {
+        auto admission = ExecutionGate().TryTransientRead(true);
+        if (!admission) return false;
+
         if (
             slot >= FabCache_->CountOfAPC_ ||
             apc.IsFabricBound_() ||
@@ -25,7 +35,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        uint64_t * const generation_cell = SlabBasePtr_ + FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
+        uint64_t * const generation_cell = DisposableFCache___.SlabBasePtr_ + FabCache_->HandleTableBeginIndex_ + HandleOfAPCStatic::CellOffset(slot);
         const HandleOfAPCStatic::ControlValues control = HandleOfAPCStatic::ReadControlCell(
             std::atomic_ref<const uint64_t>(*generation_cell).load(std::memory_order_acquire)
         );
@@ -43,9 +53,7 @@ namespace BidirectionalInMemGraph
         
         apc.APCCache_.FabricOwnerPtr_ = this;
         apc.APCCache_.RawAPCBasePtr_ = reinterpret_cast<std::byte*>(
-            SlabBasePtr_ +
-            FabCache_->SegmentPoolBegin_ +
-            static_cast<size_t>(slot) * FabCache_->PerAPCRuntimeCellCount_
+            NumericalBase_() + static_cast<size_t>(slot) * FabCache_->PerAPCRuntimeCellCount_
         );
         apc.APCCache_.APCSlotIdx_ = slot;
         apc.APCCache_.GenerationCellPtr_ = generation_cell;
@@ -62,6 +70,9 @@ namespace BidirectionalInMemGraph
         std::optional<uint32_t> expected_generation
     ) noexcept
     {
+        auto admission = ExecutionGate().TryTransientRead(true);
+        if (!admission) return false;
+
         if (!IsFabricActive() || apc_use)
         {
             return false;
@@ -666,6 +677,9 @@ namespace BidirectionalInMemGraph
         bool override_table
     ) noexcept
     {
+        auto phase = ExecutionGate().TryTransientRead();
+        if (!phase) return false;
+
         if (!IsFabricActive() || desired_apc.IsFabricBound_())
         {
             return false;
@@ -779,6 +793,7 @@ namespace BidirectionalInMemGraph
         }
 
         if (
+            __NumericalBacking__.DataPtr() ||
             !FabCache_->HasDefaultRegionTable_ ||
             override_table ||
             control_values.Generation != HandleOfAPCStatic::FIRST_GENERATION
@@ -786,7 +801,7 @@ namespace BidirectionalInMemGraph
         {
             const SD::RegionSchemaTable& schemas =
                 FabCache_->HasDefaultRegionTable_ && !override_table
-                    ? DefaultRegionTable_
+                    ? DisposableFCache___.DefaultRegionTable_
                     : region_schemas;
             if (!PrepareMatrixViewRow_(slot, schemas))
             {
@@ -805,13 +820,13 @@ namespace BidirectionalInMemGraph
         if (
             !range.IsValid ||
             !desired_apc.BindExternalRawFabricBacking_(
-                &SlabBasePtr_[range.BeginIndex],
+                ResolveCell_(range.BeginIndex),
                 this,
                 slot,
                 generation_cell,
                 control_values.Generation
             ) ||
-            !desired_apc.InitiateAPCMetaHeader()
+            !desired_apc.InitializeNodeModelDescription_()
         )
         {
             AbortCreation___();
@@ -913,8 +928,8 @@ namespace BidirectionalInMemGraph
     std::optional<uint32_t> APCFinilizer::GetASlotForNewAPCLink() noexcept
     {
         if (
-            !FabricInitialized_.load(std::memory_order_acquire) ||
-            !SlabBasePtr_ || 
+            !DisposableFCache___.FabricInitialized_.load(std::memory_order_acquire) ||
+            !DisposableFCache___.SlabBasePtr_ || 
             !ADS::IsCapacityOfAPCValid(FabCache_->PerAPCRuntimeCellCount_)
         )
         {
@@ -975,6 +990,9 @@ namespace BidirectionalInMemGraph
         uint32_t max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryTransientRead();
+        if (!phase) return false;
+
         if (
             slot >= FabCache_->CountOfAPC_ ||
             !HandleOfAPCStatic::IsGenerationValid(generation)
@@ -1320,10 +1338,11 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        for (size_t idx = range.BeginIndex; idx < range.EndIndex; ++idx)
-        {
-            DirectlyStoreFabricUnit64(idx, 0u);
-        }
+        std::fill_n(
+            ResolveCell_(range.BeginIndex),
+            range.EndIndex - range.BeginIndex,
+            UNSIGNED_ZERO
+        );
 
         return HandleOfAPCStatic::IsGenerationValid(new_generation);
     }
@@ -1338,7 +1357,7 @@ namespace BidirectionalInMemGraph
 
         for (uint8_t i = 0; i < ADS::CountOfMacroColumn(); i++)
         {
-            const SD::RegionSchemaRecord& expected = DefaultRegionTable_[i];
+            const SD::RegionSchemaRecord& expected = DisposableFCache___.DefaultRegionTable_[i];
 
             const SD::RegionSchemaRecord& supplied = table[i];
             const bool expected_disabled = SD::HasSchemaFlag(expected.Flags, SD::SchemaFlags::REGION_DISABLED);
@@ -1354,7 +1373,7 @@ namespace BidirectionalInMemGraph
 
             if (expected_disabled)
             {
-                if (supplied.Flags != expected.Flags)
+                if (SD::SealedFlags(supplied.Flags) != SD::SealedFlags(expected.Flags))
                 {
                     return false;
                 }
@@ -1366,7 +1385,8 @@ namespace BidirectionalInMemGraph
                 supplied.MatrixHeight != expected.MatrixHeight ||
                 supplied.MatrixWidth != expected.MatrixWidth ||
                 supplied.CellCount != expected.CellCount ||
-                supplied.Flags != expected.Flags
+                supplied.Flags != expected.Flags ||
+                SD::SealedFlags(supplied.Flags) != SD::SealedFlags(expected.Flags)
             )
             {
                 return false;

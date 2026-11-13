@@ -1,29 +1,7 @@
 #pragma once
-#include "../NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include "../../NeuromorphicTimeSpace/StorageManager/FabricAllocators.hpp"
 
-#include <algorithm>
-#include <atomic>
-#include <cmath>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-#include <limits>
-#include <optional>
-#include <span>
-#include <string>
-#include <type_traits>
-#include <utility>
-
-
-///TEMPORARY to keep track
-#define SN_ACPP_ENABLED true
-//just for inselisense
-
-#if defined (SN_ACPP_ENABLED)
-    #include <sycl/sycl.hpp>
-#endif
-
-namespace BidirectionalInMemGraph 
+namespace BidirectionalInMemGraph :: ComputerDetail
 {
     class Computer;
 
@@ -106,9 +84,9 @@ namespace BidirectionalInMemGraph
             std::is_same_v<std::remove_cv_t<DT>, int64_t> ||
             std::is_same_v<std::remove_cv_t<DT>, float> ||
             std::is_same_v<std::remove_cv_t<DT>, double> ||
-            std::is_same_v<std::remove_cv_t<DT>, char> ||
+            std::is_same_v<std::remove_cv_t<DT>, char>
         #if defined (SN_ACPP_ENABLED) 
-            std::is_same_v<std::remove_cv_t<DT>, sycl::half>
+            || std::is_same_v<std::remove_cv_t<DT>, sycl::half>
         #endif
         ;
 
@@ -190,18 +168,19 @@ namespace BidirectionalInMemGraph
             uint32_t Columns{UNSIGNED_ZERO};
             uint32_t SourceStride{UNSIGNED_ZERO};
             uint32_t DestinationStride{UNSIGNED_ZERO};
+            double Epsilon{0.0};
         };
 
         enum class PrimitiveResult : uint8_t
         {
             SUCCESS = 0,
             UNSUPPORTED = 1,
-            FAILD = 3
+            FAILED = 3
         };
 
         struct ComputerOptimizedPrimitives final
         {
-            using MatMaulFunctionSN = bool(*)(
+            using MatMaulFunctionSN = PrimitiveResult(*)(
                 void* user,
                 ComputerBackend backend,
                 void* destination,
@@ -210,7 +189,7 @@ namespace BidirectionalInMemGraph
                 const MatMulSNDesc& description
             );
 
-            using SoftMaxRowFunction = bool(*)(
+            using SoftMaxRowFunction = PrimitiveResult(*)(
                 void* user,
                 ComputerBackend backend,
                 void* destination,
@@ -218,7 +197,7 @@ namespace BidirectionalInMemGraph
                 const RowsDescSN& description
             );
 
-            using RMSNormFunctionSN = bool(*)(
+            using RMSNormFunctionSN = PrimitiveResult(*)(
                 void* user,
                 ComputerBackend backend,
                 void* destination,
@@ -233,11 +212,20 @@ namespace BidirectionalInMemGraph
             RMSNormFunctionSN RMSNormRows = nullptr;
         };
 
+        enum class NumericalAccess : uint8_t
+        {
+            READ = 0,
+            WRITE = 1,
+            READ_WRITE = 2
+        };
+
         template<class DT>
         struct NumericRange final
         {
             DT* Host;
             uint64_t Count;
+            NumericalAccess Access = std::is_const_v<DT> ?
+                NumericalAccess::READ : NumericalAccess::READ_WRITE;
         };
 
         template<class DT>
@@ -246,7 +234,11 @@ namespace BidirectionalInMemGraph
             return {pointer, count};
         }
 
-
+        static constexpr bool ValidBackend(ComputerBackend backend)
+        {
+            return backend == ComputerBackend::CPU ||
+                backend == ComputerBackend::GPU || backend == ComputerBackend::AUTOMATIC;
+        }
 
     };
 
@@ -266,17 +258,6 @@ namespace BidirectionalInMemGraph
     using DefaultAccumulatorSN = std::common_type_t<
         typename ComputerDefAndVect::SmallScalarPromotion<std::remove_cv_t<Ts>>::Type...
     >;
-
-    //POST DEFINATION OF FLOAT16 when Acpp
-#if defined (SN_ACPP_ENABLED)
-    template<>
-    inline constexpr std::optional<SchemaValidator::DataTypeOfMacroColumn>
-    SchemaValidator::CppTypeToRegionDType<sycl::half>() noexcept
-    {
-        return SchemaValidator::DataTypeOfMacroColumn::FLOAT16_T;
-    }
-#endif
-    //
 
     struct ComputerMath
     {
@@ -338,4 +319,73 @@ namespace BidirectionalInMemGraph
     };
 
 
+    using BackendC = ComputerDefAndVect::ComputerBackend;
+    using WorkTypeC = ComputerDefAndVect::ComputerWorkType;
+    using ErrorC = ComputerDefAndVect::ComputerError;
+    using ConfigC = ComputerDefAndVect::ComputerConf;
+    using ExecutionPolicyC = ComputerDefAndVect::ComputeExecutionPolicy;
+    using RuntimeInfoC = ComputerDefAndVect::ComputerRuntimeInfo;
+    using OptimizedPrimitivesC = ComputerDefAndVect::ComputerOptimizedPrimitives;
+    using PrimitiveResultC = ComputerDefAndVect::PrimitiveResult;
+    using MatMulSNDesc = ComputerDefAndVect::MatMulSNDesc;
+    using RowsDescSN = ComputerDefAndVect::RowsDescSN;
+    using RMSNormDescSN = ComputerDefAndVect::RMSNormDscSN;
+    using RMSNormDscSN = ComputerDefAndVect::RMSNormDscSN;
+
+    
+    template<class T> using _Legion_ = SNTOComputerBridge<T>;
+    template<class T> concept ComputerScalar = ComputerScalarV<T>;
+    template<class... Ts> using DefaultAccumulatorC = DefaultAccumulatorSN<Ts...>;
+    // template<class T> constexpr 
+    // std::optional<ComputerDefAndVect::CDT> ComputerDataTypeOf() noexcept 
+    // {
+    //     return ComputerDefAndVect::DataTypeOfSN<T>();
+    // }
+
+    template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
+
+    template<class T> constexpr NumericRange<const T> ReadRange(const T* p, uint64_t count) noexcept 
+    {
+        return {p, count};
+    }
+
+    template<class T> constexpr NumericRange<T> WriteRange(T* p, uint64_t count) noexcept 
+    {
+        return {p, count};
+    }
+
+    template<class T> constexpr NumericRange<T> OverWriteRange(T* p, uint64_t count) noexcept
+    {
+        return {
+            p,
+            count,
+            ComputerDefAndVect::NumericalAccess::WRITE
+        };
+    }
+
+    template<class DT>
+    static constexpr bool AtomicTypeSupport() noexcept
+    {
+        using U = std::remove_cv_t<DT>;
+        return (sizeof(U)== sizeof(uint32_t) || sizeof(U)== sizeof(uint64_t)) &&
+            (std::is_same_v<U,int> || std::is_same_v<U,unsigned int> ||
+            std::is_same_v<U,long> || std::is_same_v<U,unsigned long> ||
+            std::is_same_v<U,long long> || std::is_same_v<U,unsigned long long> ||
+            std::is_same_v<U,float> || std::is_same_v<U,double>);
+    }
+
+}
+
+namespace BidirectionalInMemGraph 
+{
+    //POST DEFINATION OF FLOAT16 when Acpp
+#if defined (SN_ACPP_ENABLED)
+    template<>
+    inline constexpr std::optional<SchemaValidator::DataTypeOfMacroColumn>
+    SchemaValidator::CppTypeToRegionDType<sycl::half>() noexcept
+    {
+        return SchemaValidator::DataTypeOfMacroColumn::FLOAT16_T;
+    }
+#endif
+    //
 }

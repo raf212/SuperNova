@@ -1,8 +1,6 @@
-
 #pragma once 
-#include <array>
-#include <utility>
-#include "SharedConf.hpp"
+
+#include "ExecutionGate.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -10,25 +8,13 @@ namespace BidirectionalInMemGraph
     class APCFinilizer;
     class AdaptivePackedCellContainer;
     class Computer;
+    class SlabToFabricConverterAndCordinator;
 
     struct APCDataStructure 
     {
-        enum class HeaderIdentifierOfAPC : uint8_t
-        {
-            // Identity
-            MAGIC_ID = 0,
-            APC_SLOT_IDX = 1,
-            GHGF_ROLE_CELL = 2,
-            EOF_APC_HEADER                      = 7
-        };
-
-        static constexpr uint8_t META_CELL_COUNT = static_cast<uint8_t>(HeaderIdentifierOfAPC::EOF_APC_HEADER) + 1u;
-
-        static constexpr uint32_t BRANCH_MAGIC = 0x41504342u;//big-endian
-        static constexpr uint32_t EOF_HEADER = 0x72616600;//big-endian
         static constexpr uint32_t APC_INDEX_BOUND_SENTINAL = UINT32_MAX;
         static constexpr uint64_t MAX_SLAB_CELLS = UINT64_MAX;
-        static constexpr size_t APC_CACHELINE_SIZE = 64u;
+        static constexpr size_t CACELINE_SIZE_IN_BYTES = 64u;
         static constexpr uint8_t DEFAULT_DIRECTED_PARENT_PER_AXIS = 8u;
         //Later transfer it to GHGF side.
         static constexpr uint8_t GHGF_MAX_DIRECTED_PARENT_PER_AXIS  = 64u;        
@@ -72,7 +58,7 @@ namespace BidirectionalInMemGraph
             return static_cast<uint8_t>(std::popcount(lower));
         }
 
-        static constexpr bool IsValid32BitAPCUnit(uint64_t index) noexcept
+        static constexpr bool ValidateSlotIdx(uint64_t index) noexcept
         {
             return index < APC_INDEX_BOUND_SENTINAL;
         }
@@ -85,7 +71,7 @@ namespace BidirectionalInMemGraph
         static constexpr bool IsCapacityOfAPCValid(uint64_t capacity) noexcept
         {
             return capacity >= MINIMUM_APC_CELL_COUNT &&
-                IsValid32BitAPCUnit(capacity);
+                ValidateSlotIdx(capacity);
         }
 
         static constexpr bool IsValidEven64(uint64_t value) noexcept
@@ -104,6 +90,32 @@ namespace BidirectionalInMemGraph
         };
     };
 
+    struct DescriptionOfAPC 
+    {
+        struct SeqLockAndStateStruct
+        {
+            uint32_t SeqLock = UINT32_MAX;
+            StateOfAPC StateOfTheAPC = StateOfAPC::RETIRED;
+            bool IsValid = false;
+        };
+
+        static_assert(sizeof(SeqLockAndStateStruct) <= sizeof(uint64_t));
+
+        static constexpr bool IsTransitionStateLeagal(StateOfAPC current_state, StateOfAPC desired_state) noexcept
+        {
+            return (current_state == StateOfAPC::FREE && desired_state == StateOfAPC::RESERVED) ||
+                (current_state == StateOfAPC::RESERVED && desired_state == StateOfAPC::FREE) ||
+                (current_state == StateOfAPC::RESERVED && desired_state == StateOfAPC::LIVE) ||
+                (current_state == StateOfAPC::LIVE && desired_state == StateOfAPC::RESERVED) ||
+                (current_state == StateOfAPC::RESERVED && desired_state == StateOfAPC::RETIRED) ||
+                (current_state == StateOfAPC::RETIRED && desired_state == StateOfAPC::RESERVED) ||
+                (current_state == StateOfAPC::LIVE && desired_state == StateOfAPC::HAULTED) ||
+                (current_state == StateOfAPC::HAULTED && desired_state == StateOfAPC::LIVE);
+                
+        }
+
+    };
+
     using ADS = APCDataStructure;
 
 
@@ -112,18 +124,19 @@ namespace BidirectionalInMemGraph
         friend class FabricToAPCLinker;
     private:
         uint64_t* ControlCell_{nullptr};
-        explicit APCUseScope(uint64_t* control_cell) noexcept
-            : ControlCell_(control_cell)
+        ReadLease Phase_{};
+        explicit APCUseScope(uint64_t* control_cell, ReadLease phase) noexcept
+            : ControlCell_(control_cell), Phase_(std::move(phase))
         {}
     
     public:
-        constexpr APCUseScope() noexcept = default;
+        APCUseScope() noexcept = default;
 
         APCUseScope(const APCUseScope&) = delete;
         APCUseScope& operator = (const APCUseScope&) = delete;
 
         APCUseScope(APCUseScope&& other) noexcept
-            :ControlCell_(std::exchange(other.ControlCell_, nullptr))
+            :ControlCell_(std::exchange(other.ControlCell_, nullptr)), Phase_(std::move(other.Phase_))
         {}
 
         APCUseScope& operator = (APCUseScope&& other) noexcept
@@ -134,6 +147,7 @@ namespace BidirectionalInMemGraph
             }
             Release();
             ControlCell_ = std::exchange(other.ControlCell_, nullptr);
+            Phase_ = std::move(other.Phase_);
             return *this;
         }
 
@@ -155,6 +169,7 @@ namespace BidirectionalInMemGraph
             }
             std::atomic_ref<uint64_t>(*ControlCell_).fetch_sub(1u, std::memory_order_release);
             ControlCell_ = nullptr;
+            Phase_.Reset();
         }
     };
 

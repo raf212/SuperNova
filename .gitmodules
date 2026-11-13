@@ -1,3 +1,6 @@
 [submodule "external/AdaptiveCpp"]
 	path = external/AdaptiveCpp
 	url = https://github.com/raf212/AdaptiveCpp.git
+[submodule "external/UseCase"]
+	path = external/UseCase
+	url = https://github.com/raf212/UseCase.git

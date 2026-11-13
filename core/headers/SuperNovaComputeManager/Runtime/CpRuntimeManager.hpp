@@ -3,95 +3,8 @@
 
 namespace BidirectionalInMemGraph::ComputerDetail
 {
-    struct Memory final
-    {
-        template<class DT>
-        static constexpr std::optional<uint64_t>ByteCount(uint64_t count) noexcept
-        {
-            if (count > UINT64_MAX / sizeof(DT)) 
-            {
-                return std::nullopt;
-            }
-            return static_cast<uint64_t>(count) * sizeof(DT);
-        }
-
-        static constexpr bool RangeOverlap(
-            const void* left,
-            uint64_t left_bytes,
-            const void* right,
-            uint64_t right_bytes
-        ) noexcept
-        {
-            if (
-                !left ||
-                !right ||
-                left_bytes == UNSIGNED_ZERO ||
-                right == UNSIGNED_ZERO
-            ) 
-            {
-                return false;
-            }
-
-            const uintptr_t left_begin = reinterpret_cast<uintptr_t>(left);
-            const uintptr_t right_begin = reinterpret_cast<uintptr_t>(right);
-
-            return left_begin <= right_begin ? 
-                right_begin - left_begin < left_bytes : left_begin - right_begin < right_bytes;
-        }
-
-        static constexpr bool IsRangeInside(
-            const uint64_t* slab,
-            uint64_t cell_count,
-            const void* data,
-            uint64_t bytes
-        ) noexcept
-        {
-            if (!slab || !data) 
-            {
-                return false;
-            }
-
-            const std::optional<uint64_t> slab_bytes = ByteCount<uint64_t>(cell_count);
-            if (!slab_bytes.has_value()) 
-            {
-                return false;
-            }
-            const uintptr_t begin = reinterpret_cast<uintptr_t>(slab);
-            const uintptr_t pointer = reinterpret_cast<uintptr_t>(data);
-
-            if (pointer < begin) 
-            {
-                return false;
-            }
-
-            const uintptr_t offset_wide = pointer - begin;
-            if (offset_wide > static_cast<uintptr_t>(slab_bytes.value())) 
-            {
-                return false;
-            }
-
-            const uint64_t offset = static_cast<uint64_t>(offset_wide);
-
-            return bytes <= slab_bytes.value() - offset;
-        }
-
-        template<class DT>
-        static bool IsTypedRangeInside(
-            const uint64_t* slab,
-            uint64_t slab_cells,
-            const DT* data,
-            uint64_t count
-        ) noexcept
-        {
-            const std::optional<uint64_t> bytes = ByteCount<DT>(count);
-            return count == UNSIGNED_ZERO && data && bytes &&
-                reinterpret_cast<uintptr_t>(data) % alignof(DT) == UNSIGNED_ZERO &&
-                IsRangeInside(slab, slab_cells, data, *bytes);
-        }
-    };
 
 #if defined (SN_ACPP_ENABLED)
-
     template<class DT>
     class StagedRange final
     {
@@ -114,7 +27,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ~StagedRange() noexcept
         {
             if (!Local_) return;
-            (void)Device_.Sync();
+            if (!Device_.Drain()) std::terminate();
             try 
             {
                 sycl::free(Local_, *Device_.ComputeQueuePtr());
@@ -125,52 +38,11 @@ namespace BidirectionalInMemGraph::ComputerDetail
             }
         }
 
-        bool Upload() noexcept
-        {
-            const std::optional<uint64_t> bytes = Memory::ByteCount<U>(Range_.Count);
-            if (!bytes ||!Range_.Host || !Range_.Count == UNSIGNED_ZERO) 
-            {
-                return false;
-            }
-            
-            uint64_t alignment = std::max(alignof(U), uint64_t{ADS::APC_CACHELINE_SIZE});
-
-            if constexpr (Device::AtomicTypeSupport<U>()) 
-            {
-                using Atomic = sycl::atomic_ref<U, sycl::memory_order_relaxed, 
-                    sycl::memory_scope::device, sycl::access::address_space::global_space>;
-
-                alignment = std::max(alignment, uint64_t{Atomic::required_alignment});
-            }
-
-            Local_ = sycl::aligned_alloc_device<U>(
-                alignment,
-                Range_.Count,
-                *Device_.ComputeQueuePtr()
-            );
-            if (!Local_) return false;
-
-            Device_.ComputeQueuePtr()->memcpy(
-                Range_.Host, 
-                Local_, 
-                *Memory::ByteCount<U>(Range_.Count)
-            );
-            return true;
-        }
+        bool PrepareStage();
 
         DT* Data() const noexcept {return Local_;}
 
-        void* Download() 
-        {
-            if constexpr (!std::is_const_v<DT>) 
-            {
-                Device_.ComputeQueuePtr()->memcpy(
-                    Range_.Host,
-                    Local_,
-                    *Memory::ByteCount<U>(Range_.Count)
-                );
-            }
-        }
+        bool Download();
     };
 #endif
 
@@ -194,9 +66,8 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }    
 
     #if defined (SN_ACPP_ENABLED)
-
         template<class OP>
-        static constexpr std::optional<sycl::event> SubmitGPU(
+        static std::optional<sycl::event> SubmitGPU(
             Device& device,
             uint64_t begin,
             uint64_t end,
@@ -265,11 +136,11 @@ namespace BidirectionalInMemGraph::ComputerDetail
                         operation(begin + static_cast<size_t>(id[0]));
                     }
                 );
-                return device.Sync();
+                return device.Synchronize();
             }
             catch(...)
             {
-                (void)device.Sync();
+                (void)device.Synchronize();
                 return false;
             }
         }
@@ -359,7 +230,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                         reduction,
                         [=](sycl::id<1>id, auto& value)
                         {
-                            value.combo(transform(static_cast<uint64_t>(id[0])));
+                            value.combine(transform(static_cast<uint64_t>(id[0])));
                         }
                     );
                 });
@@ -367,7 +238,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 queue->memcpy(&completed, scratch, sizeof(DT));
                 const bool ok = device.SyncComputeQ();
                 sycl::free(std::exchange(scratch, nullptr), *queue);
-                if (!ok) result = completed;
+                if (ok) result = completed;
                 return ok;
             }
             catch (...)
@@ -388,7 +259,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }
 
         template<class Pradicate>
-        static constexpr bool AllGPU(
+        static bool AllOfGPU(
             Device& device,
             uint64_t count,
             Pradicate predicate,
@@ -413,3 +284,5 @@ namespace BidirectionalInMemGraph::ComputerDetail
     #endif
     };
 }
+
+#include "../../../templates/SuperNovaComputeManager/CpRuntimeManager.tpp"

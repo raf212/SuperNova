@@ -583,6 +583,7 @@ CMAKE_ARGS=(
   -B "$SUPERNOVA_BUILD"
   -G Ninja
   -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
   -DCMAKE_CXX_COMPILER="$CLANG_CXX_PATH"
   -DAdaptiveCpp_DIR="$ACPP_ROOT/lib/cmake/AdaptiveCpp"
   -DACPP_TARGETS=generic
@@ -600,6 +601,12 @@ if ((BUILD_PYTHON)); then
 fi
 
 cmake "${CMAKE_ARGS[@]}"
+
+# Keep a separate clangd compilation database. This never touches Windows or
+# the real Linux build database. IntelliSense failures must not block builds.
+if ! python3 "$ROOT/build-IntelliSenseCompDB.py" --platform linux; then
+  warn "Linux IntelliSense database generation failed; SuperNova build continues."
+fi
 
 step "Building SuperNova"
 

@@ -1,21 +1,21 @@
 #pragma once 
 #include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
+#include "../../Models/GlobalModels.hpp"
 
 namespace BidirectionalInMemGraph
 {
+    struct RawPackedCellAllocator;
+    class RelocatableSlabStorage;
 
     struct CoreOfFabricCoordinator
     {
         /// UNCHECKED
-        static constexpr size_t DEVICE_PLANNER_RECORD_LEN = 0u;
+        static constexpr size_t MODEL_DESCRIPTION_LEN = 0u;
         static constexpr size_t WORK_RECORD_WIDTH_OF_FABRIC = 0u;
         static constexpr size_t DEFAULT_FABRIC_CONTROLIO_LENGTH = 512u;
         ///--------------------------
 
-        static constexpr uint32_t FABRIC_MAGIC = 0x41504643u;
-        static constexpr uint32_t FABRIC_META_EOF = 0x41474946u;
-
-        static constexpr uint8_t FORMAT_VERSION = 2u;
+        static constexpr uint8_t FORMAT_VERSION = 3u;
 
         enum class FabricBackigOwnership : uint8_t
         {
@@ -24,8 +24,29 @@ namespace BidirectionalInMemGraph
             BORROWED = 2
         };
 
-        struct alignas(64) FabricCache 
+        enum class NumericalCachePolicy
         {
+            ON_DEMAND = 0,
+            PRE_TOUCHED = 1
+        };
+
+        struct FabricInitConf final
+        {
+            std::filesystem::path SegmentPoolPath{};
+            const RawPackedCellAllocator* HostAlloc{};
+            NumericalCachePolicy Cache{};
+            uint64_t MaxCheckPointCells{uint64_t{1} << 27}; // it should be free ram * .8;-> MAX for that system based on runtime
+            std::span<const GMI::ModelInfo> Models{};
+            std::span<const GMI::ModelDependency> Dependencies{};
+            std::span<const std::byte> Dynamics{};
+            uint64_t DynamicRevision{1};
+        };
+
+        struct alignas(64) FabricCache final
+        {
+            friend class SlabToFabricConverterAndCordinator;
+            friend class RelocatableSlabStorage;
+        public:
             uint32_t FormateVersion_{UNSIGNED_ZERO};
             ///FABRIC CONSTRUCTION
             uint32_t PerAPCRuntimeCellCount_{UNSIGNED_ZERO};
@@ -45,7 +66,7 @@ namespace BidirectionalInMemGraph
             ///MATRIX CONSTRUCTION
             uint8_t ActiveRegionCount_{UNSIGNED_ZERO};
             uint16_t ActiveRegionMask_{UNSIGNED_ZERO};
-            uint16_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
+            uint32_t MatrixViewRowCellCount_{UNSIGNED_ZERO};
             uint32_t MatrixBatchCapacity_{UNSIGNED_ZERO};
             uint64_t RegionAlignmentCellCount_{UNSIGNED_ZERO};
 
@@ -56,6 +77,34 @@ namespace BidirectionalInMemGraph
             uint64_t MatrixViewTableBeginIndex_{UNSIGNED_ZERO};
             bool HasDefaultRegionTable_{false};
 
+            ///Model Info
+            GMI::ModelStorageDiaphragm ModelDiaphragm_ = GMI::ModelStorageDiaphragm{};
+
+            //DISK
+            uint64_t SegmentPoolDiskByteOffset_{UNSIGNED_ZERO};
+
+        private:
+            uint64_t Reserved_[1]{};
+            FabricCache* Construct(uint64_t* data) noexcept
+            {
+                return std::construct_at(
+                    reinterpret_cast<FabricCache*>(data), *this
+                );
+            }
+        };
+
+        struct VolatileFabricCache final
+        {
+            FabricExecutionGate ExecutionGate_{};
+            FabricBackigOwnership BackingOwnership_ = FabricBackigOwnership::NONE;
+            std::atomic<bool> FabricInitialized_{false};
+            std::atomic<bool> InitializationInProgress_{false};
+            std::atomic<uint64_t> SealedDAGRevision_{UNSIGNED_ZERO};
+            std::atomic<bool> TrackDAGRevision_{false};
+            SchemaDefinition::RegionSchemaTable DefaultRegionTable_{};
+            uint64_t HotCellCount_{UNSIGNED_ZERO};
+            uint64_t* StorageBasePtr_{nullptr};
+            uint64_t* SlabBasePtr_{nullptr};
         };
 
         struct DetachFabric final
@@ -102,11 +151,6 @@ namespace BidirectionalInMemGraph
             return entry;        
         }
 
-    };
-
-
-    struct RecordBookConf
-    {
         static constexpr uint8_t RECORD_BOOK_INTERNAL_SEGMENT_COUNT = static_cast<uint8_t>(FabricSegments::SEGMENT_POOL) + 1;
 
         struct FabricSegmentBounds
@@ -116,81 +160,37 @@ namespace BidirectionalInMemGraph
             FabricSegments OwnerTableOfTheBounds{};
             bool IsValid = false;  
         };
-
     };
 
-
-    struct RawPackedCellAllocator
+    namespace GMI
     {
-        using AllocateFunction = uint64_t* (*)(
-            size_t count_of_packed_cell, size_t alignment, void* user
-        ) noexcept;
+        using CFC = CoreOfFabricCoordinator;
 
-        using FreeFunction = void (*)(
-            uint64_t* packed_cell_storage_ptr, 
-            size_t count_of_cell, size_t alignment, void*user
-        ) noexcept;
-
-        AllocateFunction AllocatePackedCellStorage{nullptr};
-        FreeFunction FreePackedCellStorage{nullptr};
-        void* User{nullptr};
-        size_t Alignment{BIT_COUNT_OF_UINT64_T};
-
-        static size_t AlignBiteCount_(size_t bytes, size_t alignment) noexcept
-        {
-            if (alignment == UNSIGNED_ZERO)
-            {
-                return bytes;
-            }
-
-            const size_t remaining_bytes = bytes % alignment;
-            return remaining_bytes == UNSIGNED_ZERO ? bytes : bytes + (alignment - remaining_bytes);
-        }
-
-        static uint64_t* DefaultAllocateAtomicCells(
-            size_t count_of_packed_cell, size_t alignment, void*
+        static void GetModelCatalog(
+            const CFC::FabricCache& cache, 
+            const uint64_t* hot,
+            ModelCatalog& catalog
         ) noexcept
         {
-            if (count_of_packed_cell == UNSIGNED_ZERO)
-            {
-                return nullptr;
-            }
+            const ModelInfo* mi_ptr = reinterpret_cast<const ModelInfo*>(hot + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_);
+            const ModelDependency* dp_ptr = reinterpret_cast<const ModelDependency*>(mi_ptr + cache.ModelDiaphragm_.ModelCount_);
+            const std::byte* dynamics = reinterpret_cast<const std::byte*>(dp_ptr + cache.ModelDiaphragm_.ModelDependencyCount_);
 
-            alignment = std::max<size_t>(alignment, alignof(uint64_t));
-            const size_t byte_count = sizeof(uint64_t) * count_of_packed_cell;
-            const size_t aligned_bytes = AlignBiteCount_(byte_count, alignment);
-
-#if defined(_MSC_VER)
-
-            void* raw_packed_cell_memory = _aligned_malloc(aligned_bytes, alignment);
-#else
-            void* raw_packed_cell_memory = std::aligned_alloc(alignment, aligned_bytes);
-#endif
-            if (!raw_packed_cell_memory)
-            {
-                return nullptr;
-            }
-            std::memset(raw_packed_cell_memory, UNSIGNED_ZERO, aligned_bytes);
-            return static_cast<uint64_t*>(raw_packed_cell_memory);
-            
+            catalog.Models = {mi_ptr, cache.ModelDiaphragm_.ModelCount_};
+            catalog.Dependencies = {dp_ptr, cache.ModelDiaphragm_.ModelDependencyCount_};
+            catalog.Dynamics = {dynamics, cache.ModelDiaphragm_.ModelDynamicsByteCount_};
         }
 
-        static void DefaultFreeAtomicCells(
-            uint64_t* packed_cell_storage_ptr, 
-            size_t, size_t, void*
+        static ModelCatalog GetModelCatalog(
+            const CFC::FabricCache& cache, 
+            const uint64_t* hot
         ) noexcept
         {
-            if (!packed_cell_storage_ptr)
-            {
-                return;
-            }
-#if defined(_MSC_VER)
-            _aligned_free(packed_cell_storage_ptr);
-#else
-            std::free(packed_cell_storage_ptr);
-#endif
+            ModelCatalog catalog{};
+            GetModelCatalog(cache, hot, catalog);
+            return catalog;
         }
-    };
+    }
 
 
 }

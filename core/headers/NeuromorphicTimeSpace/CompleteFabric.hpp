@@ -1,6 +1,5 @@
 #pragma once 
-#include "FabricConstructor.h"
-#include <new>
+#include "FabricConstructor.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -10,11 +9,10 @@ namespace BidirectionalInMemGraph
     protected:
         using SD = SchemaDefinition;
         using DSA = DescriptionOfAPC;
-        using RBC = RecordBookConf;
 
         bool GetRecordMapCarrierRanges_(
             const FabricSegments table_class,
-            RecordBookConf::FabricSegmentBounds& return_bounds
+            CoreOfFabricCoordinator::FabricSegmentBounds& return_bounds
         ) noexcept;
 
         void IdleAFabricTableClassRangesMemory_(FabricSegments table_class) noexcept;
@@ -139,9 +137,7 @@ namespace BidirectionalInMemGraph
     
     class CompiledDAGTableConstructor : public EdgeTableConstructor
     {
-    protected:
-        std::atomic<uint64_t> SealedDAGRevision_{UNSIGNED_ZERO};
-        
+    protected:        
         void CompiledDAGRelation_(
             FabricSegments edge_table,
             uint32_t child_slot,

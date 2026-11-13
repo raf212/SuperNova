@@ -1,30 +1,38 @@
 #pragma once 
-#include <span>
-#include "../FabricOrchestrators/HandleAndRetirement.hpp"
+#include "FabricOrchestrators/HandleAndRetirement.hpp"
+#include "StorageManager/FabricAllocators.hpp"
 
 namespace BidirectionalInMemGraph
 {
 
-    using FabricCache = CoreOfFabricCoordinator::FabricCache;
-
-    class FabricConstructor
+    class FabricConstructor 
     {
         friend class AdaptivePackedCellContainer;
-        
+    public:
+        FabricExecutionGate& ExecutionGate() noexcept {return DisposableFCache___.ExecutionGate_;}
     protected:
         static constexpr uint8_t DEFAULT_INTERNAL_TRIES__ = 1u;
+        using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
+        using DSA = DescriptionOfAPC;
+        using SD = SchemaDefinition;
+        using CFC = CoreOfFabricCoordinator;
+        using FabricCache = CFC::FabricCache;
 
-        uint64_t* SlabBasePtr_{nullptr};
+        NumericalBacking __NumericalBacking__{}; // __NumericalBacking__
+        RawPackedCellAllocator AllocatorOfFabric_{};
 
         FabricCache* FabCache_{nullptr};
+        CFC::VolatileFabricCache DisposableFCache___{};
+        
+        uint64_t* NumericalBase_() noexcept { return DisposableFCache___.StorageBasePtr_; }
 
-        CoreOfFabricCoordinator::FabricBackigOwnership BackingOwnership_ = CoreOfFabricCoordinator::FabricBackigOwnership::NONE;
-        std::atomic<bool> FabricInitialized_{false};
-        std::atomic<bool> InitializationInProgress_{false};
-        RawPackedCellAllocator AllocatorOfFabric_{};
-        using SeqLockedOperation = FabricToAPCLinker::SeqLockedOperation;
+        void RefreshNumericalBase_() noexcept;
 
-        using DSA = DescriptionOfAPC;
+        uint64_t* ResolveCell_(uint64_t index) noexcept;
+
+        GMI::NodeModelDescription* NodeModel_(uint32_t slot) noexcept;
+
+        constexpr bool IsCellStorageHot_(uint64_t index) noexcept;
 
         ADS::RangeOfAPC GetSegmentPoolRange(uint64_t single_description_index) noexcept;
 
@@ -69,7 +77,7 @@ namespace BidirectionalInMemGraph
 
         constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
         {
-            if (FabCache_ && SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
+            if (FabCache_ && DisposableFCache___.SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
             {
                 return true;
             }
@@ -84,7 +92,7 @@ namespace BidirectionalInMemGraph
         template<typename T>
         bool IsInternalBuffer(const T* data, size_t count) noexcept
         {
-            if (!FabCache_ || !SlabBasePtr_ || count == UNSIGNED_ZERO)
+            if (!FabCache_ || !DisposableFCache___.SlabBasePtr_ || count == UNSIGNED_ZERO)
             {
                 return false;
             }
@@ -97,13 +105,24 @@ namespace BidirectionalInMemGraph
             }
 
             const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
-            const uintptr_t slab = reinterpret_cast<uintptr_t>(SlabBasePtr_);
+            const uintptr_t slab = reinterpret_cast<uintptr_t>(DisposableFCache___.SlabBasePtr_);
             const size_t bytes = count * sizeof(T);
-            const size_t slab_bytes = FabCache_->SlabCellCount_ * sizeof(uint64_t);
 
-            return begin >= slab
-                ? begin - slab < slab_bytes
-                : slab - begin < bytes;
+            auto OverLaps___ = [&](const void* mem, uint64_t cells) noexcept -> bool
+            {
+                const auto base = reinterpret_cast<uintptr_t>(mem);
+                return begin >= base ? (begin - base < cells * sizeof(uint64_t)) : 
+                    (base - begin < bytes);
+            };
+
+            return OverLaps___(
+                DisposableFCache___.SlabBasePtr_, 
+                __NumericalBacking__.DataPtr() ? FabCache_->SegmentPoolBegin_ : FabCache_->SlabCellCount_
+            ) ||
+            (
+                __NumericalBacking__.DataPtr() &&
+                OverLaps___(__NumericalBacking__.DataPtr(), FabCache_->SlabCellCount_ - FabCache_->SegmentPoolBegin_)
+            );
         }
         
     };
@@ -112,10 +131,13 @@ namespace BidirectionalInMemGraph
     {
         friend class FabricToAPCLinker;
         friend class AdaptivePackedCellContainer;
-    protected:
+    public:
         using SD = SchemaDefinition;
+    private:
+        SD::RSSpan MutableMatrixViewRow_(uint32_t apc_slot) noexcept;
+    protected:
 
-        SD::RSSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
+        SD::ConstRSSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
 
         bool ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept;
 

@@ -1,5 +1,5 @@
 #pragma once 
-#include "SlabToFabricConverterAndCordinator.h"
+#include "NeuromorphicBiDAG.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -14,7 +14,6 @@ private:
         uint32_t generation,
         uint32_t max_tries = DEFAULT_MAX_TRIES
     ) noexcept;
-
 
     bool ReclaimRetiredSlotTemp_(uint32_t slot) noexcept;
 
@@ -89,12 +88,43 @@ protected:
 
 public:
 
+    void NotifyExternalStructuralCommits(uint64_t count) noexcept;
+
     bool CreateAPC(
         AdaptivePackedCellContainer& desired_apc,
         const SD::RegionSchemaTable& region_schemas,
         uint32_t internal_max_tries = DEFAULT_MAX_TRIES,
         bool override_table = false
     ) noexcept;
+
+    template<class DT>
+    SNTOComputerBridge<DT> PinNumericRegion(
+        uint32_t slot,
+        MacroColumnOfAPC column,
+        uint32_t ordinal,
+        std::optional<uint32_t> generation
+    ) noexcept
+    {
+        ReadLease admission = ExecutionGate().TryTransientRead(true);
+        AdaptivePackedCellContainer apc{};
+        if (
+            !admission ||
+            !BindExistingAPCSnapshot_(slot, apc, generation)
+        ) 
+        {
+            return {};
+        }
+
+        SNTOComputerBridge<DT> region = apc.template BuildAViewOverRegion<DT>(column, ordinal);
+
+        if (
+            region.GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION
+        ) 
+        {
+            return {};
+        }
+        return region;
+    }
     
 };
 

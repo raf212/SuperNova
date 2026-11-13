@@ -8,3 +8,24 @@
 
 CMakeLists.txt text eol=lf
 *.cmake text eol=lf
+
+# Default text normalization
+* text=auto
+
+# C/C++ sources
+*.c   text eol=lf
+*.cpp text eol=lf
+*.h   text eol=lf
+*.hpp text eol=lf
+*.cc  text eol=lf
+*.hh  text eol=lf
+
+# Build systems
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.sh text eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

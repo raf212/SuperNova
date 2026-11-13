@@ -1,6 +1,4 @@
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
-#include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "NeuromorphicTimeSpace/SlabToFabricConverterAndCordinator.h"
+#include <SuperNova>
 
 namespace BidirectionalInMemGraph
 {
@@ -405,9 +403,9 @@ namespace BidirectionalInMemGraph
             }
         }
 
-        if (TrackDAGRevision_.load(std::memory_order_relaxed))
+        if (DisposableFCache___.TrackDAGRevision_.load(std::memory_order_relaxed))
         {
-            SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
+            DisposableFCache___.SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         }
 
         const auto PublishDomain___ = [this, &transaction](
@@ -496,7 +494,7 @@ namespace BidirectionalInMemGraph
             ++ordinal)
         {
             const EB::ParentIDGeneration handle = std::atomic_ref<const EB::ParentIDGeneration>(relations[ordinal].Parent).load(std::memory_order_relaxed);
-            if (!HAS::IsGenerationValid(handle.Generation) || !APCDataStructure::IsValid32BitAPCUnit(handle.Slot))
+            if (!HAS::IsGenerationValid(handle.Generation) || !APCDataStructure::ValidateSlotIdx(handle.Slot))
             {
                 if (scan.EmptyOrdinal == EB::RELATION_NULL)
                 {
@@ -514,7 +512,7 @@ namespace BidirectionalInMemGraph
                 scan.MatchParent = handle;
             }
             if (
-                APCDataStructure::IsValid32BitAPCUnit(handle.Slot) &&
+                APCDataStructure::ValidateSlotIdx(handle.Slot) &&
                 handle == other_parent_handle
             )
             {
@@ -539,6 +537,9 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryTransientRead();
+        if (!phase) return MutationResult::RETRY;
+
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             parent_slot >= FabCache_->CountOfAPC_ ||
@@ -748,6 +749,9 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryTransientRead();
+        if (!phase) return MutationResult::RETRY;
+
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             parent_slot >= FabCache_->CountOfAPC_ ||
@@ -909,7 +913,7 @@ namespace BidirectionalInMemGraph
                     previous_delta->Before.Parent != parent_handle ||
                     next_delta->Before.Parent != parent_handle ||
                     previous_delta->Before.Siblings.Next != self ||
-                    previous_delta->Before.Siblings.Previous != self
+                    next_delta->Before.Siblings.Previous != self
                 )
                 {
                     AbortRowTransaction_(transaction);
@@ -954,6 +958,9 @@ namespace BidirectionalInMemGraph
         uint32_t internal_max_tries
     ) noexcept
     {
+        auto phase = ExecutionGate().TryTransientRead();
+        if (!phase) return MutationResult::RETRY;
+
         if (
             !CoreOfFabricCoordinator::IsValidEdgeTable(edge_table) ||
             old_parent_slot >= FabCache_->CountOfAPC_ ||

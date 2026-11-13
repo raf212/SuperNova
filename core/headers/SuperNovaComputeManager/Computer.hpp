@@ -1,10 +1,3 @@
 #pragma once
-#include "DeviceResources.hpp"
+#include "Components/SessionC.hpp"
 
-namespace BidirectionalInMemGraph
-{
-    class Computer : protected APCFinilizer
-    {
-
-    };
-}

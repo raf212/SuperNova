@@ -1,31 +1,10 @@
 #pragma once
-
-#include <type_traits>
-#include <cstring>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <random>
-#include <optional>
-#include <vector>
-#include <algorithm>
-#include <limits>
-#include <cassert>
-#include <cstddef>
-#include <array>
-#include <thread>
-#include <stdexcept>
-#include <memory>
-#include <bit>
-#if defined(_MSC_VER)
-    #include <intrin.h>
-#endif
+#include "../../OutterIncludes.hpp"
 
 namespace BidirectionalInMemGraph 
 {
     #define DEFAULT_MAX_TRIES 128
-    static constexpr uint8_t LEN_OF_BYTE_IN_BITS = 8u;
+    static constexpr uint8_t LEN_OF_BYTE_IN_BITS = CHAR_BIT;
     static constexpr size_t BIT_COUNT_OF_UINT64_T = LEN_OF_BYTE_IN_BITS * sizeof(uint64_t);
     static constexpr uint8_t BIT_COUNT_OF_UINT32_T = LEN_OF_BYTE_IN_BITS * sizeof(uint32_t);
     static constexpr unsigned UNSIGNED_ZERO = 0u;
@@ -34,7 +13,7 @@ namespace BidirectionalInMemGraph
 
     static constexpr uint8_t EDGE_COUNT = 2u;
 
-
+    static constexpr uint64_t LIMIT_OF_CELL_COUNT = INT64_MAX / sizeof(uint64_t); //8 exabytes-limited by os
 
     enum class MacroColumnOfAPC : uint8_t
     {
@@ -57,8 +36,8 @@ namespace BidirectionalInMemGraph
         VALUE_PARENT_EDGE_TABLE_H = 2,
         VOLATILE_PARENT_EDGE_TABLE_V = 3,
         APC_HANDLE_TABLE = 4,
-        DEVICE_PLANNER_TABLE = 5,
-        WORK_QUEUE = 6,
+        WORK_QUEUE = 5,
+        MODEL_DESCRIPTION = 6,
         SEGMENT_POOL = 7
     };
 
@@ -70,6 +49,15 @@ namespace BidirectionalInMemGraph
         RETIRED = 3,
         HAULTED = 4
     };
+
+    enum class PreBuildModels : uint8_t
+    {
+        NONE = 0,
+        TRANSFORMER = 1,
+        STRUCTRURAL_ADAPTATION = 2,
+        GHGF = 3
+    };
+    static constexpr PreBuildModels LAST_DEFINED_MODEL_IDX = PreBuildModels::GHGF;
     
     static  constexpr uint64_t MaskLowBitsForU64(unsigned n) noexcept
     {

@@ -1,7 +1,5 @@
 #pragma once 
 #include "CoreOfFabricCoordinator.hpp"
-#include <span>
-#include <bitset>
 
 namespace BidirectionalInMemGraph
 {
@@ -106,7 +104,7 @@ namespace BidirectionalInMemGraph
 
         static constexpr uint64_t EdgeTableRecordWidth(uint32_t max_direct_parents) noexcept
         {
-            constexpr uint32_t cells_per_cacheline = ADS::APC_CACHELINE_SIZE / sizeof(uint64_t);
+            constexpr uint32_t cells_per_cacheline = ADS::CACELINE_SIZE_IN_BYTES / sizeof(uint64_t);
             const uint64_t raw = RawEdgeTableRecordWidth(max_direct_parents);
             return (raw + cells_per_cacheline - 1u) & ~(cells_per_cacheline - 1u);
         }

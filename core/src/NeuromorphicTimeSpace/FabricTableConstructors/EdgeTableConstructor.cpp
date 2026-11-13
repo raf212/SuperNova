@@ -1,4 +1,4 @@
-#include "NeuromorphicTimeSpace/SlabToFabricConverterAndCordinator.h"
+#include <SuperNova>
 
 namespace BidirectionalInMemGraph
 {
@@ -19,9 +19,9 @@ namespace BidirectionalInMemGraph
         const uint64_t mask_words = EB::ParentMaskWordCount(k);
 
         EB::ParentMaskBlock* const mask_begin = std::launder(reinterpret_cast<EB::ParentMaskBlock*>(
-            SlabBasePtr_ + range.BeginIndex));
+            DisposableFCache___.SlabBasePtr_ + range.BeginIndex));
         EB::ParentRelation* const relations_begin = std::launder(reinterpret_cast<EB::ParentRelation*>(
-            SlabBasePtr_ + range.BeginIndex + mask_words
+            DisposableFCache___.SlabBasePtr_ + range.BeginIndex + mask_words
         ));
 
         view.Masks = EB::PMSpan(mask_begin, mask_words);
@@ -41,11 +41,11 @@ namespace BidirectionalInMemGraph
         const uint32_t mask_words = EB::ParentMaskWordCount(k);
 
         EB::ParentMaskBlock* const mask_begin = reinterpret_cast<EB::ParentMaskBlock*>(
-            SlabBasePtr_ + range.BeginIndex
+            DisposableFCache___.SlabBasePtr_ + range.BeginIndex
         );
 
         EB::ParentRelation* const relation_begin = reinterpret_cast<EB::ParentRelation*>(
-            SlabBasePtr_ + range.BeginIndex + mask_words
+            DisposableFCache___.SlabBasePtr_ + range.BeginIndex + mask_words
         );
 
         for (uint32_t i = 0; i < mask_words; i++)
