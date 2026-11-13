@@ -151,6 +151,75 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return ok;
     }
 
+    template<class FN, class... Ts>
+    bool SessionCompute::__ExecuteGpuNumerics__(ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept
+    {
+        std::tuple scratch = std::tuple{StagedRange<Ts>(Device_, ranges)...};
+        bool publishing = false;
+        try 
+        {
+            const auto ApplyPrepare___ = std::apply([](auto&... staged_range) noexcept -> bool
+                {
+                    return (staged_range.PrepareStage() && ...);
+                },
+                scratch
+            );
+
+            if (
+                !Device_.SyncComputeQ() || !ApplyPrepare___ ||
+                !Device_.SyncComputeQ()
+            ) 
+            {
+                SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+                return false;
+            }
+
+            const bool function_applied = std::apply([&](auto&... staged_range)
+                {
+                    return function(staged_range.data()..., policy);
+                },
+                scratch
+            );
+
+            if (!function_applied) 
+            {
+                return false;
+            }
+
+            if (!Device_.SyncComputeQ()) 
+            {
+                SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+                return false;
+            }
+
+            publishing = true;
+
+            const bool downloaded = std::apply([](auto&... staged_range)
+                {
+                    return (staged_range.Download() && ...);
+                },
+                scratch
+            );
+            if (!downloaded) 
+            {
+                NumericGate_().Poison();
+                SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+                return false;
+            }
+
+            ClearError_();
+            return true;
+        }
+        catch (...)
+        {
+            (void) Device_.SyncComputeQ();
+            if (publishing) NumericGate_().Poison();
+            SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+            return false;
+        }
+    }
+
+
 
     template<class FN, class... Ts>
     bool SessionCompute::WithNumericRanges_(size_t work_units, ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept
@@ -169,76 +238,18 @@ namespace BidirectionalInMemGraph::ComputerDetail
     #if defined (SN_ACPP_ENABLED)
         if (backend == BackendC::GPU) 
         {
-            std::tuple scratch = std::tuple{StagedRange<Ts>(Device_, ranges)...};
-            bool publishing = false;
-            try 
-            {
-                const auto ApplyPrepare___ = std::apply([](auto&... staged_range) noexcept -> bool
-                    {
-                        return (staged_range.PrepareStage() && ...);
-                    },
-                    scratch
-                );
-
-                if (
-                    !Device_.SyncComputeQ() || !ApplyPrepare___ ||
-                    !Device_.SyncComputeQ()
-                ) 
-                {
-                    SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
-                    return false;
-                }
-
-                const bool function_applied = std::apply([&](auto&... staged_range)
-                    {
-                        return function(staged_range.data()..., policy);
-                    },
-                    scratch
-                );
-
-                if (!function_applied) 
-                {
-                    return false;
-                }
-
-                if (!Device_.SyncComputeQ()) 
-                {
-                    SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
-                    return false;
-                }
-
-                publishing = true;
-
-                const bool downloaded = std::apply([](auto&... staged_range)
-                    {
-                        return (staged_range.Download() && ...);
-                    },
-                    scratch
-                );
-                if (!downloaded) 
-                {
-                    NumericGate_().Poison();
-                    SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
-                    return false;
-                }
-
-                ClearError_();
-                return true;
-            }
-            catch (...)
-            {
-                (void) Device_.SyncComputeQ();
-                if (publishing) NumericGate_().Poison();
-                SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
-                return false;
-            }
+            return __ExecuteGpuNumerics__(policy, function, ranges...);
         }
-    #else
-
     #endif
+        const bool ok = function(ranges.Host..., policy);
+        if (!ok || ((ranges.Access != CDV::NumericalAccess::READ) || ...)) 
+        {
+            NumericGate_().Poison();
+            SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+        }
+
+        return ok;
     }
-
-
 
 
 }

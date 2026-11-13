@@ -68,6 +68,11 @@ namespace BidirectionalInMemGraph::ComputerDetail
         template<class OP> 
         bool For(size_t element_count, OP operation, ExecutionPolicyC policy = {}) noexcept;
 
+#if defined (SN_ACPP_ENABLED)
+        template<class FN, class... Ts>
+        bool __ExecuteGpuNumerics__(ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept;
+#endif
+
     public:
         using SD = SchemaDefinition;
         // template<class T>
