@@ -74,7 +74,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         };
 
         template<class DT>
-        inline static constexpr bool ComputerScalarV = std::is_same_v<std::remove_cv_t<DT>, uint8_t> ||
+        inline static constexpr bool ScalarMetaValue = std::is_same_v<std::remove_cv_t<DT>, uint8_t> ||
             std::is_same_v<std::remove_cv_t<DT>, uint16_t> ||
             std::is_same_v<std::remove_cv_t<DT>, uint32_t> ||
             std::is_same_v<std::remove_cv_t<DT>, uint64_t> ||
@@ -91,7 +91,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         ;
 
         template<class DT>
-        inline static constexpr bool ComputerFloatingV = std::is_same_v<std::remove_cv_t<DT>, float> ||
+        inline static constexpr bool FloatingMetaValue = std::is_same_v<std::remove_cv_t<DT>, float> ||
             std::is_same_v<std::remove_cv_t<DT>, double> 
         #if defined (SN_ACPP_ENABLED)
             || std::is_same_v<std::remove_cv_t<DT>, sycl::half>
@@ -241,27 +241,46 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         }
 
     };
+    
+    using BackendC = ComputerDefAndVect::ComputerBackend;
+    using WorkTypeC = ComputerDefAndVect::ComputerWorkType;
+    using ErrorC = ComputerDefAndVect::ComputerError;
+    using ConfigC = ComputerDefAndVect::ComputerConf;
+    using ExecutionPolicyC = ComputerDefAndVect::ComputeExecutionPolicy;
+    using RuntimeInfoC = ComputerDefAndVect::ComputerRuntimeInfo;
+    using OptimizedPrimitivesC = ComputerDefAndVect::ComputerOptimizedPrimitives;
+    using PrimitiveResultC = ComputerDefAndVect::PrimitiveResult;
+    using MatMulSNDesc = ComputerDefAndVect::MatMulSNDesc;
+    using RowsDescSN = ComputerDefAndVect::RowsDescSN;
+    using RMSNormDescSN = ComputerDefAndVect::RMSNormDscSN;
+    using RMSNormDscSN = ComputerDefAndVect::RMSNormDscSN;
+
+    template<class T> using _Legion_ = SNTOComputerBridge<T>;
 
     template<class DT>
-    inline constexpr bool ComputerScalarV = ComputerDefAndVect::ComputerScalarV<DT>;
+    inline constexpr bool ScalarMetaValue = ComputerDefAndVect::ScalarMetaValue<DT>;
 
     template<class DT>
-    inline constexpr bool ComputerFloatingV = ComputerDefAndVect::ComputerFloatingV<DT>;
+    inline constexpr bool FloatingMetaValue = ComputerDefAndVect::FloatingMetaValue<DT>;
 
     template<class DT>
-    concept ScalerVC = ComputerDefAndVect::ComputerScalarV<DT>;
+    concept ScalarValueConcept = ComputerDefAndVect::ScalarMetaValue<DT>;
 
     template<class DT>
-    concept FloatingVC = ComputerDefAndVect::ComputerFloatingV<DT>;
+    concept FloatingValueConcept = ComputerDefAndVect::FloatingMetaValue<DT>;
 
     template<class... Ts>
     using DefaultAccumulatorSN = std::common_type_t<
         typename ComputerDefAndVect::SmallScalarPromotion<std::remove_cv_t<Ts>>::Type...
     >;
 
+    template<class... Ts> using DefaultAccumulatorC = DefaultAccumulatorSN<Ts...>;
+    template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
+
+
     struct ComputerMath
     {
-        template<FloatingVC DT>
+        template<FloatingValueConcept DT>
         static constexpr DT Exp(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -271,7 +290,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<FloatingVC DT>
+        template<FloatingValueConcept DT>
         static constexpr DT Log(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -281,7 +300,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<FloatingVC DT>
+        template<FloatingValueConcept DT>
         static constexpr DT Sqrt(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -291,7 +310,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<FloatingVC DT>
+        template<FloatingValueConcept DT>
         static constexpr DT Abs(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -301,7 +320,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<FloatingVC DT>
+        template<FloatingValueConcept DT>
         static bool IsFinite(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -317,32 +336,6 @@ namespace BidirectionalInMemGraph :: ComputerDetail
             return std::clamp(value, lower, upper);
         }
     };
-
-
-    using BackendC = ComputerDefAndVect::ComputerBackend;
-    using WorkTypeC = ComputerDefAndVect::ComputerWorkType;
-    using ErrorC = ComputerDefAndVect::ComputerError;
-    using ConfigC = ComputerDefAndVect::ComputerConf;
-    using ExecutionPolicyC = ComputerDefAndVect::ComputeExecutionPolicy;
-    using RuntimeInfoC = ComputerDefAndVect::ComputerRuntimeInfo;
-    using OptimizedPrimitivesC = ComputerDefAndVect::ComputerOptimizedPrimitives;
-    using PrimitiveResultC = ComputerDefAndVect::PrimitiveResult;
-    using MatMulSNDesc = ComputerDefAndVect::MatMulSNDesc;
-    using RowsDescSN = ComputerDefAndVect::RowsDescSN;
-    using RMSNormDescSN = ComputerDefAndVect::RMSNormDscSN;
-    using RMSNormDscSN = ComputerDefAndVect::RMSNormDscSN;
-
-    
-    template<class T> using _Legion_ = SNTOComputerBridge<T>;
-    template<class T> concept ComputerScalar = ComputerScalarV<T>;
-    template<class... Ts> using DefaultAccumulatorC = DefaultAccumulatorSN<Ts...>;
-    // template<class T> constexpr 
-    // std::optional<ComputerDefAndVect::CDT> ComputerDataTypeOf() noexcept 
-    // {
-    //     return ComputerDefAndVect::DataTypeOfSN<T>();
-    // }
-
-    template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
 
     template<class T> constexpr NumericRange<const T> ReadRange(const T* p, uint64_t count) noexcept 
     {

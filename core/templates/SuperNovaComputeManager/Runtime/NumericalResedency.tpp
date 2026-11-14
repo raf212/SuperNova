@@ -94,7 +94,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         const FabricRuntimeBinding& binding
     ) noexcept
     {
-        static_assert(ComputerScalarV<T> && !std::is_const_v<T>);
+        static_assert(ScalarMetaValue<T> && !std::is_const_v<T>);
 
         std::optional<std::span<T>> span = region.RawSpan();
         std::optional<CDV::CDT> type = CDV::DataTypeOfSN<T>();

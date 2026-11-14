@@ -83,17 +83,17 @@ namespace BidirectionalInMemGraph::ComputerDetail
             ExecutionPolicyC policy = {}
         ) noexcept;
 
-        template<FloatingVC T, FloatingVC AccumT = __DAC__<T>>
+        template<FloatingValueConcept T, FloatingValueConcept AccumT = __DAC__<T>>
         bool Exp(
             T* destination, const T* source, 
             size_t count, 
             ExecutionPolicyC policy = {}
         ) noexcept;
 
-        template<FloatingVC T, FloatingVC AccumT = __DAC__<T>>
+        template<FloatingValueConcept T, FloatingValueConcept AccumT = __DAC__<T>>
         bool Sigmoid(T* destination, const T* source, size_t count, ExecutionPolicyC policy = {}) noexcept;
 
-        template<FloatingVC T, FloatingVC AccumT = __DAC__<T>>
+        template<FloatingValueConcept T, FloatingValueConcept AccumT = __DAC__<T>>
         bool Reciprocal(
             T* destination, const T* source, size_t count,
             AccumT epsilon = {}, ExecutionPolicyC policy = {}
