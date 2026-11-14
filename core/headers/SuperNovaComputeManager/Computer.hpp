@@ -1,7 +1,7 @@
 #pragma once
 #include "Components/SessionC.hpp"
 #include "Components/CkpRegion.hpp"
-#include "Components/ArithmeticCompute.hpp"
+#include "Components/Arithmetics/ArithmeticCompute.hpp"
 
 namespace BidirectionalInMemGraph 
 {

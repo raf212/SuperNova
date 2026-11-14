@@ -4,7 +4,7 @@
 
 namespace BidirectionalInMemGraph::ComputerDetail 
 {
-    struct ElementWiseArithmetic
+    class ElementWiseArithmetic
     {
     protected:
         SessionCompute& Runtime_;

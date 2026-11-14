@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Arithmetics/ReductionArithmetic.hpp"
+#include "LinearAlgebra.hpp"
 
 namespace BidirectionalInMemGraph::ComputerDetail 
 {
-    class ArithmeticCompute : ReductionArithmetic
+    class ArithmeticCompute : public LinearAlgebra
     {
     public:
         explicit ArithmeticCompute(SessionCompute& runtime) noexcept :
-            ReductionArithmetic(runtime)
+            LinearAlgebra(runtime)
         {}
 
     };
