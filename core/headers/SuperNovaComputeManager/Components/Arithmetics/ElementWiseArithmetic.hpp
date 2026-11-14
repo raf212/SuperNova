@@ -8,9 +8,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     {
     protected:
         SessionCompute& Runtime_;
-    
-        template<class T>
-        using __DAC__ = DefaultAccumulator<T>;
+
     public:
         using SD = SchemaDefinition;
         template<class T>
@@ -83,17 +81,17 @@ namespace BidirectionalInMemGraph::ComputerDetail
             ExecutionPolicyC policy = {}
         ) noexcept;
 
-        template<FloatingValueConcept T, FloatingValueConcept AccumT = __DAC__<T>>
+        template<FloatingValueConcept T, FloatingValueConcept AccumT = DefaultAccumulator<T>>
         bool Exp(
             T* destination, const T* source, 
             size_t count, 
             ExecutionPolicyC policy = {}
         ) noexcept;
 
-        template<FloatingValueConcept T, FloatingValueConcept AccumT = __DAC__<T>>
+        template<FloatingValueConcept T, FloatingValueConcept AccumT = DefaultAccumulator<T>>
         bool Sigmoid(T* destination, const T* source, size_t count, ExecutionPolicyC policy = {}) noexcept;
 
-        template<FloatingValueConcept T, FloatingValueConcept AccumT = __DAC__<T>>
+        template<FloatingValueConcept T, FloatingValueConcept AccumT = DefaultAccumulator<T>>
         bool Reciprocal(
             T* destination, const T* source, size_t count,
             AccumT epsilon = {}, ExecutionPolicyC policy = {}

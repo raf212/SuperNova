@@ -19,7 +19,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             ExecutionPolicyC policy = {}
         ) noexcept;
 
-        template<ScalarValueConcept SourceT, ScalarValueConcept AccumT = __DAC__<SourceT>>
+        template<ScalarValueConcept SourceT, ScalarValueConcept AccumT = DefaultAccumulator<SourceT>>
         bool ReduceSum(
             const SourceT* source,
             size_t count,
