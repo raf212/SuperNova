@@ -1,14 +1,15 @@
 #pragma once
 
-#include "SessionC.hpp"
+#include "Arithmetics/ReductionArithmetic.hpp"
 
 namespace BidirectionalInMemGraph::ComputerDetail 
 {
-    class ArithmeticCompute
+    class ArithmeticCompute : ReductionArithmetic
     {
-        SessionCompute& Runtime_;
-    
     public:
-        
+        explicit ArithmeticCompute(SessionCompute& runtime) noexcept :
+            ReductionArithmetic(runtime)
+        {}
+
     };
 }

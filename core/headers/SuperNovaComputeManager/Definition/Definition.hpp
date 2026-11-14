@@ -249,10 +249,10 @@ namespace BidirectionalInMemGraph :: ComputerDetail
     inline constexpr bool ComputerFloatingV = ComputerDefAndVect::ComputerFloatingV<DT>;
 
     template<class DT>
-    concept Computerscalar = ComputerDefAndVect::ComputerScalarV<DT>;
+    concept ScalerVC = ComputerDefAndVect::ComputerScalarV<DT>;
 
     template<class DT>
-    concept ComputerFloating = ComputerDefAndVect::ComputerFloatingV<DT>;
+    concept FloatingVC = ComputerDefAndVect::ComputerFloatingV<DT>;
 
     template<class... Ts>
     using DefaultAccumulatorSN = std::common_type_t<
@@ -261,7 +261,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
 
     struct ComputerMath
     {
-        template<ComputerFloating DT>
+        template<FloatingVC DT>
         static constexpr DT Exp(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -271,7 +271,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<ComputerFloating DT>
+        template<FloatingVC DT>
         static constexpr DT Log(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -281,7 +281,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<ComputerFloating DT>
+        template<FloatingVC DT>
         static constexpr DT Sqrt(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -291,7 +291,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<ComputerFloating DT>
+        template<FloatingVC DT>
         static constexpr DT Abs(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)
@@ -301,7 +301,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         #endif
         }
 
-        template<ComputerFloating DT>
+        template<FloatingVC DT>
         static bool IsFinite(DT value) noexcept
         {
         #if defined (SN_ACPP_ENABLED)

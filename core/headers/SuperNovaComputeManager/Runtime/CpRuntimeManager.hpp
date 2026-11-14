@@ -205,7 +205,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             Combine combo = {}
         ) noexcept
         {
-            static_assert(Computerscalar<DT>, "unsupported dtype");
+            static_assert(ScalerVC<DT>, "unsupported dtype");
             static_assert(std::is_trivially_copyable_v<Transform>, "Transform not tgrivially copyable");
 
             sycl::queue* queue = device.ComputeQueuePtr();
