@@ -10,7 +10,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         SessionCompute& Runtime_;
     
         template<class T>
-        using __DAC__ = DefaultAccumulatorC<T>;
+        using __DAC__ = DefaultAccumulator<T>;
     public:
         using SD = SchemaDefinition;
         template<class T>

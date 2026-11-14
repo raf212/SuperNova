@@ -241,7 +241,7 @@ namespace BidirectionalInMemGraph :: ComputerDetail
         }
 
     };
-    
+
     using BackendC = ComputerDefAndVect::ComputerBackend;
     using WorkTypeC = ComputerDefAndVect::ComputerWorkType;
     using ErrorC = ComputerDefAndVect::ComputerError;
@@ -270,11 +270,10 @@ namespace BidirectionalInMemGraph :: ComputerDetail
     concept FloatingValueConcept = ComputerDefAndVect::FloatingMetaValue<DT>;
 
     template<class... Ts>
-    using DefaultAccumulatorSN = std::common_type_t<
+    using DefaultAccumulator = std::common_type_t<
         typename ComputerDefAndVect::SmallScalarPromotion<std::remove_cv_t<Ts>>::Type...
     >;
 
-    template<class... Ts> using DefaultAccumulatorC = DefaultAccumulatorSN<Ts...>;
     template<class T> using NumericRange = ComputerDefAndVect::NumericRange<T>;
 
 
