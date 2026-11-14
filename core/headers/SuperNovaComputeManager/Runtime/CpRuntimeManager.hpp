@@ -285,4 +285,4 @@ namespace BidirectionalInMemGraph::ComputerDetail
     };
 }
 
-#include "../../../templates/SuperNovaComputeManager/CpRuntimeManager.tpp"
+#include "../../../templates/SuperNovaComputeManager/Runtime/CpRuntimeManager.tpp"

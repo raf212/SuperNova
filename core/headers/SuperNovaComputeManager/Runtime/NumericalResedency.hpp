@@ -217,4 +217,4 @@ namespace BidirectionalInMemGraph::ComputerDetail
     };
 }
 
-#include "../../../templates/SuperNovaComputeManager/NumericalResedency.tpp"
+#include "../../../templates/SuperNovaComputeManager/Runtime/NumericalResedency.tpp"
