@@ -1,0 +1,3 @@
+1. APC(AdaptivePackedCellContainer) : A collection of MacroColumn - that meand a collection of a lot of nodes.
+2. MacroColumn - Its the unit of an APC; an APC can be devided into upto 10 MacroColumn and a macro-column is collection of its own nodes
+3. Node - has a value and a meta data(parent relations). A indevisual node can't change their indevisual parent. only a APC can change the parent list of the whole collection of nodes inside it.
