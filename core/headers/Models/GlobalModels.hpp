@@ -25,6 +25,36 @@ namespace BidirectionalInMemGraph::GMI
         uint32_t Flags{};
     };
 
+    // LayerAPCs[local_index] is authoritative construction/reconstruction order.
+    // Slot is the physical APC slot; it need not equal local_index.
+    struct alignas(uint64_t) ModelAPC final
+    {
+        uint32_t Slot{ADS::APC_INDEX_BOUND_SENTINAL};
+        uint32_t Generation{};  // Zero until the APC is constructed.
+        uint32_t Role{}; // Interpreted by the owning model family.
+        uint32_t Reserved{};
+    };
+
+    struct alignas(uint64_t) LayerDescription final
+    {
+        uint32_t OperatorId{};       // Model-specific operation descriptor ID.
+        uint32_t FirstAPCRecord{};  // Index into ModelIR::LayerAPCs.
+        uint32_t APCCount{};        // Ordered active assignments.
+        uint32_t APCCapacity{};     // Includes reserved, unassigned records.
+    };
+
+    struct alignas(uint64_t) IndividualModelDescription
+    {
+        uint32_t Instances{};
+        PreBuildModels Model{PreBuildModels::NONE};
+        uint8_t StructuralADaptationAllowed{static_cast<uint8_t>(false)};
+        uint32_t FirstLayer{}; // Index into ModelIR::Layers.
+        uint32_t StructureRevision{1};
+    private:
+        uint16_t Reserved_{};
+    };
+
+
     struct alignas(uint64_t) NodeModelDescription final
     {
         uint32_t Instance{};
