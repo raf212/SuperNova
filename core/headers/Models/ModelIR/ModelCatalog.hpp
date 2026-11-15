@@ -1,5 +1,5 @@
 #pragma once 
-#include "../AdaptivePackedCellContainer/APCOrchestrators/SchemaOrchestratorForRegion.hpp"
+#include "../../AdaptivePackedCellContainer/APCOrchestrators/SchemaOrchestratorForRegion.hpp"
 
 ///GMI - Refers to (global model information)
 namespace BidirectionalInMemGraph::GMI
@@ -54,16 +54,10 @@ namespace BidirectionalInMemGraph::GMI
         uint16_t Reserved_{};
     };
 
-
-    struct alignas(uint64_t) NodeModelDescription final
-    {
-        uint32_t Instance{};
-        uint32_t Role{};
-    };
-
     struct alignas(uint64_t) ModelStorageDiaphragm final
     {
-        uint64_t GlobalTableBeginIdx_{UNSIGNED_ZERO};
+        uint32_t LayerCount{UNSIGNED_ZERO};
+        uint32_t APCRecordCount{UNSIGNED_ZERO};
         uint64_t LocalDirectoryBeginIdx_{UNSIGNED_ZERO};
         uint64_t DirectoryCellCount_{UNSIGNED_ZERO};
         uint16_t ModelCount_{UNSIGNED_ZERO};
@@ -111,7 +105,7 @@ namespace BidirectionalInMemGraph::GMI
         constexpr bool ValidCatalog() const noexcept
         {
             if (
-                Models.size() > ModelDependency::INVALID_MODEL_IDX ||
+                Models.size() >= ModelDependency::INVALID_MODEL_IDX ||
                 Dependencies.size() > ADS::APC_INDEX_BOUND_SENTINAL
             ) 
             {
