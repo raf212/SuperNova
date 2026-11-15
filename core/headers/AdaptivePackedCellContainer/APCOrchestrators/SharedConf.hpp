@@ -53,9 +53,11 @@ namespace BidirectionalInMemGraph
     enum class PreBuildModels : uint8_t
     {
         NONE = 0,
-        TRANSFORMER = 1,
-        STRUCTRURAL_ADAPTATION = 2,
-        GHGF = 3
+        FNN = 1,
+        RNN = 2,
+        TRANSFORMER = 3,
+        STRUCTRURAL_ADAPTATION = 4,
+        GHGF = 5
     };
     static constexpr PreBuildModels LAST_DEFINED_MODEL_IDX = PreBuildModels::GHGF;
     

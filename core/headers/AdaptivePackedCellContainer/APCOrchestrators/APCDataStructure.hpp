@@ -10,6 +10,7 @@ namespace BidirectionalInMemGraph
     class Computer;
     class SlabToFabricConverterAndCordinator;
 
+    //Static struct - Everything can be called statically
     struct APCDataStructure 
     {
         static constexpr uint32_t APC_INDEX_BOUND_SENTINAL = UINT32_MAX;
@@ -90,6 +91,7 @@ namespace BidirectionalInMemGraph
         };
     };
 
+    //Static struct
     struct DescriptionOfAPC 
     {
         struct SeqLockAndStateStruct
