@@ -5,7 +5,7 @@ namespace BidirectionalInMemGraph::GMI
 {
     // A single model's layers and APC arrays. Local layer index is independent
     // of both the global layer directory and the physical APC slot number.
-    struct IndividualModelView final
+    struct ViewModelIndividually final
     {
         const IndividualModelDescription* Description{};
         std::span<const LayerDescription> Layers{};
@@ -30,9 +30,19 @@ namespace BidirectionalInMemGraph::GMI
         std::span<const ModelAPC> LayerAPCs{};
         std::span<const std::byte> Dynamics{};
 
-        // // Model instance IDs are the existing 1-based ModelCatalog IDs.
-        // // The returned view exposes one separate ordered APC array per layer.
-        // IndividualModelView
+        ViewModelIndividually ModelView(uint32_t instance) const noexcept;
+
+        std::span<const ModelDependency> IncomingDependencies(uint32_t instance) const noexcept;
+
+        std::span<const std::byte> Configuration(uint32_t instance) const noexcept;
+
+        bool valid(uint32_t slot_count) const noexcept;
+
+        const ModelAPC* APCAt(uint32_t layer_index, uint32_t position) const noexcept;
+
+        const IndividualModelDescription* ModelForRecord(size_t record_index) const noexcept;
+
+        constexpr bool Accept(const SchemaDefinition::RegionSchemaRecord& region) const noexcept;
 
     };
 }
