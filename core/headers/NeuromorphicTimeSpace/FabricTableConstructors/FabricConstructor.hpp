@@ -1,6 +1,6 @@
 #pragma once 
-#include "FabricOrchestrators/HandleAndRetirement.hpp"
-#include "StorageManager/FabricAllocators.hpp"
+#include "../FabricOrchestrators/HandleAndRetirement.hpp"
+#include "../StorageManager/FabricAllocators.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -30,7 +30,7 @@ namespace BidirectionalInMemGraph
 
         uint64_t* ResolveCell_(uint64_t index) noexcept;
 
-        GMI::NodeModelDescription* NodeModel_(uint32_t slot) noexcept;
+        GMI::ModelAPC* ModelAPC_(uint32_t slot) noexcept;
 
         constexpr bool IsCellStorageHot_(uint64_t index) noexcept;
 

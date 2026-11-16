@@ -176,14 +176,6 @@ namespace BidirectionalInMemGraph
             NumericalBase_() + (index - FabCache_->SegmentPoolBegin_);
     }
 
-    GMI::NodeModelDescription* FabricConstructor::NodeModel_(uint32_t slot) noexcept
-    {
-        return FabCache_ && slot < FabCache_->CountOfAPC_ ?
-            reinterpret_cast<GMI::NodeModelDescription*>(
-                DisposableFCache___.SlabBasePtr_ + FabCache_->ModelDiaphragm_.GlobalTableBeginIdx_ + slot
-            ) : nullptr;
-    }
-
     constexpr bool FabricConstructor::IsCellStorageHot_(uint64_t index) noexcept
     {
         if (
@@ -197,6 +189,38 @@ namespace BidirectionalInMemGraph
         return false;
     }
 
+    GMI::ModelAPC* FabricConstructor::ModelAPC_(uint32_t slot) noexcept
+    {
+        if (
+            !FabCache_  || !DisposableFCache___.SlabBasePtr_ ||
+            slot >= FabCache_->CountOfAPC_
+        ) 
+        {
+            return nullptr;
+        }
+
+        const GMI::ModelIR ir = GMI::GetModelIR(*FabCache_, DisposableFCache___.SlabBasePtr_);
+        if (
+            slot < ir.LayerAPCs.size() &&
+            ir.LayerAPCs[slot].Slot == slot
+        ) 
+        {
+            return const_cast<GMI::ModelAPC*>(&ir.LayerAPCs[slot]);
+        }
+
+        for (const GMI::LayerDescription& layer : ir.Layers) 
+        {
+            for (uint32_t p = 0; p < layer.APCCount; p++) 
+            {
+                const GMI::ModelAPC& candidate = ir.LayerAPCs[layer.FirstAPCRecord + p];
+                if (candidate.Slot == slot) 
+                {
+                    return const_cast<GMI::ModelAPC*>(&candidate);
+                }
+            }
+        }
+        return nullptr;
+    }
 
 
 

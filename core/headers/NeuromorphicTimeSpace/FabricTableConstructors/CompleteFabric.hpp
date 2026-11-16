@@ -155,7 +155,18 @@ namespace BidirectionalInMemGraph
     };
 
 
-    
+    class ModelMutation : public CompiledDAGTableConstructor
+    {
+    protected:
+        bool ValidateLayer_(const GMI::ModelIR& ir, std::vector<uint8_t>& mapped) noexcept;
+
+    public:
+        bool ReplaceModelLayerAPCs(
+            uint32_t model_instance,
+            uint32_t layer_position,
+            std::span<const GMI::ModelAPC> ordered_assignments
+        ) noexcept;
+    };
 
 
 
