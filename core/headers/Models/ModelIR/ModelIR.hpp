@@ -3,20 +3,6 @@
 ///GMI - Refers to (global model information)
 namespace BidirectionalInMemGraph::GMI
 {
-    // Each layer owns a different, capacity-bounded subarray of the serialized
-    // ModelAPC directory. These are views, not persistent pointers.
-    struct LayerAPCArray final
-    {
-        std::span<const ModelAPC> Active{};
-        std::span<const ModelAPC> Storage{};
-        bool Present{false};
-
-        const ModelAPC* At(size_t position) const noexcept
-        {
-            return position < Active.size() ? &Active[position] : nullptr;
-        }
-    };
-
     // A single model's layers and APC arrays. Local layer index is independent
     // of both the global layer directory and the physical APC slot number.
     struct IndividualModelView final
@@ -33,4 +19,20 @@ namespace BidirectionalInMemGraph::GMI
         LayerAPCArray LayerAPCs(uint32_t local_layer) const noexcept;
     };
 
+
+    // A non-owning canonical IR view. Constructed from FabricInitConf on write,
+    // reconstructed directly from MODEL_DESCRIPTION on read/attach.
+    struct ModelIR final
+    {
+        std::span<const IndividualModelDescription>  Description{};
+        std::span<const ModelDependency> Dependencies{};
+        std::span<const LayerDescription> Layers{};
+        std::span<const ModelAPC> LayerAPCs{};
+        std::span<const std::byte> Dynamics{};
+
+        // // Model instance IDs are the existing 1-based ModelCatalog IDs.
+        // // The returned view exposes one separate ordered APC array per layer.
+        // IndividualModelView
+
+    };
 }

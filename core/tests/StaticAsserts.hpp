@@ -35,13 +35,14 @@ namespace BidirectionalInMemGraph
     static_assert(sizeof(APCStorageGeometry::CacheOfSNCB<uint64_t>) == 8 * sizeof(uint64_t));
     
     //
-    static_assert(sizeof(GMI::NodeModelDescription) == sizeof(uint64_t)); // Atleast for now
     static_assert(sizeof(GMI::ModelStorageDiaphragm) == 6 * sizeof(uint64_t));
 
 
     static_assert(sizeof(GMI::ModelAPC) == 16);
     static_assert(sizeof(GMI::LayerDescription) == 16);
-    static_assert(sizeof(GMI::IndividualModelDescription) % sizeof(uint64_t) == 0);
+    static_assert(sizeof(GMI::IndividualModelDescription) == 64);
+    static_assert(alignof(GMI::IndividualModelDescription) == 64);
+
     static_assert(std::is_trivially_copyable_v<GMI::ModelAPC>);
     static_assert(std::is_trivially_copyable_v<GMI::LayerDescription>);
     static_assert(std::is_trivially_copyable_v<GMI::IndividualModelDescription>);
