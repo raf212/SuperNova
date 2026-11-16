@@ -34,7 +34,7 @@ namespace BidirectionalInMemGraph::GMI
 
         const IndividualModelDescription& dsc = Description[instance - 1];
         if (
-            dsc.Instances != instance ||
+            dsc.Instance != instance ||
             dsc.FirstLayer > Layers.size() ||
             dsc.DependencyCount > (Dependencies.size() - dsc.FirstDependency)
         ) 
@@ -84,5 +84,163 @@ namespace BidirectionalInMemGraph::GMI
         );
     }
 
+    const ModelAPC* ModelIR::APCAt(uint32_t layer_index, uint32_t position) const noexcept
+    {
+        if (layer_index > Layers.size()) return nullptr;
+        const LayerDescription& layer = Layers[layer_index];
+        if (
+            layer.APCCount > layer.APCCapacity ||
+            layer.FirstAPCRecord > LayerAPCs.size() ||
+            layer.APCCapacity > (LayerAPCs.size() - layer.FirstAPCRecord) ||
+            position >= layer.APCCount
+        ) 
+        {
+            return nullptr;
+        }
+        return &LayerAPCs[layer.FirstAPCRecord + position];
+    }
+
+    const IndividualModelDescription* ModelIR::ModelForRecord(size_t record_index) const noexcept
+    {
+        if (record_index >= LayerAPCs.size()) return nullptr;
+        for (const IndividualModelDescription& model : Description) 
+        {
+            if (
+                model.FirstLayer > Layers.size() ||
+                model.LayerCount > (Layers.size() - model.FirstLayer)
+            ) 
+            {
+                return nullptr;
+            }
+            //can be used better search algorithm - BTA001
+            for (uint32_t i = 0; i < model.LayerCount; i++) 
+            {
+                const LayerDescription& layer = Layers[model.FirstLayer + i];
+                if (
+                    record_index >= layer.FirstAPCRecord &&
+                    (record_index - layer.FirstAPCRecord) < layer.APCCount &&
+                    APCAt(model.FirstLayer + i, UNSIGNED_ZERO)
+                ) 
+                {
+                    return &model;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    bool ModelIR::valid(uint32_t slot_count) const noexcept
+    {
+        if (
+            Description.size() >= ModelDependency::INVALID_MODEL_IDX ||
+            Dependencies.size() > ADS::APC_INDEX_BOUND_SENTINAL
+        ) 
+        {
+            return false;
+        }
+
+        uint64_t layer_cursor = UNSIGNED_ZERO;
+        uint64_t dependency_cursor = UNSIGNED_ZERO;
+        uint64_t apc_cursor = UNSIGNED_ZERO;
+        for (size_t idx = 0; idx < Description.size(); idx++) 
+        {
+            const IndividualModelDescription& model = Description[idx];
+            if (
+                model.Instance != (idx +1) ||
+                model.Model == PreBuildModels::NONE ||
+                model.Model > LAST_DEFINED_MODEL_IDX ||
+                model.StructuralADaptationAllowed > 1 ||
+                model.StructureRevision == UNSIGNED_ZERO ||
+                model.ConfByteCount > (Dynamics.size() - model.ConfByteOffset) ||
+                model.FirstLayer != layer_cursor ||
+                model.LayerCount > (Layers.size() - layer_cursor) ||
+                model.FirstDependency != dependency_cursor ||
+                model.DependencyCount > (Dependencies.size() - dependency_cursor)
+            ) 
+            {
+                return false;
+            }
+
+            for (uint32_t d = 0; d < model.DependencyCount; d++) 
+            {
+                const ModelDependency& dep = Dependencies[dependency_cursor + d];
+                if (
+                    !ADS::ValidateSlotIdx(dep.Producer) ||
+                    !ADS::ValidateSlotIdx(dep.Consumer) ||
+                    dep.Producer == UNSIGNED_ZERO ||
+                    dep.Producer > Description.size() ||
+                    dep.Consumer != model.Instance ||
+                    static_cast<uint8_t>(dep.ProducerRegion) >= ADS::CountOfMacroColumn() ||
+                    static_cast<uint8_t>(dep.ConsumerRegion) >= ADS::CountOfMacroColumn()
+                ) 
+                {
+                    return false;
+                }
+            }
+            dependency_cursor += model.DependencyCount;
+            layer_cursor += model.LayerCount;
+        }
+
+        if (
+            layer_cursor != Layers.size() ||
+            dependency_cursor != Dependencies.size()
+        ) 
+        {
+            return false;
+        }
+
+        for (const LayerDescription& layer : Layers) 
+        {
+            if (
+                layer.FirstAPCRecord != apc_cursor ||
+                layer.APCCount > layer.APCCapacity ||
+                layer.APCCapacity > (LayerAPCs.size() - apc_cursor)
+            ) 
+            {
+                return false;
+            }
+
+            for (uint32_t i = 0; i < layer.APCCapacity; i++) 
+            {
+                const ModelAPC& apc = LayerAPCs[apc_cursor + i];
+                if (i < layer.APCCount) 
+                {
+                    if (apc.Slot >= slot_count) return false;
+                }
+                else if (
+                    apc.Slot != ADS::APC_INDEX_BOUND_SENTINAL ||
+                    apc.Generation != UNSIGNED_ZERO ||
+                    apc.Role != UNSIGNED_ZERO
+                ) 
+                {
+                    return false;
+                }
+            }
+            apc_cursor += layer.APCCapacity;
+        }
+
+        if (apc_cursor != LayerAPCs.size()) return false;
+
+        if (Layers.empty()) return true;
+        try 
+        {
+            std::vector<uint8_t> seen(slot_count, UNSIGNED_ZERO);
+            for (const LayerDescription& layer : Layers) 
+            {
+                for (uint32_t i = 0; i < layer.APCCount; i++) 
+                {
+                    if (seen[LayerAPCs[layer.FirstAPCRecord + i].Slot]++)
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+        catch (...)
+        {
+            return false;
+        }
+        return true;
+    }
 
 }

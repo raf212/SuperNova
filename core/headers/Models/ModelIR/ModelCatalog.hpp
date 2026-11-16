@@ -35,7 +35,7 @@ namespace BidirectionalInMemGraph::GMI
 
     struct alignas(64) IndividualModelDescription
     {
-        uint32_t Instances{};
+        uint32_t Instance{};
         PreBuildModels Model{PreBuildModels::NONE};
         uint8_t StructuralADaptationAllowed{static_cast<uint8_t>(false)};
         uint16_t Reserved{};
