@@ -36,7 +36,7 @@ namespace BidirectionalInMemGraph::GMI
 
         std::span<const std::byte> Configuration(uint32_t instance) const noexcept;
 
-        bool valid(uint32_t slot_count) const noexcept;
+        bool Valid(uint32_t slot_count) const noexcept;
 
         const ModelAPC* APCAt(uint32_t layer_index, uint32_t position) const noexcept;
 
@@ -83,5 +83,28 @@ namespace BidirectionalInMemGraph::GMI
             return true;
         }
 
+    };
+
+
+    struct ModelIRBuildStorage final
+    {
+        std::vector<IndividualModelDescription> Description{};
+        std::vector<ModelDependency> Dependencies{};
+        std::vector<LayerDescription> Layers{};
+        std::vector<ModelAPC> APCRecords{};
+        std::vector<std::byte> Dynamics{};
+
+        ModelIR View() const noexcept
+        {
+            return {
+                Description, Dependencies, Layers,
+                APCRecords, Dynamics
+            };
+        }
+
+        bool Build(
+            std::span<const BuildModelDescriptionIndivisually> models,
+            uint32_t slot_count
+        ) noexcept;
     };
 }

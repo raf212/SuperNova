@@ -50,8 +50,7 @@ namespace BidirectionalInMemGraph::GMI
 
         uint64_t StructureRevision{1};
 
-    private:
-        uint64_t Reserved_[2]{};
+        uint64_t Unused_[2]{};
     };
 
     struct alignas(uint64_t) ModelStorageDiaphragm final
@@ -78,6 +77,24 @@ namespace BidirectionalInMemGraph::GMI
         {
             return position < Active.size() ? &Active[position] : nullptr;
         }
+    };
+
+    struct LayerBuildDescription final
+    {
+        uint32_t OperatorId{};
+        uint32_t MaxAllowedAPCs{};
+        std::vector<ModelAPC> APCs{};
+    };
+
+    struct BuildModelDescriptionIndivisually final
+    {
+        uint32_t Instance{};
+        PreBuildModels Model{PreBuildModels::NONE};
+        bool StructuralADaptationAllowed{false};
+        uint64_t StructureRevision{1};
+        std::vector<std::byte> Configuration{};
+        std::vector<ModelDependency> Dependencies{}; // Incoming dependencies, Consumer==Instance.
+        std::vector<LayerBuildDescription> Layers{};
     };
 
 }

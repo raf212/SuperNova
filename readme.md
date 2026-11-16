@@ -1,8 +1,14 @@
-# SuperNova
+<p align="center">
+  <img
+    src="./docs-source/SuperNova.png"
+    alt="SuperNova Logo"
+    width="650"
+  />
+</p>
+
 
 SuperNova is a C++20 architecture with optional AdaptiveCpp/SYCL execution for CPU and GPU workloads.
 
-Repository: https://github.com/raf212/SuperNova
 
 ## Before you start
 

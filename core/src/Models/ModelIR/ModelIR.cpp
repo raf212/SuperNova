@@ -129,7 +129,7 @@ namespace BidirectionalInMemGraph::GMI
         return nullptr;
     }
 
-    bool ModelIR::valid(uint32_t slot_count) const noexcept
+    bool ModelIR::Valid(uint32_t slot_count) const noexcept
     {
         if (
             Description.size() >= ModelDependency::INVALID_MODEL_IDX ||
@@ -242,5 +242,97 @@ namespace BidirectionalInMemGraph::GMI
         }
         return true;
     }
+
+    bool ModelIRBuildStorage::Build(
+        std::span<const BuildModelDescriptionIndivisually> models,
+        uint32_t slot_count
+    ) noexcept
+    {
+        if (models.size() >= ModelDependency::INVALID_MODEL_IDX) return false;
+        try 
+        {
+            ModelIRBuildStorage candidate{};
+            candidate.Description.reserve(models.size());
+            uint64_t total_layers = UNSIGNED_ZERO;
+            uint64_t total_records = UNSIGNED_ZERO;
+            uint64_t total_dependencies = UNSIGNED_ZERO;
+            for (const BuildModelDescriptionIndivisually& mo : models) 
+            {
+                if (
+                    mo.Instance != candidate.Description.size() + 1 ||
+                    mo.Model == PreBuildModels::NONE ||
+                    mo.Model > LAST_DEFINED_MODEL_IDX ||
+                    !mo.StructureRevision ||
+                    mo.Layers.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_layers) ||
+                    mo.Dependencies.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_dependencies) ||
+                    mo.Configuration.size() > (FABRIC_CELL_SENTINAL - candidate.Dynamics.size())
+                ) 
+                {
+                    return false;
+                }
+
+                total_layers += mo.Layers.size();
+                total_dependencies += mo.Dependencies.size();
+                for (const LayerBuildDescription& layer : mo.Layers) 
+                {
+                    const uint64_t capacity = layer.MaxAllowedAPCs ? layer.MaxAllowedAPCs : layer.APCs.size();
+                    if (layer.APCs.size() > capacity || capacity > (ADS::APC_INDEX_BOUND_SENTINAL - total_records)) 
+                    {
+                        return false;
+                    }
+                    total_records += capacity;
+                }
+
+                candidate.Description.push_back({
+                    mo.Instance,
+                    mo.Model,
+                    static_cast<uint8_t>(mo.StructuralADaptationAllowed), 
+                    UNSIGNED_ZERO,
+                    static_cast<uint64_t>(candidate.Dynamics.size()),
+                    static_cast<uint64_t>(mo.Configuration.size()),
+                    static_cast<uint32_t>(total_layers - mo.Layers.size()),
+                    static_cast<uint32_t>(mo.Layers.size()),
+                    static_cast<uint32_t>(total_dependencies - mo.Dependencies.size()),
+                    static_cast<uint32_t>(mo.Dependencies.size()),
+                    mo.StructureRevision
+                });
+                candidate.Dynamics.insert(
+                    candidate.Dynamics.begin(), 
+                    mo.Configuration.begin(), 
+                    mo.Configuration.end()
+                );
+                candidate.Dependencies.insert(
+                    candidate.Dependencies.end(), 
+                    mo.Dependencies.begin(), 
+                    mo.Dependencies.end()
+                );
+            }
+
+            candidate.Layers.reserve(static_cast<size_t>(total_layers));
+            candidate.APCRecords.reserve(static_cast<size_t>(total_records));
+            for (const BuildModelDescriptionIndivisually& model : models) 
+            {
+                for (const LayerBuildDescription& layer : model.Layers) 
+                {
+                    const uint32_t capacity = layer.MaxAllowedAPCs ? layer.MaxAllowedAPCs :
+                        static_cast<uint32_t>(layer.APCs.size());
+                    candidate.Layers.push_back({
+                        layer.OperatorId,
+                        static_cast<uint32_t>(candidate.APCRecords.size()),
+                        static_cast<uint32_t>(layer.APCs.size()),
+                        capacity
+                    });
+                }
+            }
+            if (!candidate.View().Valid(slot_count)) return false;
+            *this = std::move(candidate);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+    
 
 }
