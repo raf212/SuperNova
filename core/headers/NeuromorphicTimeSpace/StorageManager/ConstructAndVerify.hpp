@@ -38,8 +38,11 @@ private :
 
     static constexpr std::optional<uint64_t> __LocalRecords__(CFC::FabricCache& cache) noexcept
     {
-        uint64_t local_records = cache.ModelDiaphragm_.ModelCount_ * (sizeof(GMI::ModelInfo) / sizeof(uint64_t)) +
-            cache.ModelDiaphragm_.ModelDependencyCount_ * (sizeof(GMI::ModelDependency) / sizeof(uint64_t));
+        uint64_t local_records = uint64_t{cache.ModelDiaphragm_.ModelCount_} * (sizeof(GMI::IndividualModelDescription) / sizeof(uint64_t)) +
+            cache.ModelDiaphragm_.ModelDependencyCount_ * (sizeof(GMI::ModelDependency) / sizeof(uint64_t)) +
+            uint64_t{cache.ModelDiaphragm_.LayerCount_} * (sizeof(GMI::LayerDescription) / sizeof(uint64_t)) +
+            uint64_t{cache.ModelDiaphragm_.APCRecordCount_} * (sizeof(GMI::ModelAPC) / sizeof(uint64_t));
+
         return local_records > LIMIT_OF_CELL_COUNT ? std::nullopt : std::optional<uint64_t>{local_records};
     }
 
@@ -71,14 +74,9 @@ private :
 
         cache.ModelDiaphragm_.DirectoryCellCount_ = lrm.value() + drm.value();
 
-        const uint64_t per_slot_cells = sizeof(GMI::NodeModelDescription) / sizeof(uint64_t);
-        const uint64_t node_cells = static_cast<uint64_t>(cache.CountOfAPC_) * per_slot_cells;
-        if (node_cells > LIMIT_OF_CELL_COUNT - cursor) return false;
-        const uint64_t directory_begin = CFC::DefaultFabricAlignment16Cell(cursor + node_cells);
-        if (
-            directory_begin > LIMIT_OF_CELL_COUNT ||
-            cache.ModelDiaphragm_.DirectoryCellCount_ > LIMIT_OF_CELL_COUNT - directory_begin
-        )
+
+        const uint64_t directory_begin = cursor;
+        if (cache.ModelDiaphragm_.DirectoryCellCount_ > (LIMIT_OF_CELL_COUNT - directory_begin))
         {
             return false;
         }
@@ -89,7 +87,6 @@ private :
             FS::MODEL_DESCRIPTION,
             true
         };
-        cache.ModelDiaphragm_.GlobalTableBeginIdx_ = __SegmentBegin__(segments, FS::MODEL_DESCRIPTION);
         cache.ModelDiaphragm_.LocalDirectoryBeginIdx_ = directory_begin;
         cursor = CFC::DefaultFabricAlignment16Cell(model_bounds.EndIndex);
         return cursor > LIMIT_OF_CELL_COUNT ? false : true;
@@ -179,7 +176,6 @@ public :
             actual.HorizontalEdgeBeginIdx_ == expected.HorizontalEdgeBeginIdx_ &&
             actual.VerticalEdgeBeginIdx_ == expected.VerticalEdgeBeginIdx_ &&
             actual.HandleTableBeginIndex_ == expected.HandleTableBeginIndex_ &&
-            actual.ModelDiaphragm_.GlobalTableBeginIdx_ == expected.ModelDiaphragm_.GlobalTableBeginIdx_ &&
             actual.ModelDiaphragm_.LocalDirectoryBeginIdx_ == expected.ModelDiaphragm_.LocalDirectoryBeginIdx_ &&
             actual.ModelDiaphragm_.DirectoryCellCount_ == expected.ModelDiaphragm_.DirectoryCellCount_ &&
             actual.SegmentPoolBegin_ == expected.SegmentPoolBegin_ &&
