@@ -42,7 +42,46 @@ namespace BidirectionalInMemGraph::GMI
 
         const IndividualModelDescription* ModelForRecord(size_t record_index) const noexcept;
 
-        constexpr bool Accept(const SchemaDefinition::RegionSchemaRecord& region) const noexcept;
+        constexpr bool Accept(const SchemaDefinition::RegionSchemaRecord& region) const noexcept
+        {
+            if (
+                region.ModelInstance > Dependencies.size() ||
+                region.DependencyBegin > Dependencies.size() ||
+                region.DependencyCount > (Dependencies.size() - region.DependencyBegin) ||
+                (
+                    region.ModelInstance == UNSIGNED_ZERO &&
+                    region.DependencyCount != UNSIGNED_ZERO
+                )
+            ) 
+            {
+                return false;
+            }
+
+            if (region.DependencyCount == UNSIGNED_ZERO) return true;
+
+            const IndividualModelDescription& dsc = Description[region.ModelInstance - 1];
+            if (
+                region.DependencyBegin < dsc.FirstDependency ||
+                (uint64_t{region.DependencyBegin} + region.DependencyCount) >
+                    (uint64_t{dsc.FirstDependency} + dsc.DependencyCount)
+            ) 
+            {
+                return false;
+            }
+
+            for (uint32_t i = 0; i < region.DependencyCount; i++) 
+            {
+                const ModelDependency& dep = Dependencies[region.DependencyBegin + i];
+                if (
+                    dep.Consumer != region.ModelInstance ||
+                    dep.ConsumerRegion != region.Region
+                ) 
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
 
     };
 }
