@@ -1,3 +1,5 @@
+#pragma once
+
 #include "ModelCatalog.hpp"
 
 ///GMI - Refers to (global model information)
@@ -42,10 +44,12 @@ namespace BidirectionalInMemGraph::GMI
 
         const IndividualModelDescription* ModelForRecord(size_t record_index) const noexcept;
 
+        const IndividualModelDescription* ModelForSLot(uint32_t slot) const noexcept;
+
         constexpr bool Accept(const SchemaDefinition::RegionSchemaRecord& region) const noexcept
         {
             if (
-                region.ModelInstance > Dependencies.size() ||
+                region.ModelInstance > Description.size() ||
                 region.DependencyBegin > Dependencies.size() ||
                 region.DependencyCount > (Dependencies.size() - region.DependencyBegin) ||
                 (

@@ -134,7 +134,7 @@ namespace BidirectionalInMemGraph
                 *fabric->FabCache_, 
                 fabric->DisposableFCache___.SlabBasePtr_
             );
-            const GMI::IndividualModelDescription* owner = ir.ModelForRecord(APCCache_.APCSlotIdx_);
+            const GMI::IndividualModelDescription* owner = ir.ModelForSLot(APCCache_.APCSlotIdx_);
             if (!owner) return false;
             for (const SD::RegionSchemaRecord& schema : fabric->MatrixViewRow_(APCCache_.APCSlotIdx_)) 
             {
@@ -151,7 +151,7 @@ namespace BidirectionalInMemGraph
             std::atomic_ref<uint32_t> generation(assignmen->Generation);
             const uint32_t previous = generation.load(std::memory_order_acquire);
             if (
-                previous != UNSIGNED_ZERO ||
+                previous != UNSIGNED_ZERO &&
                 previous != APCCache_.CurrentGeneration_
             ) 
             {

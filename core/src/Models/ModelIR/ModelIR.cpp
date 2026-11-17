@@ -36,6 +36,8 @@ namespace BidirectionalInMemGraph::GMI
         if (
             dsc.Instance != instance ||
             dsc.FirstLayer > Layers.size() ||
+            dsc.DependencyCount > (Dependencies.size() - dsc.FirstDependency) ||
+            dsc.LayerCount > (Layers.size() - dsc.FirstLayer) ||
             dsc.DependencyCount > (Dependencies.size() - dsc.FirstDependency)
         ) 
         {
@@ -71,7 +73,7 @@ namespace BidirectionalInMemGraph::GMI
 
         const IndividualModelDescription& dsc = *model.Description;
         if (
-            dsc.ConfByteCount > Dynamics.size() ||
+            dsc.ConfByteOffset > Dynamics.size() ||
             dsc.ConfByteCount > (Dynamics.size() - dsc.ConfByteOffset)
         ) 
         {
@@ -86,7 +88,7 @@ namespace BidirectionalInMemGraph::GMI
 
     const ModelAPC* ModelIR::APCAt(uint32_t layer_index, uint32_t position) const noexcept
     {
-        if (layer_index > Layers.size()) return nullptr;
+        if (layer_index >= Layers.size()) return nullptr;
         const LayerDescription& layer = Layers[layer_index];
         if (
             layer.APCCount > layer.APCCapacity ||
@@ -118,8 +120,7 @@ namespace BidirectionalInMemGraph::GMI
                 const LayerDescription& layer = Layers[model.FirstLayer + i];
                 if (
                     record_index >= layer.FirstAPCRecord &&
-                    (record_index - layer.FirstAPCRecord) < layer.APCCount &&
-                    APCAt(model.FirstLayer + i, UNSIGNED_ZERO)
+                    (record_index - layer.FirstAPCRecord) < layer.APCCount
                 ) 
                 {
                     return &model;
@@ -151,10 +152,13 @@ namespace BidirectionalInMemGraph::GMI
                 model.Model > LAST_DEFINED_MODEL_IDX ||
                 model.StructuralADaptationAllowed > 1 ||
                 model.StructureRevision == UNSIGNED_ZERO ||
+                model.ConfByteOffset > Dynamics.size() ||
                 model.ConfByteCount > (Dynamics.size() - model.ConfByteOffset) ||
                 model.FirstLayer != layer_cursor ||
+                layer_cursor > Layers.size() ||
                 model.LayerCount > (Layers.size() - layer_cursor) ||
                 model.FirstDependency != dependency_cursor ||
+                dependency_cursor > Dependencies.size() ||
                 model.DependencyCount > (Dependencies.size() - dependency_cursor)
             ) 
             {
@@ -193,6 +197,7 @@ namespace BidirectionalInMemGraph::GMI
         {
             if (
                 layer.FirstAPCRecord != apc_cursor ||
+                apc_cursor > LayerAPCs.size() ||
                 layer.APCCount > layer.APCCapacity ||
                 layer.APCCapacity > (LayerAPCs.size() - apc_cursor)
             ) 
@@ -265,6 +270,7 @@ namespace BidirectionalInMemGraph::GMI
                     !mo.StructureRevision ||
                     mo.Layers.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_layers) ||
                     mo.Dependencies.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_dependencies) ||
+                    mo.Configuration.size() > (FABRIC_CELL_SENTINAL - candidate.Dynamics.size()) ||
                     mo.Configuration.size() > (FABRIC_CELL_SENTINAL - candidate.Dynamics.size())
                 ) 
                 {
@@ -297,7 +303,7 @@ namespace BidirectionalInMemGraph::GMI
                     mo.StructureRevision
                 });
                 candidate.Dynamics.insert(
-                    candidate.Dynamics.begin(), 
+                    candidate.Dynamics.end(), 
                     mo.Configuration.begin(), 
                     mo.Configuration.end()
                 );
@@ -322,6 +328,14 @@ namespace BidirectionalInMemGraph::GMI
                         static_cast<uint32_t>(layer.APCs.size()),
                         capacity
                     });
+
+                    candidate.APCRecords.insert(
+                        candidate.APCRecords.end(), layer.APCs.begin(), layer.APCs.end()
+                    );
+
+                    candidate.APCRecords.resize(
+                        candidate.APCRecords.size() + capacity - layer.APCs.size()
+                    );
                 }
             }
             if (!candidate.View().Valid(slot_count)) return false;
