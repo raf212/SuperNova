@@ -348,5 +348,41 @@ namespace BidirectionalInMemGraph::GMI
         }
     }
     
+    //CODE:: BTA001
+    const IndividualModelDescription* ModelIR::ModelForSLot(uint32_t slot) const noexcept
+    {
+        for (const IndividualModelDescription& model : Description) 
+        {
+            if (
+                model.FirstLayer > Layers.size() ||
+                model.LayerCount > (Layers.size() - model.FirstLayer)
+            ) 
+            {
+                return nullptr;
+            }
+
+            for (uint32_t i = 0; i < model.LayerCount; i++) 
+            {
+                const LayerDescription& layer = Layers[model.FirstLayer + i];
+                if (
+                    layer.FirstAPCRecord > LayerAPCs.size() ||
+                    layer.APCCount > (LayerAPCs.size() - layer.FirstAPCRecord)
+                ) 
+                {
+                    return nullptr;
+                }
+
+                for (uint32_t p = 0; p < layer.APCCount; p++) 
+                {
+                    if (LayerAPCs[layer.FirstAPCRecord + p].Slot == slot) 
+                    {
+                        return &model;
+                    }
+                }
+            }
+        }
+        return nullptr;
+    }
+
 
 }
