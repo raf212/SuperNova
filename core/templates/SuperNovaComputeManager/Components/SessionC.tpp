@@ -103,6 +103,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         ) 
         {
             SetError_(ErrorC::INVALID_CONF);
+            return false;
         }
 
         policy.Backend = Residency_.Backend();
@@ -114,7 +115,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
                 OpenAccess::READ_WRITE;
         };
 
-        std::tuple mapped = std::tuple{Residency_.Map(ranges.Host, ranges.Count, GetAccess___())...};
+        std::tuple mapped = std::tuple{Residency_.Map(ranges.Host, ranges.Count, GetAccess___(ranges))...};
         const bool applied = std::apply([](auto... pointers)
             {
                 return ((pointers != nullptr) && ...);
@@ -151,6 +152,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return ok;
     }
 
+#if defined (SN_ACPP_ENABLED)
     template<class FN, class... Ts>
     bool SessionCompute::__ExecuteGpuNumerics__(ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept
     {
@@ -218,6 +220,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return false;
         }
     }
+#endif
 
     template<class FN, class... Ts>
     bool SessionCompute::WithNumericRanges_(size_t work_units, ExecutionPolicyC policy, FN function, NumericRange<Ts>... ranges) noexcept
@@ -240,13 +243,17 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }
     #endif
         const bool ok = function(ranges.Host..., policy);
-        if (!ok || ((ranges.Access != CDV::NumericalAccess::READ) || ...)) 
+        const bool writable = ((ranges.Access != CDV::NumericalAccess::READ) || ...);
+        if (!ok) 
         {
-            NumericGate_().Poison();
+            if (writable) NumericGate_().Poison();
             SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+            return false;
         }
 
-        return ok;
+        if (writable) NumericGate_().NotifyHostChange();
+        ClearError_();
+        return true;
     }
 
 #if defined (SN_ACPP_ENABLED)
