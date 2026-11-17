@@ -196,7 +196,7 @@ namespace BidirectionalInMemGraph
         GMI::NodeModelDescription* model_desc = GHGFFabric_->NodeModel_(APCCache_.APCSlotIdx_);
         if (!model_desc) return false;
 
-        const SD::ConstRSSpan schemas = GHGFFabric_->MetrixViewRow_(APCCache_.APCSlotIdx_);
+        const SD::ConstRSSpan schemas = GHGFFabric_->MatrixViewRow_(APCCache_.APCSlotIdx_);
         if (!schemas.empty())
         {
             model_desc->Instance = schemas.front().ModelInstance;

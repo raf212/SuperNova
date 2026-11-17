@@ -1,5 +1,4 @@
-#include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include <SuperNova>
 
 namespace BidirectionalInMemGraph
 {
@@ -32,7 +31,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        SchemaOrchestrator::ConstRSSpan region_row = fabric_owner->MetrixViewRow_(
+        SchemaOrchestrator::ConstRSSpan region_row = fabric_owner->MatrixViewRow_(
             static_cast<uint32_t>(fabric_slot_idx)
         );
 
@@ -113,8 +112,9 @@ namespace BidirectionalInMemGraph
         return HandleOfAPCStatic::IsOpenGeneration(raw, APCCache_.CurrentGeneration_);
     }
 
-    bool FabricToAPCLinker::InitializeNodeModelDescription_() noexcept
+    bool FabricToAPCLinker::StampModelAPCGeneration_() noexcept
     {
+        using SD = SchemaDefinition;
         if (!IsFabricBound_()) return false;
         HAS::LifeCycleControl current_state{};
         if (
@@ -127,9 +127,58 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        GMI::NodeModelDescription* model_record = APCCache_.FabricOwnerPtr_->NodeModel_(APCCache_.APCSlotIdx_);
-        if (!model_record) return false;
-        *model_record = {};
+        if (GMI::ModelAPC* assignmen = APCCache_.FabricOwnerPtr_->ModelAPC_(APCCache_.APCSlotIdx_)) 
+        {
+            APCFinilizer* fabric = APCCache_.FabricOwnerPtr_;
+            const GMI::ModelIR ir = GMI::GetModelIR(
+                *fabric->FabCache_, 
+                fabric->DisposableFCache___.SlabBasePtr_
+            );
+            const GMI::IndividualModelDescription* owner = ir.ModelForRecord(APCCache_.APCSlotIdx_);
+            if (!owner) return false;
+            for (const SD::RegionSchemaRecord& schema : fabric->MatrixViewRow_(APCCache_.APCSlotIdx_)) 
+            {
+                if (
+                    !SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED) &&
+                    schema.ModelInstance != owner->Instance
+                ) 
+                {
+                    return false;
+                }
+            }
+            // Preserve roles supplied by imported Model IR on first creation.
+            // Only a reused slot with a different generation loses its stale role.
+            std::atomic_ref<uint32_t> generation(assignmen->Generation);
+            const uint32_t previous = generation.load(std::memory_order_acquire);
+            if (
+                previous != UNSIGNED_ZERO ||
+                previous != APCCache_.CurrentGeneration_
+            ) 
+            {
+                std::atomic_ref<uint32_t>(assignmen->Role).store(
+                    UNSIGNED_ZERO, std::memory_order_release
+                );
+            }
+            generation.store(
+                APCCache_.CurrentGeneration_,
+                std::memory_order_release
+            );
+        }
+        else 
+        {
+            for (const SD::RegionSchemaRecord& schema : APCCache_.FabricOwnerPtr_->MatrixViewRow_(
+                APCCache_.APCSlotIdx_
+            )) 
+            {
+                if (
+                    !SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED) &&
+                    schema.ModelInstance != UNSIGNED_ZERO
+                ) 
+                {
+                    return false;
+                }
+            }
+        }
         return true;
     }
 

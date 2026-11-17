@@ -4,7 +4,7 @@
 namespace BidirectionalInMemGraph
 {
     class RelocatableSlabStorage;
-    class SlabToFabricConverterAndCordinator : public CompiledDAGTableConstructor
+    class SlabToFabricConverterAndCordinator : public ModelMutation
     {
         friend class AdaptivePackedCellContainer;
         friend class RelocatableSlabStorage;

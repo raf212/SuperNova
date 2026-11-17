@@ -50,7 +50,7 @@ namespace BidirectionalInMemGraph
             uint32_t expected_generation
         ) noexcept;
 
-        bool InitializeNodeModelDescription_() noexcept;
+        bool StampModelAPCGeneration_() noexcept;
     };
         
     

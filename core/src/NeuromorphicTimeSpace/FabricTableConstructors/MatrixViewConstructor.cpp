@@ -25,7 +25,7 @@ namespace BidirectionalInMemGraph
         return SD::RSSpan(row, FabCache_->ActiveRegionCount_);
     }
 
-    SchemaDefinition::ConstRSSpan MatrixViewConstructor::MetrixViewRow_(uint32_t apc_slot) noexcept
+    SchemaDefinition::ConstRSSpan MatrixViewConstructor::MatrixViewRow_(uint32_t apc_slot) noexcept
     {
         return MutableMatrixViewRow_(apc_slot);
     }
@@ -115,7 +115,7 @@ namespace BidirectionalInMemGraph
             
             cursor = record.CellOffset + record.CellCount;
             observed_mask = static_cast<uint16_t>(observed_mask | ADS::RegionBit(expected_region));
-            if (!GMI::GetModelCatalog(*FabCache_, DisposableFCache___.SlabBasePtr_).Accept(record)) 
+            if (!GMI::GetModelIR(*FabCache_, DisposableFCache___.SlabBasePtr_).Accept(record)) 
             {
                 return false;
             }

@@ -368,9 +368,14 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
+        std::vector<uint8_t> mapped;
         const GMI::ModelIR ir = GMI::GetModelIR(*FabCache_, DisposableFCache___.SlabBasePtr_);
-        if (!ir.Valid(FabCache_->CountOfAPC_)) return false;
-        
+
+        if (
+            !ir.Valid(FabCache_->CountOfAPC_) ||
+            !ValidateLayer_(ir, mapped)
+        ) return false;
+
 
         StorageAllocationDef layout{};
         CFC::FabricCache expected = *FabCache_;
@@ -388,7 +393,7 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t s = 0; s < FabCache_->CountOfAPC_; s++) 
         {
-            const SD::ConstRSSpan row = MetrixViewRow_(s);
+            const SD::ConstRSSpan row = MatrixViewRow_(s);
             if (row.size() != FabCache_->ActiveRegionCount_) 
             {
                 return false;
@@ -402,6 +407,18 @@ namespace BidirectionalInMemGraph
                     continue;
                 }
 
+                if (schema.ModelInstance != UNSIGNED_ZERO && !mapped[s]) 
+                {
+                    HAS::LifeCycleControl state{};
+                    if (
+                        ReadAPCStateAtomically_(s, state) != SeqLockedOperation::FOUND ||
+                        state.State == StateOfAPC::LIVE
+                    ) 
+                    {
+                        return false;
+                    }
+                }
+
                 if (
                     static_cast<uint8_t>(schema.Region) >= ADS::CountOfMacroColumn() ||
                     (mask & ADS::RegionBit(schema.Region)) ||
@@ -412,7 +429,7 @@ namespace BidirectionalInMemGraph
                         FabCache_->PerAPCRuntimeCellCount_, 
                         FabCache_->MatrixBatchCapacity_
                     ) ||
-                    !catalog.Accept(schema)
+                    !ir.Accept(schema)
                 ) 
                 {
                     return false;

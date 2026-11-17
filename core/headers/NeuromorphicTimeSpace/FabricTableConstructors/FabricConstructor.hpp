@@ -137,7 +137,7 @@ namespace BidirectionalInMemGraph
         SD::RSSpan MutableMatrixViewRow_(uint32_t apc_slot) noexcept;
     protected:
 
-        SD::ConstRSSpan MetrixViewRow_(uint32_t apc_slot) noexcept;
+        SD::ConstRSSpan MatrixViewRow_(uint32_t apc_slot) noexcept;
 
         bool ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept;
 
