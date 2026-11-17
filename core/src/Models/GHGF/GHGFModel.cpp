@@ -213,6 +213,45 @@ namespace BidirectionalInMemGraph
         return true;
     }
 
+    static constexpr bool __GHGFTempModelBuilder__(
+        uint32_t slot_count,
+        CoreOfFabricCoordinator::VolatileFabricCache& d_cache,
+        CoreOfFabricCoordinator::FabricInitConf& model_storage
+    ) noexcept
+    {
+        using SD  = SchemaDefinition;
+        using CFC = CoreOfFabricCoordinator;
+
+        for (auto& schema : d_cache.DefaultRegionTable_)
+            if (!SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED))
+                schema.ModelInstance = 1;
+
+        // One model, one ordered layer. Position i maps to physical slot i;
+        // node creation later stamps the generation and model-specific role.
+        const std::array<GMI::IndividualModelDescription, 1> descriptions{{
+            GMI::IndividualModelDescription{
+                1, PreBuildModels::GHGF, 1, 0,
+                0, 0, // Empty configuration
+                0, 1, // One layer
+                0, 0, // No incoming model dependencies
+                1     // Structure revision
+            }
+        }};
+        const std::array<GMI::LayerDescription, 1> layers{{
+            GMI::LayerDescription{0, 0, slot_count, slot_count}
+        }};
+        std::vector<GMI::ModelAPC> assignments;
+        try
+        {
+            assignments.resize(slot_count);
+        }
+        catch (...) { return false; }
+        for (uint32_t slot = 0; slot < slot_count; ++slot)
+            assignments[slot].Slot = slot;
+        model_storage.ModelDescription = {descriptions, {}, layers, assignments, {}};
+        return true;
+    }
+
     bool GHGFModel::InitializeGHGFFabric(
         uint32_t slot_count,
         const GHGFLayerModel::GHGFStorageProfile& profile
@@ -231,12 +270,16 @@ namespace BidirectionalInMemGraph
         GHGFCache_.NodeCount_ = UNSIGNED_ZERO;
         GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         DisposableFCache___.DefaultRegionTable_ = profile.DefaultSchemaTable;
+
+        CFC::FabricInitConf model_storage{};
         if (
+            !__GHGFTempModelBuilder__(slot_count, DisposableFCache___, model_storage) ||
             !InitializeFabric(
                 slot_count,
                 profile.RequiredAPCCells,
                 profile.FabricConfig,
-                profile.MaxDirectParentPerAxis
+                profile.MaxDirectParentPerAxis,
+                model_storage
             )
         )
         {
