@@ -193,14 +193,16 @@ namespace BidirectionalInMemGraph
             (weight.value())[volatile_index] = GMC::INITIAL_VOLATILITY_COUPLING;
         }
 
-        GMI::NodeModelDescription* model_desc = GHGFFabric_->NodeModel_(APCCache_.APCSlotIdx_);
-        if (!model_desc) return false;
-
-        const SD::ConstRSSpan schemas = GHGFFabric_->MatrixViewRow_(APCCache_.APCSlotIdx_);
-        if (!schemas.empty())
+        GMI::ModelAPC* model_desc = GHGFFabric_->ModelAPC_(APCCache_.APCSlotIdx_);
+        if (
+            !model_desc || 
+            !std::atomic_ref(model_desc->Generation).load(std::memory_order_acquire) != 
+                APCCache_.CurrentGeneration_
+        ) 
         {
-            model_desc->Instance = schemas.front().ModelInstance;
+            return false;
         }
+
         std::atomic_ref<uint32_t>(model_desc->Role).store(
             static_cast<uint32_t>(role),
             std::memory_order_release
@@ -250,8 +252,15 @@ namespace BidirectionalInMemGraph
     std::optional<GHGFLayerModel::GHGFNodeRole> GHGFNode::GHGFRole_() noexcept
     {
         if (!IsActiveAPC()) return std::nullopt;
-        GMI::NodeModelDescription* model_desc = GHGFFabric_->NodeModel_(APCCache_.APCSlotIdx_);
-        if (!model_desc) return std::nullopt;
+        GMI::ModelAPC* model_desc = GHGFFabric_->ModelAPC_(APCCache_.APCSlotIdx_);
+        if (
+            !model_desc || 
+            !std::atomic_ref(model_desc->Generation).load(std::memory_order_acquire) != 
+                APCCache_.CurrentGeneration_
+        ) 
+        {
+            return std::nullopt;
+        }
         const uint32_t value = std::atomic_ref<uint32_t>(model_desc->Role).load(std::memory_order_acquire);
         if (
             value < static_cast<uint8_t>(GM::GHGFNodeRole::OBSERVATION) ||
