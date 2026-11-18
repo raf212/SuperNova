@@ -36,8 +36,8 @@ namespace BidirectionalInMemGraph::GMI
         if (
             dsc.Instance != instance ||
             dsc.FirstLayer > Layers.size() ||
-            dsc.DependencyCount > (Dependencies.size() - dsc.FirstDependency) ||
             dsc.LayerCount > (Layers.size() - dsc.FirstLayer) ||
+            dsc.FirstDependency > Dependencies.size() ||
             dsc.DependencyCount > (Dependencies.size() - dsc.FirstDependency)
         ) 
         {

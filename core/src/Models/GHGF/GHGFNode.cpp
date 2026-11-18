@@ -196,7 +196,7 @@ namespace BidirectionalInMemGraph
         GMI::ModelAPC* model_desc = GHGFFabric_->ModelAPC_(APCCache_.APCSlotIdx_);
         if (
             !model_desc || 
-            !std::atomic_ref(model_desc->Generation).load(std::memory_order_acquire) != 
+            std::atomic_ref(model_desc->Generation).load(std::memory_order_acquire) != 
                 APCCache_.CurrentGeneration_
         ) 
         {
@@ -255,7 +255,7 @@ namespace BidirectionalInMemGraph
         GMI::ModelAPC* model_desc = GHGFFabric_->ModelAPC_(APCCache_.APCSlotIdx_);
         if (
             !model_desc || 
-            !std::atomic_ref(model_desc->Generation).load(std::memory_order_acquire) != 
+            std::atomic_ref(model_desc->Generation).load(std::memory_order_acquire) != 
                 APCCache_.CurrentGeneration_
         ) 
         {
