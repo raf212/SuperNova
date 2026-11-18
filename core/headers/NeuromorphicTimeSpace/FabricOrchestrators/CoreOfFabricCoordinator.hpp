@@ -1,6 +1,6 @@
 #pragma once 
 #include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "../../Models/GlobalModels.hpp"
+#include "../../Models/ModelIR/ModelIR.hpp"
 
 namespace BidirectionalInMemGraph
 {
@@ -36,9 +36,7 @@ namespace BidirectionalInMemGraph
             const RawPackedCellAllocator* HostAlloc{};
             NumericalCachePolicy Cache{};
             uint64_t MaxCheckPointCells{uint64_t{1} << 27}; // it should be free ram * .8;-> MAX for that system based on runtime
-            std::span<const GMI::ModelInfo> Models{};
-            std::span<const GMI::ModelDependency> Dependencies{};
-            std::span<const std::byte> Dynamics{};
+            GMI::ModelIR ModelDescription{};
             uint64_t DynamicRevision{1};
         };
 
@@ -166,29 +164,32 @@ namespace BidirectionalInMemGraph
     {
         using CFC = CoreOfFabricCoordinator;
 
-        static void GetModelCatalog(
-            const CFC::FabricCache& cache, 
-            const uint64_t* hot,
-            ModelCatalog& catalog
-        ) noexcept
-        {
-            const ModelInfo* mi_ptr = reinterpret_cast<const ModelInfo*>(hot + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_);
-            const ModelDependency* dp_ptr = reinterpret_cast<const ModelDependency*>(mi_ptr + cache.ModelDiaphragm_.ModelCount_);
-            const std::byte* dynamics = reinterpret_cast<const std::byte*>(dp_ptr + cache.ModelDiaphragm_.ModelDependencyCount_);
-
-            catalog.Models = {mi_ptr, cache.ModelDiaphragm_.ModelCount_};
-            catalog.Dependencies = {dp_ptr, cache.ModelDiaphragm_.ModelDependencyCount_};
-            catalog.Dynamics = {dynamics, cache.ModelDiaphragm_.ModelDynamicsByteCount_};
-        }
-
-        static ModelCatalog GetModelCatalog(
-            const CFC::FabricCache& cache, 
+        // Each model's 64-byte description owns its configuration and
+        // incoming-dependency ranges. The array data is flat/relocatable.
+        // Directory order: Descriptions, Dependencies, Layers, LayerAPCs, Dynamics.
+        static ModelIR GetModelIR(
+            const CFC::FabricCache& cache,
             const uint64_t* hot
         ) noexcept
         {
-            ModelCatalog catalog{};
-            GetModelCatalog(cache, hot, catalog);
-            return catalog;
+            const std::byte* cursor = reinterpret_cast<const std::byte*>(
+                hot + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_
+            );
+
+            ModelIR result{};
+            const auto Take___ = [&cursor]<class T>(size_t count) noexcept -> std::span<const T>
+            {
+                const T* ptr = reinterpret_cast<const T*>(cursor);
+                cursor += count * sizeof(T);
+                return {ptr, count};
+            };
+
+            result.Description = Take___.template operator()<IndividualModelDescription>(cache.ModelDiaphragm_.ModelCount_);
+            result.Dependencies = Take___.template operator()<ModelDependency>(cache.ModelDiaphragm_.ModelDependencyCount_);
+            result.Layers = Take___.template operator()<LayerDescription>(cache.ModelDiaphragm_.LayerCount_);
+            result.LayerAPCs = Take___.template operator()<ModelAPC>(cache.ModelDiaphragm_.APCRecordCount_);
+            result.Dynamics = {cursor, cache.ModelDiaphragm_.ModelDynamicsByteCount_};
+            return result;
         }
     }
 

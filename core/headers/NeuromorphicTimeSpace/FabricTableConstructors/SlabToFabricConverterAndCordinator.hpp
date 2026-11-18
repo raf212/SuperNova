@@ -4,7 +4,7 @@
 namespace BidirectionalInMemGraph
 {
     class RelocatableSlabStorage;
-    class SlabToFabricConverterAndCordinator : public CompiledDAGTableConstructor
+    class SlabToFabricConverterAndCordinator : public ModelMutation
     {
         friend class AdaptivePackedCellContainer;
         friend class RelocatableSlabStorage;
@@ -19,9 +19,8 @@ namespace BidirectionalInMemGraph
 
         bool __InitSlabAndCache__(const CFC::FabricInitConf& storage, CFC::FabricCache& cache) noexcept;
         void __InitModelStorage__(
-            const GMI::ModelCatalog& catalog, 
-            std::byte* directory,
-            uint64_t count_of_apc
+            const GMI::ModelIR& ir,
+            std::byte* directory
         ) noexcept;
 
         bool __InitMatrixRegionTable__(const StorageAllocationDef& layout) noexcept;

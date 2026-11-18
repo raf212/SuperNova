@@ -157,38 +157,28 @@ namespace BidirectionalInMemGraph
     }
 
     void SlabToFabricConverterAndCordinator::__InitModelStorage__(
-        const GMI::ModelCatalog& catalog, 
-        std::byte* directory,
-        uint64_t count_of_apc
+        const GMI::ModelIR& ir,
+        std::byte* directory
     ) noexcept
     {
-        if (!catalog.Models.empty()) 
+        const auto Copy___ = [&directory]<class T>(std::span<const T> values) noexcept -> void
         {
-            std::memcpy(directory, catalog.Models.data(), catalog.Models.size_bytes());
-        }
-        if (!catalog.Dependencies.empty()) 
-        {
-            std::memcpy(
-                directory + catalog.Models.size_bytes(), 
-                catalog.Dependencies.data(), 
-                catalog.Dependencies.size_bytes()
-            );
-        }
-        if (!catalog.Dynamics.empty()) 
-        {
-            std::memcpy(
-                directory + catalog.Models.size_bytes() + catalog.Dependencies.size_bytes(),
-                catalog.Dynamics.data(),
-                catalog.Dynamics.size()
-            );
-        }
+            if (!values.empty()) 
+            {
+                std::memcpy(directory, values.data(), values.size_bytes());
+                directory += values.size_bytes();
+            }
+        };
+        Copy___(ir.Description);
+        Copy___(ir.Dependencies);
+        Copy___(ir.Layers);
+        Copy___(ir.LayerAPCs);
 
-        for (uint32_t s = 0; s < count_of_apc; s++) 
+        if (!ir.Dynamics.empty()) 
         {
-            std::construct_at(NodeModel_(s));
+            std::memcpy(directory, ir.Dynamics.data(), ir.Dynamics.size());
         }
     }
-
 
     bool SlabToFabricConverterAndCordinator::__InitMatrixRegionTable__(const StorageAllocationDef& layout) noexcept
     {
@@ -251,19 +241,21 @@ namespace BidirectionalInMemGraph
 
         InitFlagReset flag{DisposableFCache___.InitializationInProgress_};
         const RawPackedCellAllocator allocator =  storage.HostAlloc ? *storage.HostAlloc : RawPackedCellAllocator{};
-        const GMI::ModelCatalog catalog{
-            storage.Models,
-            storage.Dependencies,
-            storage.Dynamics                                                                                                                          
-        };
+        const GMI::ModelIR& ir = storage.ModelDescription;
 
         if (
             !allocator.IsValid() ||
-            !storage.DynamicRevision ||
-            !catalog.ValidCatalog()
+            !storage.DynamicRevision  ||
+            ir.LayerAPCs.size() > ADS::APC_INDEX_BOUND_SENTINAL ||
+            ir.Layers.size() > ADS::APC_INDEX_BOUND_SENTINAL
         ) 
         {
             return false;
+        }
+
+        for (const GMI::ModelAPC& assignment : ir.LayerAPCs) 
+        {
+            if (assignment.Generation != UNSIGNED_ZERO) return false;
         }
 
         //CODE:: INITCACHE_FIX_PRIO_01
@@ -276,9 +268,11 @@ namespace BidirectionalInMemGraph
             cache.ActiveRegionMask_ = region_conf.ActiveRegionMask;
             cache.MatrixBatchCapacity_ = region_conf.BatchCapacity;
             cache.HasDefaultRegionTable_ = region_conf.IsDefault;
-            cache.ModelDiaphragm_.ModelCount_ = static_cast<uint16_t>(storage.Models.size());
-            cache.ModelDiaphragm_.ModelDependencyCount_ = static_cast<uint32_t>(storage.Dependencies.size());
-            cache.ModelDiaphragm_.ModelDynamicsByteCount_ = storage.Dynamics.size();
+            cache.ModelDiaphragm_.ModelCount_ = static_cast<uint16_t>(ir.Description.size());
+            cache.ModelDiaphragm_.ModelDependencyCount_ = static_cast<uint32_t>(ir.Dependencies.size());
+            cache.ModelDiaphragm_.ModelDynamicsByteCount_ = ir.Dynamics.size();
+            cache.ModelDiaphragm_.LayerCount_ = static_cast<uint32_t>(ir.Layers.size());
+            cache.ModelDiaphragm_.APCRecordCount_ = static_cast<uint32_t>(ir.LayerAPCs.size());
         }
 
         SAD layout;
@@ -289,9 +283,8 @@ namespace BidirectionalInMemGraph
         if (!__InitSlabAndCache__(storage, cache)) return false;
 
         __InitModelStorage__(
-            catalog,
-            reinterpret_cast<std::byte*>(DisposableFCache___.SlabBasePtr_ + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_),
-            cache.CountOfAPC_
+            ir,
+            reinterpret_cast<std::byte*>(DisposableFCache___.SlabBasePtr_ + cache.ModelDiaphragm_.LocalDirectoryBeginIdx_)
         );
 
         if (!__InitMatrixRegionTable__(layout)) return false;
@@ -315,6 +308,8 @@ namespace BidirectionalInMemGraph
         {
             __NumericalBacking__.WarmAll();
         }
+
+        if (!ValidateAttachedFabricLayout_()) return false;
 
         __NumericalBacking__.CommitCreation();
         DisposableFCache___.SealedDAGRevision_.store(replacement.Revision() + 1, std::memory_order_release);
@@ -373,8 +368,14 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        const GMI::ModelCatalog catalog = GMI::GetModelCatalog(*FabCache_, DisposableFCache___.SlabBasePtr_);
-        if (!catalog.ValidCatalog()) return false;
+        std::vector<uint8_t> mapped;
+        const GMI::ModelIR ir = GMI::GetModelIR(*FabCache_, DisposableFCache___.SlabBasePtr_);
+
+        if (
+            !ir.Valid(FabCache_->CountOfAPC_) ||
+            !ValidateLayer_(ir, mapped)
+        ) return false;
+
 
         StorageAllocationDef layout{};
         CFC::FabricCache expected = *FabCache_;
@@ -392,7 +393,7 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t s = 0; s < FabCache_->CountOfAPC_; s++) 
         {
-            const SD::ConstRSSpan row = MetrixViewRow_(s);
+            const SD::ConstRSSpan row = MatrixViewRow_(s);
             if (row.size() != FabCache_->ActiveRegionCount_) 
             {
                 return false;
@@ -406,6 +407,18 @@ namespace BidirectionalInMemGraph
                     continue;
                 }
 
+                if (schema.ModelInstance != UNSIGNED_ZERO && !mapped[s]) 
+                {
+                    HAS::LifeCycleControl state{};
+                    if (
+                        ReadAPCStateAtomically_(s, state) != SeqLockedOperation::FOUND ||
+                        state.State == StateOfAPC::LIVE
+                    ) 
+                    {
+                        return false;
+                    }
+                }
+
                 if (
                     static_cast<uint8_t>(schema.Region) >= ADS::CountOfMacroColumn() ||
                     (mask & ADS::RegionBit(schema.Region)) ||
@@ -416,7 +429,7 @@ namespace BidirectionalInMemGraph
                         FabCache_->PerAPCRuntimeCellCount_, 
                         FabCache_->MatrixBatchCapacity_
                     ) ||
-                    !catalog.Accept(schema)
+                    !ir.Accept(schema)
                 ) 
                 {
                     return false;
@@ -427,15 +440,6 @@ namespace BidirectionalInMemGraph
             }
 
             if ((mask != UNSIGNED_ZERO && mask != FabCache_->ActiveRegionMask_))
-            {
-                return false;
-            }
-
-            const GMI::NodeModelDescription* description = NodeModel_(s);
-            if (
-                !description ||
-                (description->Instance) >  catalog.Models.size()
-            ) 
             {
                 return false;
             }

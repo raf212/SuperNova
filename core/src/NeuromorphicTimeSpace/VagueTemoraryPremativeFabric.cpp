@@ -826,7 +826,7 @@ namespace BidirectionalInMemGraph
                 generation_cell,
                 control_values.Generation
             ) ||
-            !desired_apc.InitializeNodeModelDescription_()
+            !desired_apc.StampModelAPCGeneration_()
         )
         {
             AbortCreation___();

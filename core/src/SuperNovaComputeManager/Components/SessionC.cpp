@@ -79,7 +79,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
         std::span<uint64_t> hot_babe = owner.HotStorageDramUsm();
         std::span<uint64_t> probable_segmentpool = owner.NumericalStorage();
 
-        if (!hot_babe.empty() || probable_segmentpool.empty()) return false;
+        if (hot_babe.empty() || probable_segmentpool.empty()) return false;
 
         try 
         {
@@ -300,7 +300,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     {
         if (
             (Residency_.Active() || Session_) &&
-            OwnsEpoch_()
+            !OwnsEpoch_()
         ) 
         {   
             return false;
@@ -342,7 +342,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
     bool SessionCompute::Configure(const ConfigC& config) noexcept
     {
-        if (!Residency_.Active() || Session_ || !Residency_.Empty()) 
+        if (Residency_.Active() || Session_ || !Residency_.Empty()) 
         {
             SetError_(ErrorC::CONFIGIRED_AFTER_FABRIC_INIT);
             return false;
@@ -393,6 +393,20 @@ namespace BidirectionalInMemGraph::ComputerDetail
         return info;
     }
 
-    
+    bool SessionCompute::Close() noexcept
+    {
+        // Finish the active numerical epoch before publishing the outer session.
+        // Both operations require ownership of the corresponding Fabric gate.
+        if (Residency_.Active() && !EndEpoch()) return false;
+        if (Session_ && !EndSession()) return false;
+
+        if (!Residency_.Evict(Device_)) 
+        {
+            SetError_(ErrorC::DEVICE_EXECUTION_FAILED);
+            return false;
+        }
+        return Synchronize();
+    }
+
 
 }

@@ -19,7 +19,7 @@ namespace BidirectionalInMemGraph
     {
         using SD = SchemaDefinition;
 
-        SD::ConstRSSpan region_row = APCCache_.FabricOwnerPtr_->MetrixViewRow_(APCCache_.APCSlotIdx_);
+        SD::ConstRSSpan region_row = APCCache_.FabricOwnerPtr_->MatrixViewRow_(APCCache_.APCSlotIdx_);
         out = ResolveRegionBiteView{};
         if (
             !IsActiveAPC() ||

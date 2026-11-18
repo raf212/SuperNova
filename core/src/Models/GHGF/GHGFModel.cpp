@@ -231,12 +231,49 @@ namespace BidirectionalInMemGraph
         GHGFCache_.NodeCount_ = UNSIGNED_ZERO;
         GHGFCache_.ObservationCount_ = UNSIGNED_ZERO;
         DisposableFCache___.DefaultRegionTable_ = profile.DefaultSchemaTable;
+
+        // ModelIR is a non-owning view. These buffers MUST outlive InitializeFabric().
+        // Model 1 owns a single ordered layer with positions [0, slot_count).
+        for (auto& schema : DisposableFCache___.DefaultRegionTable_)
+        {
+            if (!SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED))
+                schema.ModelInstance = 1;
+        }
+
+        const std::array<GMI::IndividualModelDescription, 1> descriptions{{
+            GMI::IndividualModelDescription{
+                1, PreBuildModels::GHGF, 1, 0,
+                0, 0,    // Model configuration
+                0, 1,    // One ordered layer
+                0, 0,    // No incoming model dependencies
+                1        // Structure revision
+            }
+        }};
+        const std::array<GMI::LayerDescription, 1> layers{{
+            GMI::LayerDescription{0, 0, slot_count, slot_count}
+        }};
+
+        std::vector<GMI::ModelAPC> assignments;
+        try
+        {
+            assignments.resize(slot_count);
+        }
+        catch (...)
+        {
+            return false;
+        }
+        for (uint32_t slot = 0; slot < slot_count; ++slot)
+            assignments[slot].Slot = slot;
+
+        CFC::FabricInitConf model_storage{};
+        model_storage.ModelDescription = {descriptions, {}, layers, assignments, {}};
         if (
             !InitializeFabric(
                 slot_count,
                 profile.RequiredAPCCells,
                 profile.FabricConfig,
-                profile.MaxDirectParentPerAxis
+                profile.MaxDirectParentPerAxis,
+                model_storage
             )
         )
         {
@@ -245,7 +282,7 @@ namespace BidirectionalInMemGraph
 
         Profile_ = profile;
 
-        for (const SD::RegionSchemaRecord& record : MetrixViewRow_(0u))
+        for (const SD::RegionSchemaRecord& record : MatrixViewRow_(0u))
         {   
             switch (record.Region)
             {
