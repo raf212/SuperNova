@@ -2,4 +2,6 @@
 
 > 02. GHGFModel.cpp -> InitializeGHGFFabric : Is a place holder and AI generated used temporaryly before writing global model builder.
 
+> 03. RegionSchemaRecord : unnecessery values can be removed 
+
 > 010. Fix CODE:: BTA001

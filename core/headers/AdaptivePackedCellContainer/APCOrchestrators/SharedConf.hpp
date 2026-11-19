@@ -8,7 +8,7 @@ namespace BidirectionalInMemGraph
     static constexpr size_t BIT_COUNT_OF_UINT64_T = LEN_OF_BYTE_IN_BITS * sizeof(uint64_t);
     static constexpr uint8_t BIT_COUNT_OF_UINT32_T = LEN_OF_BYTE_IN_BITS * sizeof(uint32_t);
     static constexpr unsigned UNSIGNED_ZERO = 0u;
-    static constexpr uint16_t MINIMUM_APC_CELL_COUNT = 128u;
+    static constexpr uint16_t MINIMUM_APC_CELL_COUNT = 32u;
     static constexpr uint64_t FABRIC_CELL_SENTINAL = UINT64_MAX;
 
     static constexpr uint8_t EDGE_COUNT = 2u;
@@ -24,7 +24,7 @@ namespace BidirectionalInMemGraph
         ERROR_SLOT = 4,
         WEIGHTLESS_LOOKUP = 5,
         WEIGHT_SLOT = 6,
-        AUX_SLOT = 7,
+        BIAS_SLOT = 7,
         EXTRA_SLOT = 8,
         FREE_SLOT     = 9
     };
