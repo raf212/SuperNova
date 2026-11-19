@@ -84,7 +84,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             CMF::FabricCheckpoint image;
             CFC::FabricCache cache{};
             if (
-                !image.Open(path, storege.MaxCheckPointCells);
+                !image.Open(path, storege.MaxCheckPointCells) ||
                 !image.FabSlabCache(cache)
             ) 
             {

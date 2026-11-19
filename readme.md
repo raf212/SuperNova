@@ -125,9 +125,9 @@ CPU execution does not require a GPU SDK.
 Windows:
 
 ```powershell
-.\SuperNova-Windows-Install.ps1 -CpuOnly
-.\SuperNova-Windows-Install.ps1 -BuildPython
-.\SuperNova-Windows-Install.ps1 -RebuildAdaptiveCpp
+powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -CpuOnly
+powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -BuildPython
+powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -RebuildAdaptiveCpp
 ```
 
 Linux:

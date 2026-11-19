@@ -128,7 +128,6 @@ set(
 
 set(HEADERS_DIR  "${CMAKE_SOURCE_DIR}/headers")
 set(SRC_DIR      "${CMAKE_SOURCE_DIR}/src")
-set(BINDINGS_DIR "${CMAKE_SOURCE_DIR}/bindings")
 
 # =============================================================================
 # Optional AdaptiveCpp / SYCL integration
@@ -577,6 +576,10 @@ function(supernova_enable_adaptivecpp TARGET_NAME VISIBILITY)
         SOURCES ${ARGN}
     )
 
+    # AdaptiveCpp's compiler launcher is not a C++20 module scanner.
+    # These targets use headers/templates, not C++ named modules.
+    set_property(TARGET ${TARGET_NAME} PROPERTY CXX_SCAN_FOR_MODULES OFF)
+
     # VectorizedSuperNova.hpp uses this switch to compile its SYCL backend while
     # ordinary SuperNova builds retain only the scalar implementation.
     target_compile_definitions(
@@ -762,25 +765,13 @@ endif()
 
 if(SUPERNOVA_BUILD_PYTHON)
 
-    file(GLOB_RECURSE BINDING_SRCS CONFIGURE_DEPENDS
-        "${BINDINGS_DIR}/*.cpp"
-        "${BINDINGS_DIR}/*.cc"
-        "${BINDINGS_DIR}/*.cxx"
-    )
-
-    if(NOT BINDING_SRCS)
-        message(FATAL_ERROR
-            "SUPERNOVA_BUILD_PYTHON=ON, but no binding source files were found "
-            "under ${BINDINGS_DIR}."
-        )
-    endif()
-
     # Prefer a user-provided local checkout, then an already-installed package.
     # Network fetching is opt-in so the C++ core can always configure offline.
+    set(PYBIND11_FINDPYTHON ON)
     if(PYBIND11_DIR)
         if(EXISTS "${PYBIND11_DIR}/CMakeLists.txt")
             message(STATUS "SuperNova: using local pybind11 at ${PYBIND11_DIR}")
-            add_subdirectory("${PYBIND11_DIR}" EXCLUDE_FROM_ALL)
+            add_subdirectory("${PYBIND11_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/pybind11" EXCLUDE_FROM_ALL)
         else()
             message(FATAL_ERROR
                 "PYBIND11_DIR was set, but no CMakeLists.txt exists at: "
@@ -788,7 +779,6 @@ if(SUPERNOVA_BUILD_PYTHON)
             )
         endif()
     else()
-        set(PYBIND11_FINDPYTHON ON)
         find_package(pybind11 CONFIG QUIET)
 
         if(NOT pybind11_FOUND)
@@ -813,50 +803,7 @@ if(SUPERNOVA_BUILD_PYTHON)
         endif()
     endif()
 
-    set(
-        PREFERRED_BINDING
-        "${BINDINGS_DIR}/PackedCellCoreBindings.cpp"
-    )
-
-    if(EXISTS "${PREFERRED_BINDING}")
-        set(MODULE_SRC "${PREFERRED_BINDING}")
-    else()
-        list(GET BINDING_SRCS 0 MODULE_SRC)
-        message(STATUS "SuperNova: using binding source ${MODULE_SRC}")
-    endif()
-
-    pybind11_add_module(
-        SuperNovaBind
-        ${MODULE_SRC}
-    )
-
-    target_link_libraries(
-        SuperNovaBind
-        PRIVATE
-            atomiccim_core_pic
-    )
-
-    target_include_directories(
-        SuperNovaBind
-        PRIVATE
-            "${HEADERS_DIR}"
-            "${BINDINGS_DIR}"
-    )
-
-    supernova_enable_adaptivecpp(
-        SuperNovaBind
-        PRIVATE
-        "${MODULE_SRC}"
-    )
-
-    supernova_optimize_compile(SuperNovaBind)
-    supernova_optimize_link(SuperNovaBind)
-
-    source_group(
-        TREE "${BINDINGS_DIR}"
-        PREFIX "Binding Files"
-        FILES ${BINDING_SRCS}
-    )
+    add_subdirectory(bindings)
 
     # Preserve the original behavior: place the extension beside the repository
     # Python entry point rather than inside the build tree.
