@@ -17,6 +17,7 @@ namespace SuperNovaBindings
         using Protocol = Schema::SchemaProtocols;
         using Flags = Schema::SchemaFlags;
         using Result = APC::MutationResult;
+        using Record = Schema::RegionSchemaRecord;
 
         py::enum_<Column>(module, "Column")
             .value("BOTTOM_UP", Column::BOTTOM_UP_SLOT)
@@ -53,7 +54,6 @@ namespace SuperNovaBindings
             .value("INVALID", Result::INVALID)
             .value("RETRY", Result::RETRY);
 
-        using Record = Schema::RegionSchemaRecord;
         py::class_<Record>(module, "RegionSchema")
             .def(py::init([](Column column, DType dtype, uint32_t rows, uint32_t columns,
                              Protocol protocol, uint32_t record_count, bool batched,
