@@ -87,30 +87,38 @@ namespace SuperNovaBindings
 
         py::class_<APCHandle>(module, "APC")
             .def_property_readonly("active", [](APCHandle& self) { return self.IsActiveAPC(); })
+
             .def_property_readonly("slot", [](APCHandle& self) { return self.GetThisSlotIdx(); },
                                    "Native slot index. Inactive handles return INVALID_SLOT.")
+
             .def("retire", [](APCHandle& self, uint32_t max_tries) {
                 return self.Retire(max_tries);
             }, py::arg("max_tries") = DEFAULT_MAX_TRIES)
+
             .def("add_parent", [](APCHandle& self, APCHandle& parent, Edge edge) {
                 return self.AddParent(parent, edge);
             }, py::arg("parent"), py::arg("edge") = Edge::VALUE_PARENT_EDGE_TABLE_H)
+
             .def("remove_parent", [](APCHandle& self, APCHandle& parent, Edge edge) {
                 return self.RemoveParent(parent, edge);
             }, py::arg("parent"), py::arg("edge") = Edge::VALUE_PARENT_EDGE_TABLE_H)
+
             .def("replace_parent", [](APCHandle& self, APCHandle& old_parent,
                                        APCHandle& new_parent, Edge edge) {
                 return self.ReplaceParent(old_parent, new_parent, edge);
             }, py::arg("old_parent"), py::arg("new_parent"),
                py::arg("edge") = Edge::VALUE_PARENT_EDGE_TABLE_H)
+
             .def("find_parent", [](APCHandle& self, uint32_t ordinal, Edge edge) {
                 auto parent = self.FindParent(edge, ordinal);
                 return parent.IsActiveAPC()
                     ? std::make_unique<APCHandle>(self.Fabric(), std::move(parent)) : nullptr;
             }, py::arg("ordinal"), py::arg("edge") = Edge::VALUE_PARENT_EDGE_TABLE_H)
-            .def("read_region", [](APCHandle& self, Column column, DType dtype) {
-                return VisitRegionType(dtype, [&]<class T> { return ReadRegion<T>(self, column); });
+
+            .def("region_view", [](APCHandle& self, Column column, DType dtype, bool writable = false) {
+                return VisitRegionType(dtype, [&]<class T> { return RegionView<T>(self, column, writable); });
             }, py::arg("column"), py::arg("dtype"))
+
             .def("write_region", [](APCHandle& self, Column column, DType dtype, const py::array& values) {
                 VisitRegionType(dtype, [&]<class T> {
                     WriteRegion<T>(self, column, values, self.Fabric()->ExecutionGate());
