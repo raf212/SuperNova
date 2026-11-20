@@ -88,31 +88,31 @@ namespace SuperNovaBindings
     };
 
     template<class T>
-    py::array RegionView(APCHandle& apc, MacroColumn column, bool writable) noexcept
+    py::array RegionView(APCHandle& apc, MacroColumn column, bool writable)
     {
         using namespace BidirectionalInMemGraph;
 
         SNTOComputerBridge<T> bridge = apc.BuildAViewOverRegion<T>(column);
-        const std::optional<std::span<T>> cells = std::as_const(bridge).RawSpan();
+        const std::optional<std::span<const T>> cells = std::as_const(bridge).RawSpan();
         if (!cells || (writable && !bridge.RawSpan()))
         {
             throw std::runtime_error("Expected an accessible region with the requested dtype and protocol.");
         }
         const RegionArrayLayout<T> layout(bridge);
-        std::unique_ptr owner = std::make_unique<RegionArrayLayout<T>>(
+        std::unique_ptr owner = std::make_unique<RegionArrayOwner<T>>(
             apc.Fabric(),
             std::move(bridge)
         );
 
         py::capsule base(owner.get(), [](void* ptr)
             {
-                delete static_cast<RegionArrayLayout<T>*>(ptr);
+                delete static_cast<RegionArrayOwner<T>*>(ptr);
             }
         );
         owner.release();
 
         py::array result(
-            RegionArrayLayout<T>(),
+            RegionDType<T>(),
             {layout.Rows, layout.Columns},
             {layout.RowStride, static_cast<py::ssize_t>(sizeof(T))},
             cells->data(), base
@@ -129,7 +129,7 @@ namespace SuperNovaBindings
     void WriteRegion(
         APCHandle& apc, MacroColumn column,
         const py::array& values
-    ) noexcept
+    )
     {
         using namespace BidirectionalInMemGraph;
         SNTOComputerBridge<T> bridge = apc.BuildAViewOverRegion<T>(column);
