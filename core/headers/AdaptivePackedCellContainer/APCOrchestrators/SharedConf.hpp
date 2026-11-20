@@ -56,10 +56,10 @@ namespace BidirectionalInMemGraph
         FNN = 1,
         RNN = 2,
         TRANSFORMER = 3,
-        STRUCTRURAL_ADAPTATION = 4,
-        GHGF = 5
+        GHGF = 4,
+        DENSE = 5
     };
-    static constexpr PreBuildModels LAST_DEFINED_MODEL_IDX = PreBuildModels::GHGF;
+    static constexpr PreBuildModels LAST_DEFINED_MODEL_IDX = PreBuildModels::DENSE;
     
     static  constexpr uint64_t MaskLowBitsForU64(unsigned n) noexcept
     {

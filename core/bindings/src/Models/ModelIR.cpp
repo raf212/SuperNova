@@ -18,7 +18,6 @@ namespace SuperNovaBindings
             .value("FNN", Family::FNN)
             .value("RNN", Family::RNN)
             .value("TRANSFORMER", Family::TRANSFORMER)
-            .value("STRUCTURAL_ADAPTATION", Family::STRUCTRURAL_ADAPTATION)
             .value("GHGF", Family::GHGF);
 
         py::class_<Dependency>(module, "Dependency")
