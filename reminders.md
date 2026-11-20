@@ -4,6 +4,6 @@
 
 > 03. RegionSchemaRecord : unnecessery values can be removed and resolve should GHGF directly use RegionSchemaRecord ??
 
-> 04. 
+> 04. Separate PreBuildModels -> GHGF is not a model its a learning rule like backprop
 
 > 010. Fix CODE:: BTA001

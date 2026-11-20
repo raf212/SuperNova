@@ -1,7 +1,8 @@
 .vs
 .vscode
 .cache
-*build*
+*build-*
+*-build*
 /FUTUTE_DIRECTIONS
 *.pdb
 *.ilk
