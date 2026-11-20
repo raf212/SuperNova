@@ -121,7 +121,7 @@ namespace SuperNovaBindings
 
             .def("write_region", [](APCHandle& self, Column column, DType dtype, const py::array& values) {
                 VisitRegionType(dtype, [&]<class T> {
-                    WriteRegion<T>(self, column, values, self.Fabric()->ExecutionGate());
+                    WriteRegion<T>(self, column, values);
                 });
             }, py::arg("column"), py::arg("dtype"), py::arg("values").noconvert());
 

@@ -103,7 +103,53 @@ namespace SuperNovaBindings
         {
             throw std::runtime_error("Expected an accessible private region with the requested dtype.");
         }
-        
+
+        const RegionArrayLayout<T> layout(bridge);
+        if (
+            !values.dtype().equal(RegionDType<T>()) ||
+            !(values.flags() & py::array::c_style) ||
+            values.ndim() != 2  || 
+            values.shape(0) != layout.Rows ||
+            values.shape(1) != layout.Columns ||
+            values.nbytes() != (layout.Rows * layout.RowBytes())
+        ) 
+        {
+            throw py::value_error("Expected a C-contiguous array with the exact region dtype and shape.");
+        }
+
+        if (layout.RowStride == layout.RowBytes()) 
+        {
+            // The source may itself be a view of this region.
+            std::memmove(cells->data(), values.data(), static_cast<size_t>(values.nbytes()));
+        }
+        else
+        {
+            std::span source = std::span(
+                static_cast<const std::byte*>(values.data()),
+                static_cast<size_t>(values.nbytes())
+            );
+            std::span destination = std::as_writable_bytes(*cells);
+
+            const std::less<const std::byte*> before;
+            std::vector<std::byte> snapshot;
+            if (
+                before(source.data(), destination.data() + destination.size()) &&
+                before(destination.data(), source.data() + source.size())
+            ) 
+            {
+                snapshot.assign(source.begin(), source.end());
+                source = snapshot;
+            }
+            for (py::ssize_t row = 0; row < layout.Rows; row++) 
+            {
+                std::memcpy(
+                    destination.data() + (row * layout.RowStride),
+                    source.data() + (row * layout.RowBytes()),
+                    static_cast<size_t>(layout.RowBytes())
+                );
+            }
+        }
+        apc.Fabric()->ExecutionGate().NotifyHostChange();
     }
 
 }
