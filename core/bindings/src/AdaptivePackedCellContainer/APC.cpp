@@ -115,9 +115,15 @@ namespace SuperNovaBindings
                     ? std::make_unique<APCHandle>(self.Fabric(), std::move(parent)) : nullptr;
             }, py::arg("ordinal"), py::arg("edge") = Edge::VALUE_PARENT_EDGE_TABLE_H)
 
-            .def("region_view", [](APCHandle& self, Column column, DType dtype, bool writable = false) {
+            .def("read_region", [](APCHandle& self, Column column, DType dtype) {
+                return VisitRegionType(dtype, [&]<class T> { return RegionView<T>(self, column, false); });
+            }, py::arg("column"), py::arg("dtype"),
+               "Return a read-only, zero-copy NumPy view of a private or immutable region.")
+
+            .def("region_view", [](APCHandle& self, Column column, DType dtype, bool writable) {
                 return VisitRegionType(dtype, [&]<class T> { return RegionView<T>(self, column, writable); });
-            }, py::arg("column"), py::arg("dtype"))
+            }, py::arg("column"), py::arg("dtype"), py::kw_only(), py::arg("writable") = false,
+               "Return a pinned, zero-copy NumPy view. Writable views require a private region.")
 
             .def("write_region", [](APCHandle& self, Column column, DType dtype, const py::array& values) {
                 VisitRegionType(dtype, [&]<class T> {
