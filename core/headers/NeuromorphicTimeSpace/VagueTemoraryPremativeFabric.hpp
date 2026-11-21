@@ -87,6 +87,7 @@ protected:
     ) noexcept;
 
 public:
+    bool OpenAPC(uint32_t slot, uint32_t generation, AdaptivePackedCellContainer apc) noexcept;
 
     void NotifyExternalStructuralCommits(uint64_t count) noexcept;
 
@@ -103,30 +104,11 @@ public:
         MacroColumnOfAPC column,
         uint32_t ordinal,
         std::optional<uint32_t> generation
-    ) noexcept
-    {
-        ReadLease admission = ExecutionGate().TryTransientRead(true);
-        AdaptivePackedCellContainer apc{};
-        if (
-            !admission ||
-            !BindExistingAPCSnapshot_(slot, apc, generation)
-        ) 
-        {
-            return {};
-        }
-
-        SNTOComputerBridge<DT> region = apc.template BuildAViewOverRegion<DT>(column, ordinal);
-
-        if (
-            region.GetProtocol() != SD::SchemaProtocols::PRIVATE_REGION
-        ) 
-        {
-            return {};
-        }
-        return region;
-    }
+    ) noexcept;
     
 };
 
 
 }
+
+#include "../../templates/NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.tpp"

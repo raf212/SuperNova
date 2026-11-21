@@ -160,19 +160,6 @@ namespace BidirectionalInMemGraph
     protected:
         bool ValidateLayer_(const GMI::ModelIR& ir, std::vector<uint8_t>& mapped) noexcept;
 
-    public:
-
-        GMI::Dense::ModelSnapshot InspectDenseModel(uint32_t instance) noexcept;
-
-        uint64_t DenseStructureRevision(uint32_t instance) noexcept;
-
-        bool OpenAPC(uint32_t slot, uint32_t generation, AdaptivePackedCellContainer apc) noexcept;
-
-        bool ReplaceModelLayerAPCs(
-            uint32_t model_instance,
-            uint32_t layer_position,
-            std::span<const GMI::ModelAPC> ordered_assignments
-        ) noexcept;
     };
 
 
