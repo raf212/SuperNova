@@ -13,6 +13,9 @@ namespace
     constexpr size_t OPERATOR_BYTES = 13u;
     constexpr size_t TENSOR_HEADER_BYTES = 15u;
     constexpr size_t BINDING_BYTES = 21u;
+    constexpr uint8_t DIM_OF_WEIGHT_TENSOR = 2u;
+    constexpr uint8_t DIM_OF_BIAS_TENSOR = 1u;
+    
     
 
     constexpr void Require(bool valid)
@@ -211,5 +214,155 @@ namespace
         Require(reader.Empty());
         return dense_ir;
     }
+
+    void DenseModelDynamics::Validate(std::span<const LayerDescription> layers) const
+    {
+        using Region = std::tuple<uint32_t, uint32_t, MacroColumnOfAPC>;
+        struct __Range__ final
+        {
+            Region Region{};
+            uint32_t Offset{};
+            uint64_t End{};
+            SD::DataTypeOfMacroColumn Dtype{};
+        };
+
+        struct __ValueGeometry__ final
+        {
+            uint32_t Width{};
+            SD::DataTypeOfMacroColumn DType{};
+        };
+
+        std::vector<__Range__> ranges;
+        std::unordered_set<std::string_view> names;
+        for (const TensorDescription& tensor : Tensors) 
+        {
+            Require(
+                tensor.LayerIndex < layers.size() &&
+                (
+                    tensor.Role == TensorRole::Parameter ||
+                    tensor.Role == TensorRole::Buffer
+                ) &&
+                SD::DTypeByteCount(tensor.DType).has_value() &&
+                !tensor.Name.empty() &&
+                tensor.Name.find('\0') == std::string::npos &&
+                names.insert(tensor.Name).second
+            );
+
+            uint64_t count = UNSIGNED_ZERO;
+            if (std::ranges::find(tensor.Shape, UNSIGNED_ZERO) == tensor.Shape.end()) 
+            {
+                count = 1;
+                for (const uint32_t dim : tensor.Shape) 
+                {
+                    Require(count <= (std::numeric_limits<uint64_t>::max() / dim));
+                    count *= dim;
+                }
+            }
+
+            uint64_t cursor = UNSIGNED_ZERO;
+            for (const TensorBindings& binding : tensor.Bindings) 
+            {
+                const uint64_t end = uint64_t{binding.APCOffset} + binding.ElementCount;
+                Require(
+                    binding.APCIndex < layers[tensor.LayerIndex].APCCount &&
+                    static_cast<uint8_t>(binding.Column) < ADS::CountOfMacroColumn() &&
+                    binding.ElementCount != UNSIGNED_ZERO &&
+                    binding.TensorOffset == cursor &&
+                    binding.ElementCount <= (count - cursor) &&
+                    end <= ADS::APC_INDEX_BOUND_SENTINAL
+                );
+                cursor += binding.ElementCount;
+                ranges.emplace_back(
+                    Region{tensor.LayerIndex, binding.APCIndex, binding.Column},
+                    binding.APCOffset, 
+                    end,
+                    tensor.DType
+                );
+            }
+            Require(cursor == count);
+        }
+        std::sort(
+            ranges.begin(),
+            ranges.end(),
+            [](const __Range__& a, const __Range__& b)
+            {
+                return std::tie(a.Region, a.Offset)
+                    < std::tie(b.Region, b.Offset);
+            }
+        );
+
+        for (size_t i = 0; i < ranges.size(); i++) 
+        {
+            const __Range__& range = ranges[i];
+            const __Range__& previous_range = ranges[i - 1];            
+            if (range.Region == previous_range.Region) 
+            {
+                Require(
+                    range.Offset >= previous_range.End &&
+                    range.Dtype == previous_range.Dtype
+                );
+            }
+        }
+
+        Require(
+            TopologyFingerPrint.empty() ||
+            (
+                TopologyFingerPrint.size() == FINGERPRINT_BYTES &&
+                TopologyFingerPrint.find_first_not_of("0123456789abcdef") == std::string::npos
+
+            )
+        );
+        if (Graph) return;
+
+        Require(!TopologyFingerPrint.empty() && Graph->Output <= Graph->Operators.size());
+
+        std::vector<size_t> origins{UNSIGNED_ZERO};
+        std::vector<std::optional<__ValueGeometry__>> geometry{1};
+        for (const Operator& op : Graph->Operators) 
+        {
+            Require(op.Input < origins.size());
+            if (op.Kind == OperatorKind::ReLU) 
+            {
+                Require(op.Weight == NO_TENSOR && op.Bias == NO_TENSOR);
+                const size_t origin = origins[op.Input];
+                origins.push_back(origin);
+                geometry.emplace_back();
+                continue;
+            }
+
+            Require(op.Kind == OperatorKind::Linear && op.Weight < Tensors.size());
+            const TensorDescription& weight_tensor = Tensors[op.Weight];
+            Require(weight_tensor.Role == TensorRole::Parameter && weight_tensor.Shape.size() == DIM_OF_WEIGHT_TENSOR);
+            if (op.Bias != NO_TENSOR) 
+            {
+                Require(op.Bias < Tensors.size());
+                const TensorDescription& bias_tensor = Tensors[op.Bias];
+                Require(
+                    bias_tensor.Role == TensorRole::Parameter &&
+                    bias_tensor.Shape.size() == DIM_OF_BIAS_TENSOR &&
+                    bias_tensor.DType == weight_tensor.DType &&
+                    bias_tensor.Shape[0] == weight_tensor.Shape[0]
+                );
+            }
+
+            std::optional<__ValueGeometry__>& input = geometry[origins[op.Input]];
+            Require(!input.has_value() || (
+                input->Width == weight_tensor.Shape[1] &&
+                input->DType == weight_tensor.DType
+            ));
+
+            input = __ValueGeometry__{
+                weight_tensor.Shape[1],
+                weight_tensor.DType
+            };
+            origins.push_back(geometry.size());
+            geometry.emplace_back(__ValueGeometry__(
+                weight_tensor.Shape[0],
+                weight_tensor.DType
+            ));
+        }
+
+    }
+
 
 }
