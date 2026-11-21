@@ -100,9 +100,6 @@ namespace BidirectionalInMemGraph
     private:
         SD::RSSpan MutableMatrixViewRow_(uint32_t apc_slot) noexcept;
     protected:
-
-        SD::ConstRSSpan MatrixViewRow_(uint32_t apc_slot) noexcept;
-
         bool ConstructMatrixViewRecords_(size_t table_begin, size_t table_end) noexcept;
 
         bool PrepareMatrixViewRow_(
@@ -113,7 +110,9 @@ namespace BidirectionalInMemGraph
         void ClearMatrixViewRow_(uint32_t apc_slot) noexcept;
 
         bool InitializeRegionProtocolStorage_(uint32_t apc_slot) noexcept;
-
+    
+    public:
+        SD::ConstRSSpan MatrixViewRow(uint32_t apc_slot) noexcept;
     };
 
     class APCHandleAndRetirement : public MatrixViewConstructor

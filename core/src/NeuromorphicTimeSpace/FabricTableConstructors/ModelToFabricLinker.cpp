@@ -40,7 +40,7 @@ namespace BidirectionalInMemGraph
                         return false;
                     }
 
-                    for (const SD::RegionSchemaRecord& schema : MatrixViewRow_(model.Slot)) 
+                    for (const SD::RegionSchemaRecord& schema : MatrixViewRow(model.Slot)) 
                     {
                         if (
                             !SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED) &&

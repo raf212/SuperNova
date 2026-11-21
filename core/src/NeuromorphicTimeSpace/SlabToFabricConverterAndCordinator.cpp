@@ -393,7 +393,7 @@ namespace BidirectionalInMemGraph
 
         for (uint32_t s = 0; s < FabCache_->CountOfAPC_; s++) 
         {
-            const SD::ConstRSSpan row = MatrixViewRow_(s);
+            const SD::ConstRSSpan row = MatrixViewRow(s);
             if (row.size() != FabCache_->ActiveRegionCount_) 
             {
                 return false;

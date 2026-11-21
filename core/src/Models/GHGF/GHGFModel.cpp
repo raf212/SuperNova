@@ -282,7 +282,7 @@ namespace BidirectionalInMemGraph
 
         Profile_ = profile;
 
-        for (const SD::RegionSchemaRecord& record : MatrixViewRow_(0u))
+        for (const SD::RegionSchemaRecord& record : MatrixViewRow(0u))
         {   
             switch (record.Region)
             {

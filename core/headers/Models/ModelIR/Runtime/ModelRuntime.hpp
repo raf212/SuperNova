@@ -15,7 +15,7 @@ namespace BidirectionalInMemGraph
             FabricPtr_(fabric_ptr)
         {}
 
-        GMI::Dense::ModelSnapshot InspectDenseModel(uint32_t instance) noexcept;
+        GMI::Dense::ModelSnapshot InspectDenseModel(uint32_t instance);
 
         uint64_t DenseStructureRevision(uint32_t instance);
 

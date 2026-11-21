@@ -31,7 +31,7 @@ namespace BidirectionalInMemGraph
             return false;
         }
 
-        SchemaOrchestrator::ConstRSSpan region_row = fabric_owner->MatrixViewRow_(
+        SchemaOrchestrator::ConstRSSpan region_row = fabric_owner->MatrixViewRow(
             static_cast<uint32_t>(fabric_slot_idx)
         );
 
@@ -136,7 +136,7 @@ namespace BidirectionalInMemGraph
             );
             const GMI::IndividualModelDescription* owner = ir.ModelForSLot(APCCache_.APCSlotIdx_);
             if (!owner) return false;
-            for (const SD::RegionSchemaRecord& schema : fabric->MatrixViewRow_(APCCache_.APCSlotIdx_)) 
+            for (const SD::RegionSchemaRecord& schema : fabric->MatrixViewRow(APCCache_.APCSlotIdx_)) 
             {
                 if (
                     !SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED) &&
@@ -166,7 +166,7 @@ namespace BidirectionalInMemGraph
         }
         else 
         {
-            for (const SD::RegionSchemaRecord& schema : APCCache_.FabricOwnerPtr_->MatrixViewRow_(
+            for (const SD::RegionSchemaRecord& schema : APCCache_.FabricOwnerPtr_->MatrixViewRow(
                 APCCache_.APCSlotIdx_
             )) 
             {
