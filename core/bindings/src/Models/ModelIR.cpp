@@ -13,10 +13,15 @@ namespace SuperNovaBindings
         using Assignment = sn::GMI::ModelAPC;
         using Layer = sn::GMI::LayerBuildDescription;
         using Model = sn::GMI::BuildModelDescriptionIndivisually;
+        using LSK = sn::GMI::LearningSystemKind;
 
         py::enum_<Family>(module, "Family")
-            .value("Torch_Model", Family::DENSE_TENSOR_STATE)
-            .value("GHGF_Graph", Family::GHGF_GRAPH);
+            .value("torch_model", Family::DENSE_TENSOR_STATE)
+            .value("ghgf_graph", Family::GHGF_GRAPH);
+
+        py::enum_<LSK>(module, "LearningSystem")
+            .value("backprop", LSK::BACKPROPAGATION)
+            .value("ghgf_local", LSK::GHGF_LOCAL);
 
         py::class_<Dependency>(module, "Dependency")
             .def(py::init<uint16_t, uint16_t, sn::MacroColumnOfAPC, sn::MacroColumnOfAPC, uint32_t>(),
