@@ -17,7 +17,7 @@ namespace BidirectionalInMemGraph
 
         GMI::Dense::ModelSnapshot InspectDenseModel(uint32_t instance) noexcept;
 
-        uint64_t DenseStructureRevision(uint32_t instance) noexcept;
+        uint64_t DenseStructureRevision(uint32_t instance);
 
         bool ReplaceModelLayerAPCs(
             uint32_t model_instance,

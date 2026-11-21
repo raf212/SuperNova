@@ -84,6 +84,11 @@ namespace BidirectionalInMemGraph
 
         template<typename T>
         bool IsInternalBuffer(const T* data, size_t count) noexcept;
+    
+    public:
+        const FabricCache* GetFabricCache() const noexcept {return FabCache_;}
+
+        const CFC::VolatileFabricCache* GetDisposableCache() const noexcept {return &DisposableFCache___;}
     };
 
     class MatrixViewConstructor : public FabricConstructor
