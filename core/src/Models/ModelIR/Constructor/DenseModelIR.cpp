@@ -312,7 +312,7 @@ namespace
 
             )
         );
-        if (Graph) return;
+        if (!Graph) return;
 
         Require(!TopologyFingerPrint.empty() && Graph->Output <= Graph->Operators.size());
 

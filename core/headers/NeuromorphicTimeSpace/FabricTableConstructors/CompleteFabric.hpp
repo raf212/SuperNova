@@ -155,7 +155,7 @@ namespace BidirectionalInMemGraph
     };
 
 
-    class ModelMutation : public CompiledDAGTableConstructor
+    class ModelToFabricLinker : public CompiledDAGTableConstructor
     {
     protected:
         bool ValidateLayer_(const GMI::ModelIR& ir, std::vector<uint8_t>& mapped) noexcept;

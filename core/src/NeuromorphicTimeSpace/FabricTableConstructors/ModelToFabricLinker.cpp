@@ -2,7 +2,7 @@
 
 namespace BidirectionalInMemGraph 
 {
-    bool ModelMutation::ValidateLayer_(const GMI::ModelIR& ir, std::vector<uint8_t>& mapped) noexcept
+    bool ModelToFabricLinker::ValidateLayer_(const GMI::ModelIR& ir, std::vector<uint8_t>& mapped) noexcept
     {
         try 
         {
