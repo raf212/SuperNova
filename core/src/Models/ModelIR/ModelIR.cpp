@@ -148,7 +148,7 @@ namespace BidirectionalInMemGraph::GMI
             const IndividualModelDescription& model = Description[idx];
             if (
                 model.Instance != (idx +1) ||
-                model.Model == PreBuildModels::NONE ||
+                model.Model == ModelRepresentation::NONE ||
                 model.Model > LAST_DEFINED_MODEL_IDX ||
                 model.StructuralADaptationAllowed > 1 ||
                 model.StructureRevision == UNSIGNED_ZERO ||
@@ -265,7 +265,7 @@ namespace BidirectionalInMemGraph::GMI
             {
                 if (
                     mo.Instance != candidate.Description.size() + 1 ||
-                    mo.Model == PreBuildModels::NONE ||
+                    mo.Model == ModelRepresentation::NONE ||
                     mo.Model > LAST_DEFINED_MODEL_IDX ||
                     !mo.StructureRevision ||
                     mo.Layers.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_layers) ||

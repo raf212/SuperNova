@@ -242,7 +242,7 @@ namespace BidirectionalInMemGraph
 
         const std::array<GMI::IndividualModelDescription, 1> descriptions{{
             GMI::IndividualModelDescription{
-                1, PreBuildModels::GHGF, 1, 0,
+                1, GMI::ModelRepresentation::GHGF_GRAPH, 1, 0,
                 0, 0,    // Model configuration
                 0, 1,    // One ordered layer
                 0, 0,    // No incoming model dependencies

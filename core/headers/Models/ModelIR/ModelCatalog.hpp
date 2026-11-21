@@ -4,6 +4,21 @@
 ///GMI - Refers to (global model information)
 namespace BidirectionalInMemGraph::GMI
 {
+    enum class ModelRepresentation : uint8_t
+    {
+        NONE = 0,
+        GHGF_GRAPH = 2,
+        DENSE_TENSOR_STATE = 3
+    };
+    static constexpr ModelRepresentation LAST_DEFINED_MODEL_IDX = ModelRepresentation::DENSE_TENSOR_STATE;
+
+    enum class LearningSystemKind
+    {
+        NONE = 0,
+        BACKPROPAGATION = 1,
+        GHGF_LOCAL = 2
+    };
+    
     struct alignas(uint64_t) ModelDependency final
     {
         static constexpr uint16_t INVALID_MODEL_IDX = UINT16_MAX;
@@ -36,7 +51,7 @@ namespace BidirectionalInMemGraph::GMI
     struct alignas(64) IndividualModelDescription
     {
         uint32_t Instance{};
-        PreBuildModels Model{PreBuildModels::NONE};
+        ModelRepresentation Model{ModelRepresentation::NONE};
         uint8_t StructuralADaptationAllowed{static_cast<uint8_t>(false)};
         uint16_t Reserved{};
 
@@ -89,7 +104,7 @@ namespace BidirectionalInMemGraph::GMI
     struct BuildModelDescriptionIndivisually final
     {
         uint32_t Instance{};
-        PreBuildModels Model{PreBuildModels::NONE};
+        ModelRepresentation Model{ModelRepresentation::NONE};
         bool StructuralADaptationAllowed{false};
         uint64_t StructureRevision{1};
         std::vector<std::byte> Configuration{};

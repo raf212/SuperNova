@@ -8,17 +8,15 @@ namespace SuperNovaBindings
     void BindModelIR(py::module_& module)
     {
         namespace sn = BidirectionalInMemGraph;
-        using Family = sn::PreBuildModels;
+        using Family = sn::GMI::ModelRepresentation;
         using Dependency = sn::GMI::ModelDependency;
         using Assignment = sn::GMI::ModelAPC;
         using Layer = sn::GMI::LayerBuildDescription;
         using Model = sn::GMI::BuildModelDescriptionIndivisually;
 
         py::enum_<Family>(module, "Family")
-            .value("FNN", Family::FNN)
-            .value("RNN", Family::RNN)
-            .value("TRANSFORMER", Family::TRANSFORMER)
-            .value("GHGF", Family::GHGF);
+            .value("Torch_Model", Family::DENSE_TENSOR_STATE)
+            .value("GHGF_Graph", Family::GHGF_GRAPH);
 
         py::class_<Dependency>(module, "Dependency")
             .def(py::init<uint16_t, uint16_t, sn::MacroColumnOfAPC, sn::MacroColumnOfAPC, uint32_t>(),

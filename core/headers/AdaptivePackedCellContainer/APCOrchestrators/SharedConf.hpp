@@ -49,17 +49,6 @@ namespace BidirectionalInMemGraph
         RETIRED = 3,
         HAULTED = 4
     };
-
-    enum class PreBuildModels : uint8_t
-    {
-        NONE = 0,
-        FNN = 1,
-        RNN = 2,
-        TRANSFORMER = 3,
-        GHGF = 4,
-        DENSE = 5
-    };
-    static constexpr PreBuildModels LAST_DEFINED_MODEL_IDX = PreBuildModels::DENSE;
     
     static  constexpr uint64_t MaskLowBitsForU64(unsigned n) noexcept
     {
