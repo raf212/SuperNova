@@ -72,9 +72,23 @@ namespace BidirectionalInMemGraph
             {
                 const uint32_t slot = snapshshot.Assignments[tensor.LayerIndex][binding.APCIndex].Slot;
                 const SD::ConstRSSpan row = FabricPtr_->MatrixViewRow(slot);
+                const auto schema = std::ranges::find(
+                    row, binding.Column, &SD::RegionSchemaRecord::Region
+                );
+                if (
+                    schema == row.end() ||
+                    SD::HasSchemaFlag(schema->Flags, SD::SchemaFlags::REGION_DISABLED) ||
+                    schema->Protocol != SD::SchemaProtocols::PRIVATE_REGION ||
+                    schema->ModelInstance != instance ||
+                    schema->Dtype != tensor.DType ||
+                    (uint64_t{binding.APCOffset} + binding.ElementCount) > (uint64_t{schema->MatrixHeight} * schema->MatrixWidth)
+                ) 
+                {
+                    throw std::invalid_argument("Invalid physical Dense tensor binding: " + tensor.Name);
+                }
             }
         }
-
+        return snapshshot;
     }
 
 }
