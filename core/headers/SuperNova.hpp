@@ -22,10 +22,8 @@
 // Fabric / slab / DAG public layer.
 #include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
 
-// GHGF public model layer.
-#include "Models/GHGF/GHGFLayer.hpp"
-#include "Models/GHGF/GHGFNode.hpp"
-#include "Models/GHGF/GHGFModelOfAPC.hpp"
+// Models and learning system
+#include "Models/ModelAndlarnerManager.hpp"
 
 //COMPUTER
 #include "SuperNovaComputeManager/Computer.hpp"

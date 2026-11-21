@@ -1,5 +1,6 @@
 #pragma once 
 #include "../../../NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include "../../../SuperNovaComputeManager/Computer.hpp"
 
 namespace BidirectionalInMemGraph 
 {
@@ -7,7 +8,8 @@ namespace BidirectionalInMemGraph
     {
     protected:
         APCFinilizer* FabricPtr_;
-
+        // Computer Computer_; we will add it in future
+        
     public:
         explicit ModelRuntime(APCFinilizer* fabric_ptr) noexcept :
             FabricPtr_(fabric_ptr)
