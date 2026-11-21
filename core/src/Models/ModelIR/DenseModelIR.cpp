@@ -2,11 +2,13 @@
 
 namespace BidirectionalInMemGraph::GMI::Dense 
 {
+    using SD = SchemaDefinition;
 // INTERNAL - no header necessery
 namespace 
 {
     constexpr uint32_t MAGIC = 0x52494e44u; // DNIR
-    constexpr uint32_t Version = 1u;
+    constexpr uint32_t VERSION = 2u;
+    constexpr uint32_t FIRST_VERSION = 1u; 
     constexpr size_t FINGERPRINT_BYTES = 64u;
     constexpr size_t OPERATOR_BYTES = 13u;
     constexpr size_t TENSOR_HEADER_BYTES = 15u;
@@ -129,6 +131,82 @@ namespace
             }
         }
         return bytes;
+    }
+
+
+    DenseModelDynamics DenseModelDynamics::Decode(std::span<const std::byte> bytes)
+    {
+        Reader reader(bytes);
+        Require(reader.Get<uint32_t>() == MAGIC);
+        const uint32_t version = reader.Get<uint32_t>();
+        Require(version == FIRST_VERSION || version == VERSION);
+        const uint32_t count = reader.Get<uint32_t>();
+        reader.CheckCount(count, TENSOR_HEADER_BYTES);
+
+        DenseModelDynamics dense_ir;
+        dense_ir.Tensors.reserve(count);
+        for (uint32_t i = 0; i < count; i++) 
+        {
+            TensorDescription tensor;
+            const uint32_t name_size = reader.Get<uint32_t>();
+            tensor.Role = static_cast<TensorRole>(reader.Get<uint8_t>());
+            tensor.DType = static_cast<SD::DataTypeOfMacroColumn>(reader.Get<uint8_t>());
+            tensor.LayerIndex = reader.Get<uint32_t>();
+            const  uint8_t rank = reader.Get<uint8_t>();
+            const uint32_t bindings = reader.Get<uint32_t>();
+            const std::span name = reader.Take(name_size);
+            tensor.Name.assign(reinterpret_cast<const char*>(name.data()), name.size());
+            for (uint16_t d = 0; d < rank; d++) 
+            {
+                tensor.Shape.push_back(reader.Get<uint32_t>());
+            }
+            reader.CheckCount(bindings, BINDING_BYTES);
+            tensor.Bindings.reserve(bindings);
+            for (uint32_t b = 0; b < bindings; b++) 
+            {
+                tensor.Bindings.push_back({
+                    reader.Get<uint32_t>(),
+                    static_cast<MacroColumnOfAPC>(reader.Get<uint8_t>()),
+                    reader.Get<uint64_t>(),
+                    reader.Get<uint32_t>(),
+                    reader.Get<uint32_t>()
+                });
+            }
+            dense_ir.Tensors.push_back(std::move(tensor));
+        }
+        if (version >= VERSION) 
+        {
+            const uint8_t has_fingerprint = reader.Get<uint8_t>();
+            Require(has_fingerprint <= 1u);
+            if (has_fingerprint) 
+            {
+                const std::span fingerprint = reader.Take(FINGERPRINT_BYTES);
+                dense_ir.TopologyFingerPrint.assign(
+                    reinterpret_cast<const char*>(fingerprint.data()),
+                    fingerprint.size()
+                );
+            }
+
+            const uint8_t has_graph = reader.Get<uint8_t>();
+            Require(has_graph <= 1u);
+            if (has_graph) 
+            {
+                OperatorGraph& graph = dense_ir.Graph.emplace();
+                const uint32_t count = reader.Get<uint32_t>();
+                reader.CheckCount(count, OPERATOR_BYTES);
+                graph.Operators.reserve(count);
+                for (uint32_t i = 0; i < count; i++) 
+                {
+                    graph.Operators.push_back({
+                        static_cast<OperatorKind>(reader.Get<uint8_t>()),
+                        reader.Get<uint32_t>(),
+                        reader.Get<uint32_t>()
+                    });
+                }
+            }
+        }
+        Require(reader.Empty());
+        return dense_ir;
     }
 
 }
