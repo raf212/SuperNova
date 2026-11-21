@@ -75,14 +75,7 @@ namespace BidirectionalInMemGraph
             const uint64_t* desired_cells
         ) noexcept;
 
-        constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
-        {
-            if (FabCache_ && DisposableFCache___.SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
-            {
-                return true;
-            }
-            return false;
-        }
+        constexpr bool IsDesiredIndexValidInSLab(size_t desired_idx) noexcept;
 
         constexpr size_t SlotBegin_(uint32_t slot) noexcept
         {
@@ -90,41 +83,7 @@ namespace BidirectionalInMemGraph
         }
 
         template<typename T>
-        bool IsInternalBuffer(const T* data, size_t count) noexcept
-        {
-            if (!FabCache_ || !DisposableFCache___.SlabBasePtr_ || count == UNSIGNED_ZERO)
-            {
-                return false;
-            }
-            if (
-                count > SIZE_MAX / sizeof(T) ||
-                FabCache_->SlabCellCount_ > SIZE_MAX / sizeof(uint64_t)
-            )
-            {
-                return true;
-            }
-
-            const uintptr_t begin = reinterpret_cast<uintptr_t>(data);
-            const uintptr_t slab = reinterpret_cast<uintptr_t>(DisposableFCache___.SlabBasePtr_);
-            const size_t bytes = count * sizeof(T);
-
-            auto OverLaps___ = [&](const void* mem, uint64_t cells) noexcept -> bool
-            {
-                const auto base = reinterpret_cast<uintptr_t>(mem);
-                return begin >= base ? (begin - base < cells * sizeof(uint64_t)) : 
-                    (base - begin < bytes);
-            };
-
-            return OverLaps___(
-                DisposableFCache___.SlabBasePtr_, 
-                __NumericalBacking__.DataPtr() ? FabCache_->SegmentPoolBegin_ : FabCache_->SlabCellCount_
-            ) ||
-            (
-                __NumericalBacking__.DataPtr() &&
-                OverLaps___(__NumericalBacking__.DataPtr(), FabCache_->SlabCellCount_ - FabCache_->SegmentPoolBegin_)
-            );
-        }
-        
+        bool IsInternalBuffer(const T* data, size_t count) noexcept;
     };
 
     class MatrixViewConstructor : public FabricConstructor
@@ -214,7 +173,6 @@ namespace BidirectionalInMemGraph
         }
     };
 
-
-
-
 }
+
+#include "../../../templates/NeuromorphicTimeSpace/FabricTableConstructors/FabricConstructor.tpp"
