@@ -34,7 +34,8 @@ namespace SuperNovaBindings
     void BindFabric(py::module_& module)
     {
         py::class_<Fabric, std::shared_ptr<Fabric>>(module, "Fabric")
-            .def(py::init([](uint32_t slots, const Records& schemas, uint32_t slot_cells,
+            .def(
+                py::init([](uint32_t slots, const Records& schemas, uint32_t slot_cells,
                              uint32_t batch_capacity, std::optional<uint32_t> max_parents,
                              const std::optional<std::filesystem::path>& segment_pool_path,
                              const ModelDescriptions& models) {
@@ -63,15 +64,23 @@ namespace SuperNovaBindings
                 py::arg("batch_capacity") = 1u,
                 py::arg("max_parents") = py::none(),
                 py::arg("segment_pool_path") = py::none(),
-                py::arg("models") = ModelDescriptions{})
+                py::arg("models") = ModelDescriptions{}
+            )
             .def_property_readonly("active", [](Fabric& self) { return self.IsFabricActive(); })
+
             .def_property_readonly("disk_paged", [](const Fabric& self) { return self.IsDiskPaged(); })
+
             .def("flush_numerical_backing", [](Fabric& self) { return self.FlushNumericalBacking(); })
-            .def("create_apc", [](const std::shared_ptr<Fabric>& self, const Records& schemas) {
+
+            .def(
+                "create_apc", [](const std::shared_ptr<Fabric>& self, const Records& schemas) {
                 auto apc = std::make_unique<APCHandle>(self);
                 if (!self->CreateAPC(*apc, SchemaTable(schemas)))
                     throw std::runtime_error("SuperNova could not create the APC.");
                 return apc;
-            }, py::arg("schemas"));
+                }, py::arg("schemas")
+            );
+
+            
     }
 }

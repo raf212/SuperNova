@@ -217,10 +217,10 @@ namespace
 
     void DenseModelDynamics::Validate(std::span<const LayerDescription> layers) const
     {
-        using Region = std::tuple<uint32_t, uint32_t, MacroColumnOfAPC>;
+        using __Region__ = std::tuple<uint32_t, uint32_t, MacroColumnOfAPC>;
         struct __Range__ final
         {
-            Region Region{};
+            __Region__ Region{};
             uint32_t Offset{};
             uint64_t End{};
             SD::DataTypeOfMacroColumn Dtype{};
@@ -273,7 +273,7 @@ namespace
                 );
                 cursor += binding.ElementCount;
                 ranges.emplace_back(
-                    Region{tensor.LayerIndex, binding.APCIndex, binding.Column},
+                    __Region__{tensor.LayerIndex, binding.APCIndex, binding.Column},
                     binding.APCOffset, 
                     end,
                     tensor.DType
@@ -291,7 +291,7 @@ namespace
             }
         );
 
-        for (size_t i = 0; i < ranges.size(); i++) 
+        for (size_t i = 1; i < ranges.size(); i++) 
         {
             const __Range__& range = ranges[i];
             const __Range__& previous_range = ranges[i - 1];            

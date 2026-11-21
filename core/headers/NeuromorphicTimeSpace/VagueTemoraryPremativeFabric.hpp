@@ -88,7 +88,7 @@ protected:
     ) noexcept;
 
 public:
-    bool OpenAPC(uint32_t slot, uint32_t generation, AdaptivePackedCellContainer apc) noexcept;
+    bool OpenAPC(uint32_t slot, uint32_t generation, AdaptivePackedCellContainer& apc) noexcept;
 
     void NotifyExternalStructuralCommits(uint64_t count) noexcept;
 
