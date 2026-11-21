@@ -79,7 +79,8 @@ namespace
     {
         std::vector<std::byte> bytes;
         Put(bytes, MAGIC);
-        Put(bytes, Tensors.size());
+        Put(bytes, VERSION);
+        PutSize(bytes, Tensors.size());
 
         for (const TensorDescription& tensor : Tensors) 
         {
@@ -193,12 +194,14 @@ namespace
             {
                 OperatorGraph& graph = dense_ir.Graph.emplace();
                 const uint32_t count = reader.Get<uint32_t>();
+                graph.Output = reader.Get<uint32_t>();
                 reader.CheckCount(count, OPERATOR_BYTES);
                 graph.Operators.reserve(count);
                 for (uint32_t i = 0; i < count; i++) 
                 {
                     graph.Operators.push_back({
                         static_cast<OperatorKind>(reader.Get<uint8_t>()),
+                        reader.Get<uint32_t>(),
                         reader.Get<uint32_t>(),
                         reader.Get<uint32_t>()
                     });

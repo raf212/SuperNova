@@ -226,9 +226,17 @@ namespace BidirectionalInMemGraph::GMI
 
         if (apc_cursor != LayerAPCs.size()) return false;
 
-        if (Layers.empty()) return true;
         try 
         {
+            for (const IndividualModelDescription& model : Description) 
+            {
+                if (model.Model != ModelRepresentation::DENSE_TENSOR_STATE) continue;
+                Dense::DenseModelDynamics dense = Dense::DenseModelDynamics::Decode(
+                    Configuration(model.Instance)
+                );
+                dense.Validate(Layers.subspan(model.FirstLayer, model.LayerCount));
+            }
+            if (Layers.empty()) return true;
             std::vector<uint8_t> seen(slot_count, UNSIGNED_ZERO);
             for (const LayerDescription& layer : Layers) 
             {

@@ -34,8 +34,8 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
     enum class OperatorKind : uint8_t
     {
-        Linear = 0,
-        ReLU = 1
+        Linear = 1,
+        ReLU = 2
     };
 
     struct Operator final
