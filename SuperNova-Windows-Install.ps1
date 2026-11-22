@@ -22,13 +22,13 @@
   GPU vendor drivers/SDKs are intentionally NOT installed automatically.
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild -Jobs 4
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild -Jobs 4
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -BuildPython
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -BuildPython
 #>
 
 [CmdletBinding()]
@@ -387,7 +387,9 @@ function Remove-DirectoryIfPresent([string]$Path) {
 }
 
 # Capture the intended Python BEFORE importing the Visual Studio environment.
-# An explicit selection wins, then a venv, then Conda, then the current PATH.
+# Explicit selection wins, then a venv, then python.exe from the active PATH.
+# CONDA_PREFIX is only a fallback: a child PowerShell profile can reset it to base.
+# Prefer launching this script with powershell -NoProfile to preserve activation.
 if ($BuildPython) {
     Write-Step "Selecting Python for SuperNova bindings"
     if ($PythonExecutable) {
@@ -396,16 +398,28 @@ if ($BuildPython) {
     elseif ($env:VIRTUAL_ENV) {
         $python = Join-Path $env:VIRTUAL_ENV "Scripts/python.exe"
     }
-    elseif ($env:CONDA_PREFIX) {
-        $python = Join-Path $env:CONDA_PREFIX "python.exe"
-    }
     else {
+        # The executable on PATH reflects what `python` actually runs here.
+        # CONDA_PREFIX can be stale or rewritten by PowerShell startup profiles.
         $command = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -First 1
-        if (-not $command) {
+
+        if ($command) {
+            $python = $command.Source
+        }
+        elseif ($env:CONDA_PREFIX) {
+            $python = Join-Path $env:CONDA_PREFIX "python.exe"
+        }
+        else {
             throw "Python bindings requested, but python.exe was not found. Use -PythonExecutable."
         }
-        $python = $command.Source
+    }
+
+    if (-not $PythonExecutable -and $env:CONDA_PREFIX) {
+        $condaPython = Join-Path $env:CONDA_PREFIX "python.exe"
+        if ([IO.Path]::GetFullPath($condaPython) -ine [IO.Path]::GetFullPath($python)) {
+            Write-Warning "CONDA_PREFIX and selected python.exe disagree. Selected: $python; CONDA_PREFIX: $condaPython. If this is unexpected, run with powershell -NoProfile or supply -PythonExecutable."
+        }
     }
 
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
