@@ -66,11 +66,32 @@ namespace SuperNovaBindings
                 py::arg("segment_pool_path") = py::none(),
                 py::arg("models") = ModelDescriptions{}
             )
+
             .def_property_readonly("active", [](Fabric& self) { return self.IsFabricActive(); })
 
             .def_property_readonly("disk_paged", [](const Fabric& self) { return self.IsDiskPaged(); })
 
             .def("flush_numerical_backing", [](Fabric& self) { return self.FlushNumericalBacking(); })
+
+            .def("inspect_dense_model", [](Fabric& self, uint32_t instance)
+            {
+                return sn::ModelRuntime{&self}.InspectDenseModel(instance);
+            }, py::arg("instance"))
+
+            .def("dense_structure_revision", [](Fabric& self, uint32_t instance)
+            {
+                return sn::ModelRuntime{&self}.DenseStructureRevision(instance);
+            }, py::arg("instance"))
+
+            .def("open_apc", [](const std::shared_ptr<Fabric>& self, uint32_t slot, uint32_t generation)
+            {
+                std::unique_ptr apc = std::make_unique<APCHandle>(self);
+                if (!self->OpenAPC(slot, generation, *apc)) 
+                {
+                    throw std::runtime_error("The APC is unavailable or its generation is stale.");
+                }
+                return apc;
+            }, py::arg("slot"), py::arg("generation"))
 
             .def(
                 "create_apc", [](const std::shared_ptr<Fabric>& self, const Records& schemas) {
@@ -81,6 +102,5 @@ namespace SuperNovaBindings
                 }, py::arg("schemas")
             );
 
-            
     }
 }

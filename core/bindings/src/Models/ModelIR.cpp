@@ -14,6 +14,13 @@ namespace SuperNovaBindings
         using Layer = sn::GMI::LayerBuildDescription;
         using Model = sn::GMI::BuildModelDescriptionIndivisually;
         using LSK = sn::GMI::LearningSystemKind;
+        using sn::GMI::Dense::TensorRole;
+        using TensorBinding = sn::GMI::Dense::TensorBindings;
+        using sn::GMI::Dense::TensorDescription;
+        using sn::GMI::Dense::ModelSnapshot;
+        using sn::GMI::Dense::Operator;
+        using sn::GMI::Dense::OperatorGraph;
+        using sn::GMI::Dense::OperatorKind;
 
         py::enum_<Family>(module, "Family")
             .value("torch_model", Family::DENSE_TENSOR_STATE)
@@ -34,7 +41,11 @@ namespace SuperNovaBindings
                 assignment.Slot = slot;
                 assignment.Role = role;
                 return assignment;
-            }), py::arg("slot"), py::arg("role") = 0u);
+            }), py::arg("slot"), py::arg("role") = 0u)
+            
+            .def_readonly("slot", &Assignment::Slot)
+            .def_readonly("generation", &Assignment::Generation)
+            .def_readonly("role", &Assignment::Role);
 
         py::class_<Layer>(module, "LayerDescription")
             .def(py::init<uint32_t, uint32_t, std::vector<Assignment>>(),
@@ -61,5 +72,70 @@ namespace SuperNovaBindings
                 py::arg("dependencies") = std::vector<Dependency>{},
                 py::arg("configuration") = py::bytes(""),
                 py::arg("structural_adaptation") = false);
+
+
+        py::enum_<TensorRole>(module, "TensorRole")
+            .value("PARAMETER", TensorRole::Parameter)
+            .value("BUFFER", TensorRole::Buffer);
+
+        py::class_<TensorBinding>(module, "TensorBinding")
+            .def(py::init<uint32_t, sn::MacroColumnOfAPC, uint64_t, uint32_t, uint32_t>(),
+                 py::arg("apc_index"), py::arg("column"), py::arg("tensor_offset"),
+                 py::arg("apc_offset"), py::arg("element_count"))
+            .def_readonly("apc_index", &TensorBinding::APCIndex)
+            .def_readonly("column", &TensorBinding::Column)
+            .def_readonly("tensor_offset", &TensorBinding::TensorOffset)
+            .def_readonly("apc_offset", &TensorBinding::APCOffset)
+            .def_readonly("element_count", &TensorBinding::ElementCount);
+
+        py::class_<TensorDescription>(module, "TensorDescription")
+            .def(py::init<std::string, TensorRole, sn::SchemaDefinition::DataTypeOfMacroColumn,
+                          uint32_t, std::vector<uint32_t>, std::vector<TensorBinding>>(),
+                 py::arg("name"), py::arg("role"), py::arg("dtype"), py::arg("layer_index"),
+                 py::arg("shape"), py::arg("bindings"))
+            .def_readonly("name", &TensorDescription::Name)
+            .def_readonly("role", &TensorDescription::Role)
+            .def_readonly("dtype", &TensorDescription::DType)
+            .def_readonly("layer_index", &TensorDescription::LayerIndex)
+            .def_readonly("shape", &TensorDescription::Shape)
+            .def_readonly("bindings", &TensorDescription::Bindings);
+
+        py::enum_<OperatorKind>(module, "OperatorKind")
+            .value("LINEAR", OperatorKind::Linear)
+            .value("RELU", OperatorKind::ReLU);
+
+        py::class_<Operator>(module, "DenseOperator")
+            .def(py::init<OperatorKind, uint32_t, uint32_t, uint32_t>(),
+                 py::arg("kind"), py::arg("input"),
+                 py::arg("weight") = sn::GMI::Dense::NO_TENSOR, py::arg("bias") = sn::GMI::Dense::NO_TENSOR)
+            .def_readonly("kind", &Operator::Kind)
+            .def_readonly("input", &Operator::Input)
+            .def_readonly("weight", &Operator::Weight)
+            .def_readonly("bias", &Operator::Bias);
+
+        py::class_<OperatorGraph>(module, "DenseOperatorGraph")
+            .def(py::init<std::vector<Operator>, uint32_t>(), py::arg("operators"), py::arg("output"))
+            .def_readonly("operators", &OperatorGraph::Operators)
+            .def_readonly("output", &OperatorGraph::Output);
+
+        module.def("encode_dense_ir", [](const std::vector<TensorDescription>& tensors,
+                                        const std::string& topology_fingerprint,
+                                        const std::optional<OperatorGraph>& graph) {
+            const auto bytes = sn::GMI::Dense::DenseModelDynamics{tensors, topology_fingerprint, graph}.Encode();
+            return py::bytes(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        }, py::arg("tensors"), py::arg("topology_fingerprint") = "", py::arg("graph") = py::none());
+
+        py::class_<ModelSnapshot>(module, "DenseModelSnapshot")
+            .def_readonly("structure_revision", &ModelSnapshot::StructureRevision)
+            .def_property_readonly("tensors", [](const ModelSnapshot& snapshot) {
+                return snapshot.DenseIR.Tensors;
+            })
+            .def_property_readonly("topology_fingerprint", [](const ModelSnapshot& snapshot) {
+                return snapshot.DenseIR.TopologyFingerPrint;
+            })
+            .def_property_readonly("graph", [](const ModelSnapshot& snapshot) {
+                return snapshot.DenseIR.Graph;
+            })
+            .def_readonly("assignments", &ModelSnapshot::Assignments);
     }
 }
