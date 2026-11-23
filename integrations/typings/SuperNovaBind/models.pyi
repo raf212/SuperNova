@@ -1,0 +1,59 @@
+"""Partial declarations from core/bindings/src/Models/ModelIR.cpp."""
+from enum import Enum
+from .apc import Column, DType
+
+class Family(Enum):
+    torch_model = ...
+    ghgf_graph = ...
+
+class TensorRole(Enum):
+    PARAMETER = ...
+    BUFFER = ...
+
+class OperatorKind(Enum):
+    LINEAR = ...
+    RELU = ...
+
+class Assignment:
+    def __init__(self, slot: int, role: int = 0) -> None: ...
+    @property
+    def slot(self) -> int: ...
+
+class LayerDescription:
+    def __init__(self, operator_id: int, capacity: int, assignments: list[Assignment]) -> None: ...
+
+class Dependency:
+    def __init__(self, producer: int, consumer: int, producer_region: Column, consumer_region: Column, flags: int = 0) -> None: ...
+
+class TensorBinding:
+    def __init__(self, apc_index: int, column: Column, tensor_offset: int, apc_offset: int, element_count: int) -> None: ...
+    @property
+    def tensor_offset(self) -> int: ...
+    @property
+    def element_count(self) -> int: ...
+
+class TensorDescription:
+    def __init__(self, name: str, role: TensorRole, dtype: DType, layer_index: int, shape: list[int], bindings: list[TensorBinding]) -> None: ...
+
+class ModelDescription:
+    def __init__(
+        self,
+        instance: int,
+        family: Family,
+        layers: list[LayerDescription],
+        dependencies: list[Dependency] = ...,
+        configuration: bytes = b"",
+        structural_adaptation: bool = False,
+    ) -> None: ...
+
+class DenseOperator:
+    def __init__(self, kind: OperatorKind, input: int, weight: int = ..., bias: int = ...) -> None: ...
+
+class DenseOperatorGraph:
+    def __init__(self, operators: list[DenseOperator], output: int) -> None: ...
+
+def encode_dense_ir(
+    tensors: list[TensorDescription],
+    topology_fingerprint: str = "",
+    graph: DenseOperatorGraph | None = None,
+) -> bytes: ...

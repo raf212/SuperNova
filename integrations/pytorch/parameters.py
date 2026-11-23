@@ -1,18 +1,35 @@
 """Describe and allocate the APC regions for PyTorch model state."""
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from itertools import zip_longest
+from os import PathLike
+from typing import Final, TypeAlias
 import re
+
 import torch
-from typing import Final
 
 import SuperNovaBind as sn
 
 
-__LSTM_GROUP__: Final = 4
-__GRU_GROUP__ : Final = 3
-__VANILLA_RNN_GROUP__ : Final = 1
+# These explicit aliases describe the handoff between PyTorch and native APCs.
+TensorState: TypeAlias = dict[str, tuple[sn.models.TensorRole, torch.Tensor]]
+Region: TypeAlias = tuple[str, int, int, int]  # name, offset, rows, columns
+TensorRange: TypeAlias = tuple[str, int, int]  # name, offset, count
+WidthList: TypeAlias = list[tuple[str, int]]
+RecurrentGroup: TypeAlias = tuple[int, int, WidthList, WidthList]
+AssignmentTable: TypeAlias = list[list[sn.models.Assignment]]
+SchemaRow: TypeAlias = dict[sn.apc.Column, sn.apc.RegionSchema]
+BindingTable: TypeAlias = dict[str, list[sn.models.TensorBinding]]
+ColumnSchemas: TypeAlias = dict[sn.apc.Column, sn.apc.RegionSchema]
+FeatureInfo: TypeAlias = dict[str, tuple[int, str | None]]
 
-_DTYPES = {
+__LSTM_GROUP__: Final[int] = 4
+__GRU_GROUP__: Final[int] = 3
+__VANILLA_RNN_GROUP__: Final[int] = 1
+
+_DTYPES: Final[dict[torch.dtype, sn.apc.DType]] = {
     torch.float32: sn.apc.DType.FLOAT32,
     torch.float64: sn.apc.DType.FLOAT64,
     torch.int8: sn.apc.DType.INT8,
@@ -27,15 +44,16 @@ _DTYPES = {
     torch.float16: sn.apc.DType.FLOAT16
 }
 
-def _module_state(module):
+def _module_state(module: torch.nn.Module) -> TensorState:
     parameters = sn.models.TensorRole.PARAMETER
     buffers = sn.models.TensorRole.BUFFER
-    return {
-        **{name: (parameters, value) for name, value in module.named_parameters()},
-        **{name: (buffers, value) for name, value in module.named_buffers()},
+    state: TensorState = {
+        name: (parameters, value) for name, value in module.named_parameters()
     }
+    state.update({name: (buffers, value) for name, value in module.named_buffers()})
+    return state
 
-def _check_tensor(name, value):
+def _check_tensor(name: str, value: torch.Tensor) -> None:
     if (
         type(value) not in (torch.Tensor, torch.nn.Parameter)
         or value.device.type != "cpu"
@@ -44,21 +62,21 @@ def _check_tensor(name, value):
     ):
         raise ValueError(f"{name}: expected an initialized CPU dense tensor with a supported dtype")
 
-def _column(name, role):
+def _column(name: str, role: sn.models.TensorRole) -> sn.apc.Column:
     if role == sn.models.TensorRole.BUFFER:
         return sn.apc.Column.EXTRA
     if name.rsplit(".", 1)[-1].startswith("bias"):
         return sn.apc.Column.BIAS
     return sn.apc.Column.WEIGHT
 
-def _feature_width(module, name, value):
+def _feature_width(module: torch.nn.Module, name: str, value: torch.Tensor) -> int | None:
     owner, _, local_name = name.rpartition(".")
     feature_modules = (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
     if local_name == "weight" and value.numel() and isinstance(module.get_submodule(owner), feature_modules):
         return value.numel() // value.shape[0]
     return None
 
-def _bias_name(state, weight_name, feature_count):
+def _bias_name(state: TensorState, weight_name: str, feature_count: int) -> str | None:
     name = weight_name[:-len("weight")] + "bias"
     if name in state:
         role, value = state[name]
@@ -66,7 +84,9 @@ def _bias_name(state, weight_name, feature_count):
             return name
     return None
 
-def _feature_blocks(name, bias, feature_count, width, budget):
+def _feature_blocks(
+    name: str, bias: str | None, feature_count: int, width: int, budget: int,
+) -> Iterator[list[Region]]:
     if width <= budget:
         feature_per_sec = budget // width
         for first in range(0, feature_count, feature_per_sec):
@@ -85,7 +105,9 @@ def _feature_blocks(name, bias, feature_count, width, budget):
                 regions.append((bias, feature, 1, 1))
             yield regions
 
-def _recurrent_group(module, state, name):
+def _recurrent_group(
+    module: torch.nn.Module, state: TensorState, name: str,
+) -> RecurrentGroup | None:
     owner, _, local_name = name.rpartition(".")
     if not re.fullmatch(r"weight_ih(?:_l[0-9]+(?:_reverse)?)?", local_name):
         return None
@@ -133,15 +155,17 @@ def _recurrent_group(module, state, name):
     return hidden, gates, weight_rows, bias_row
 
 
-def _recurrent_ranges(tensors, hidden, gates, first, features):
+def _recurrent_ranges(
+    tensors: Sequence[tuple[str, int]], hidden: int, gates: int, first: int, features: int,
+) -> Iterator[TensorRange]:
     for gate in range(gates):
         row = (gate * hidden) + first
         for name, width in tensors:
             yield name, (row * width), (features * width)
 
 
-def _fragments(ranges, budget):
-    fragment = []
+def _fragments(ranges: Iterable[TensorRange], budget: int) -> Iterator[list[Region]]:
+    fragment: list[Region] = []
     remaining = budget
     for name, offset, count in ranges:
         while count:
@@ -152,12 +176,14 @@ def _fragments(ranges, budget):
             count -= size
             if not remaining:
                 yield fragment
-                fragment = []
+                fragment: list[Region] = []
                 remaining = budget
     if fragment:
         yield fragment
 
-def _recurrent_blocks(hidden, gates, weights, biases, budget):
+def _recurrent_blocks(
+    hidden: int, gates: int, weights: WidthList, biases: WidthList, budget: int,
+) -> Iterator[list[Region]]:
     # Each column has its own budget. Concatenate its disjoint source ranges.
     region_width = gates * max(sum(width for _, width in weights), len(biases))
     features_per_apc = budget // region_width
@@ -178,15 +204,17 @@ def _recurrent_blocks(hidden, gates, weights, biases, budget):
         ):
             yield [*weight, *bias]
 
-def _inspect_model_state(module, state):
+def _inspect_model_state(
+    module: torch.nn.Module, state: TensorState,
+) -> tuple[dict[str, int], AssignmentTable, FeatureInfo, set[str], dict[str, RecurrentGroup], set[str]]:
     """Validate tensors, discover layers, and classify feature/recurrent groups."""
-    layer_indices = {}
-    assignments = []
-    features = {}
-    paired_biases = set()
-    recurrent_groups = {}
-    recurrent_tensors = set()
-    seen_storage = set()
+    layer_indices: dict[str, int] = {}
+    assignments: AssignmentTable = []
+    features: FeatureInfo = {}
+    paired_biases: set[str] = set()
+    recurrent_groups: dict[str, RecurrentGroup] = {}
+    recurrent_tensors: set[str] = set()
+    seen_storage: set[int] = set()
 
     for name, (role, value) in state.items():
         _check_tensor(name, value)
@@ -217,7 +245,11 @@ def _inspect_model_state(module, state):
     return layer_indices, assignments, features, paired_biases, recurrent_groups, recurrent_tensors
 
 
-def _add_apc(layer, regions, state, assignments, schemas, columns, bindings):
+def _add_apc(
+    layer: int, regions: Sequence[Region], state: TensorState,
+    assignments: AssignmentTable, schemas: list[SchemaRow], columns: ColumnSchemas,
+    bindings: BindingTable,
+) -> None:
     """Register one APC's model assignment, tensor bindings, and region schemas.
 
     `layer` is a layer index. Assignment.slot uses the global APC index
@@ -226,7 +258,7 @@ def _add_apc(layer, regions, state, assignments, schemas, columns, bindings):
     apc_index = len(assignments[layer])
     assignments[layer].append(sn.models.Assignment(len(schemas)))
 
-    layout = {}
+    layout: dict[sn.apc.Column, tuple[sn.apc.DType, int, int]] = {}
     for name, offset, rows, cols in regions:
         role, value = state[name]
         column = _column(name, role)
@@ -234,7 +266,9 @@ def _add_apc(layer, regions, state, assignments, schemas, columns, bindings):
         apc_offset = 0
 
         if column in layout:
-            _, previous_rows, previous_cols = layout[column]
+            previous_dtype, previous_rows, previous_cols = layout[column]
+            if dtype != previous_dtype:
+                raise ValueError(f"{name}: mixed dtypes in APC column {column} are unsupported")
             apc_offset = previous_rows * previous_cols
             layout[column] = dtype, 1, apc_offset + rows * cols
         else:
@@ -244,7 +278,7 @@ def _add_apc(layer, regions, state, assignments, schemas, columns, bindings):
             sn.models.TensorBinding(apc_index, column, offset, apc_offset, rows * cols)
         )
 
-    row = {}
+    row: SchemaRow = {}
     for column, (dtype, rows, cols) in layout.items():
         schema = sn.apc.RegionSchema(column, dtype, rows, cols, model_instance=1)
         row[column] = schema
@@ -252,7 +286,10 @@ def _add_apc(layer, regions, state, assignments, schemas, columns, bindings):
     schemas.append(row)
 
 
-def _allocate_fabric(model, schemas, columns, segment_pool_path):
+def _allocate_fabric(
+    model: sn.models.ModelDescription, schemas: Sequence[SchemaRow],
+    columns: ColumnSchemas, segment_pool_path: str | PathLike[str] | None,
+) -> sn.fabric.Fabric:
     """Create the native Fabric and install all APC region schemas in slot order."""
     if not columns:
         # Fabric requires at least one enabled column, even with no parameters.
@@ -283,7 +320,10 @@ def _allocate_fabric(model, schemas, columns, segment_pool_path):
     return fabric
 
 
-def _describe_model(state, layer_indices, assignments, bindings, fingerprint, graph):
+def _describe_model(
+    state: TensorState, layer_indices: Mapping[str, int], assignments: AssignmentTable,
+    bindings: BindingTable, fingerprint: str, graph: sn.models.DenseOperatorGraph | None,
+) -> sn.models.ModelDescription:
     """Build the native ModelDescription from the collected APC assignments."""
     # Preserve the tensor order expected by operator references in the Dense IR.
     tensor = [
@@ -302,7 +342,11 @@ def _describe_model(state, layer_indices, assignments, bindings, fingerprint, gr
         configuration= sn.models.encode_dense_ir(tensor, fingerprint, graph)
     )
 
-def _build_fabric(module, state, chunk_elements, segment_pool_path, fingerprint, graph):
+def _build_fabric(
+    module: torch.nn.Module, state: TensorState, chunk_elements: int,
+    segment_pool_path: str | PathLike[str] | None, fingerprint: str,
+    graph: sn.models.DenseOperatorGraph | None,
+) -> sn.fabric.Fabric:
     """Convert PyTorch state into APC-backed native Fabric storage."""
     if type(chunk_elements) is not int or not 1 <= chunk_elements <= (2**32 - 8):
         raise ValueError("chunk_elements must be a positive integer within the APC size range")
@@ -312,11 +356,12 @@ def _build_fabric(module, state, chunk_elements, segment_pool_path, fingerprint,
         recurrent_groups, recurrent_tensors,
     ) = _inspect_model_state(module, state)
 
-    schemas = []
-    columns = {}
-    bindings = {name: [] for name in state}
+    schemas: list[SchemaRow] = []
+    columns: ColumnSchemas = {}
+    bindings: BindingTable = {name: [] for name in state}
 
     for name, (_, value) in state.items():
+        blocks: Iterable[list[Region]]
         layer = layer_indices[name.rpartition(".")[0]]
 
         if name in recurrent_groups:
@@ -341,3 +386,11 @@ def _build_fabric(module, state, chunk_elements, segment_pool_path, fingerprint,
 
     model = _describe_model(state, layer_indices, assignments, bindings, fingerprint, graph)
     return _allocate_fabric(model, schemas, columns, segment_pool_path)
+
+
+# Public module-level API for cross-module imports under Pyright strict mode.
+# Retain the existing underscore-prefixed functions for notebooks/older code.
+module_state = _module_state
+build_fabric = _build_fabric
+
+__all__ = ["TensorState", "module_state", "build_fabric"]
