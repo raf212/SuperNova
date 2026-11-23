@@ -8,11 +8,7 @@
 
 
 <h4 align="center"><i>
-SuperNova is being designed as a model-agnostic, learning-rule-agnostic, structurally mutable computational library.
-<br>
-Built upon a concurrently mutable directed acyclic graph (DAG) with CSR-like sparse computation, originally designed for Generalized Hierarchical Gaussian Filter's (GHGF).
-<br>
-The ultimate objective is to unify PyTorch compatible dense modeling with fast memory local predictive coding, Bayesian inference, and continual structural learning through vendor agnostic heterogeneous device execution using AdaptiveCpp.
+SuperNova is being designed as a model-agnostic, learning-rule-agnostic, structurally mutable computational library.Built upon a concurrently mutable directed acyclic graph (DAG) with CSR-like sparse computation, originally designed for Generalized Hierarchical Gaussian Filter's (GHGF).The ultimate objective is to unify PyTorch compatible dense modeling with fast memory local predictive coding, Bayesian inference, and continual structural learning through vendor agnostic heterogeneous device execution using AdaptiveCpp.
 </i></h4>
 
 ### Before you start

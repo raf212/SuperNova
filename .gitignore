@@ -9,3 +9,5 @@
 *.so
 *.pyd
 *llvm-*
+__pycache__
+*.egg*
