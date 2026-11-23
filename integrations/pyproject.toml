@@ -34,6 +34,7 @@ namespaces = true
 include = [
     "pytorch/capture.py",
     "pytorch/parameters.py",
+    "pytorch/reference.py",
 ]
 exclude = ["**/__pycache__", "**/.venv", "**/build*", "**/.git"]
 pythonVersion = "3.11"

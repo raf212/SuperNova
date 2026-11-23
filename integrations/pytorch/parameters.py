@@ -394,3 +394,7 @@ module_state = _module_state
 build_fabric = _build_fabric
 
 __all__ = ["TensorState", "module_state", "build_fabric"]
+
+# Public, typed helpers used by reference.py (keep old underscore API).
+check_tensor = _check_tensor
+DTYPES: Mapping[torch.dtype, sn.apc.DType] = _DTYPES

@@ -24,7 +24,7 @@ import SuperNovaBind as sn
 
 from .parameters import build_fabric, module_state
 
-__all__ = ["capture", "capture_graph"]
+__all__ = ["capture", "capture_graph", "export_optional", "fingerprint", "lower_graph"]
 
 # The current reference.py is empty. This protocol describes the *expected*
 # future interface without falsely claiming that the class already exists.
@@ -325,3 +325,8 @@ def capture(
     dense = constructor(fabric, template, program, fingerprint)
     dense.store_state({name: value for name, (_, value) in state.items()})
     return dense
+
+# Stable public aliases for the reference adapter; legacy helpers stay intact.
+export_optional = _export_optional
+fingerprint = _fingerprint
+lower_graph = _lower_graph

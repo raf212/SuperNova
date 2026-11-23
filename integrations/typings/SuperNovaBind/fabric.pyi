@@ -2,7 +2,7 @@
 from os import PathLike
 from typing import Final
 from .apc import RegionSchema, APC
-from .models import ModelDescription
+from .models import ModelDescription, DenseModelSnapshot
 
 MINIMUM_APC_CELL_COUNT: Final[int]
 
@@ -17,4 +17,11 @@ class Fabric:
         segment_pool_path: str | PathLike[str] | None = None,
         models: list[ModelDescription] = ...,
     ) -> None: ...
+
     def create_apc(self, schemas: list[RegionSchema]) -> APC: ...
+
+    def inspect_dense_model(self, instance : int) -> int: ...
+
+    def dense_structure_revision(self, instance: int) -> int: ...
+
+    def open_apc(self, slot : int, generation : int) -> APC: ...

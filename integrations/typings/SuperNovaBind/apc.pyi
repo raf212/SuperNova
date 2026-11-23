@@ -1,5 +1,7 @@
 """Stubbed declarations correspond to core/bindings/src/AdaptivePackedCellContainer/APC.cpp."""
 from enum import Enum
+import numpy as np
+from numpy.typing import NDArray
 
 class Column(Enum):
     BOTTOM_UP = ...
@@ -61,3 +63,7 @@ class RegionSchema:
 class APC:
     @property
     def slot(self) -> int: ...
+
+    def read_region(self, column: Column, dtype: DType) -> NDArray[np.generic]: ...
+    
+    def write_region(self, column: Column, dtype: DType, values: NDArray[np.generic]) -> None: ...
