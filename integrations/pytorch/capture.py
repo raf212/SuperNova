@@ -140,3 +140,60 @@ def _signature(spec: InputSpec | OutputSpec, indices: Mapping[Node, int]) -> JSO
         _argument(getattr(arg, "value", None), indices),
         getattr(spec, "persistent", None)
     ]
+
+def _call_target(target: object) -> JSONValue:
+    # OpOverload.__str__ is stable within the chosen PyTorch version and
+    # contains the ATen namespace and overload (e.g. aten.relu.default).
+    # PyTorch exposes an ATen overload's `_schema`, but its `torch._ops`
+    # implementation module is intentionally private. Avoid importing that
+    # private type merely for a runtime check.
+    schema: object = getattr(target, "_schema", None)
+    if schema is not None:
+        return str(target)
+    module = getattr(target, "__module__", None)
+    qualified_name = getattr(target, "__qualname__", None)
+    if isinstance(module, str) and isinstance(qualified_name, str):
+        return [module, qualified_name]
+    raise ValueError(f"Unsupported call_function target: {target!r}")
+
+
+def _fingerprint(program: ExportedProgram) -> str:
+    """Hash exported dataflow, signatures and constants, excluding tensor *state*.
+
+    NOT a compiled-executable compatibility hash: check device, shape and
+    range constraints, tensor metadata and PyTorch version separately.
+    """
+    nodes: list[Node] = list(program.graph.nodes)
+    indices : dict[Node, int] = {node: index for index, node in enumerate(nodes)}
+    records : list[JSONValue] = []
+
+    for node in nodes:
+        if node.op in ("placeholder", "output"):
+            target : JSONValue = None
+        elif node.op == "call_function":
+            target = _call_target(node.target)
+        else:
+            raise ValueError(f"Unsupported exported graph op: {node.op!r}")
+        records.append([
+            node.op, target, 
+            _argument(node.args, indices),
+            _argument(node.kwargs, indices)
+        ])
+
+    constants = cast(Mapping[str, object], program.constants)
+    constant_records : dict[str, JSONValue] = {
+        name : _argument(value, indices) for name, value in constants.items()
+    }
+    payload : JSONValue = [
+        "supernova-export-fingerprint-v1",
+        records,
+        [_signature(spec, indices) for spec in program.graph_signature.input_specs],
+        [_signature(spec, indices) for spec in program.graph_signature.output_specs],
+        str(program.call_spec.in_spec),
+        str(program.call_spec.out_spec),
+        constant_records
+    ]
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
