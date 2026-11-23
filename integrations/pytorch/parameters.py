@@ -23,7 +23,7 @@ _DTYPES = {
     torch.uint16: sn.apc.DType.UINT16,
     torch.uint32: sn.apc.DType.UINT32,
     torch.uint64: sn.apc.DType.UINT64,
-    ### Float 16 is still npt supported
+    ### Float 16 is still not supported
     torch.float16: sn.apc.DType.FLOAT16
 }
 
@@ -62,7 +62,7 @@ def _bias_name(state, weight_name, feature_count):
     name = weight_name[:-len("weight")] + "bias"
     if name in state:
         role, value = state[name]
-        if role == sn.models.TensorRole.PARAMETER and tuple(value.shape) == (feature_count):
+        if role == sn.models.TensorRole.PARAMETER and tuple(value.shape) == (feature_count,):
             return name
     return None
 
@@ -123,7 +123,7 @@ def _recurrent_group(module, state, name):
 
     if any(
         tuple(value.shape) != (rows,) or
-        ValueError.dtype != biases[0].dtype
+        value.dtype != biases[0].dtype
         for value in biases
     ) :
         return None
@@ -170,10 +170,174 @@ def _recurrent_blocks(hidden, gates, weights, biases, budget):
 
     for feature in range(hidden):
         weights_for_feature = _recurrent_ranges(weights, hidden, gates, feature, 1)
-        biases_for_feature = _recurrent_ranges(biases, hidden, gates, features, 1)
+        biases_for_feature = _recurrent_ranges(biases, hidden, gates, feature, 1)
         for weight, bias in zip_longest(
             _fragments(weights_for_feature, budget),
             _fragments(biases_for_feature, budget),
             fillvalue=()
         ):
-            yield[*weights, *bias]
+            yield [*weight, *bias]
+
+def _inspect_model_state(module, state):
+    """Validate tensors, discover layers, and classify feature/recurrent groups."""
+    layer_indices = {}
+    assignments = []
+    features = {}
+    paired_biases = set()
+    recurrent_groups = {}
+    recurrent_tensors = set()
+    seen_storage = set()
+
+    for name, (role, value) in state.items():
+        _check_tensor(name, value)
+        if value.numel():
+            address = value.untyped_storage().data_ptr()
+            if address in seen_storage:
+                raise ValueError(f"{name}: distinct tensors sharing storage are unsupported")
+            seen_storage.add(address)
+
+        owner = name.rpartition(".")[0]
+        if owner not in layer_indices:
+            layer_indices[owner] = len(assignments)
+            assignments.append([])
+
+        width = _feature_width(module, name, value) if role == sn.models.TensorRole.PARAMETER else None
+        if width is not None:
+            bias = _bias_name(state, name, value.shape[0])
+            features[name] = (width, bias)
+            if bias is not None:
+                paired_biases.add(bias)
+
+        group = _recurrent_group(module, state, name)
+        if group is not None:
+            recurrent_groups[name] = group
+            _, _, weights, biases = group
+            recurrent_tensors.update(tensor for tensor, _ in weights + biases)
+
+    return layer_indices, assignments, features, paired_biases, recurrent_groups, recurrent_tensors
+
+
+def _add_apc(layer, regions, state, assignments, schemas, columns, bindings):
+    """Register one APC's model assignment, tensor bindings, and region schemas.
+
+    `layer` is a layer index. Assignment.slot uses the global APC index
+    (`len(schemas)`); TensorBinding uses the APC's index within its layer.
+    """
+    apc_index = len(assignments[layer])
+    assignments[layer].append(sn.models.Assignment(len(schemas)))
+
+    layout = {}
+    for name, offset, rows, cols in regions:
+        role, value = state[name]
+        column = _column(name, role)
+        dtype = _DTYPES[value.dtype]
+        apc_offset = 0
+
+        if column in layout:
+            _, previous_rows, previous_cols = layout[column]
+            apc_offset = previous_rows * previous_cols
+            layout[column] = dtype, 1, apc_offset + rows * cols
+        else:
+            layout[column] = dtype, rows, cols
+
+        bindings[name].append(
+            sn.models.TensorBinding(apc_index, column, offset, apc_offset, rows * cols)
+        )
+
+    row = {}
+    for column, (dtype, rows, cols) in layout.items():
+        schema = sn.apc.RegionSchema(column, dtype, rows, cols, model_instance=1)
+        row[column] = schema
+        columns.setdefault(column, schema)
+    schemas.append(row)
+
+
+def _allocate_fabric(model, schemas, columns, segment_pool_path):
+    """Create the native Fabric and install all APC region schemas in slot order."""
+    if not columns:
+        # Fabric requires at least one enabled column, even with no parameters.
+        columns[sn.apc.Column.WEIGHT] = sn.apc.RegionSchema(
+            sn.apc.Column.WEIGHT, sn.apc.DType.FLOAT32, 1, 1
+        )
+
+    # Each APC must provide a schema for every enabled Fabric column.
+    placeholders = {
+        column: sn.apc.RegionSchema(column, sn.apc.DType.UINT8, 1, 1, model_instance=1)
+        for column in columns
+    }
+    slot_schemas = [
+        [row.get(column, placeholder) for column, placeholder in placeholders.items()]
+        for row in schemas
+    ]
+    slot_cells = max(
+        sn.fabric.MINIMUM_APC_CELL_COUNT, max((sum(record.cell_count for record in row) for row in slot_schemas), default=0)
+    )
+
+    fabric = sn.fabric.Fabric(
+        max(1, len(schemas)), list(columns.values()), slot_cells=slot_cells,
+        segment_pool_path=segment_pool_path, models=[model], max_parents=1,
+    )
+    for slot, row in enumerate(slot_schemas):
+        if fabric.create_apc(row).slot != slot:
+            raise RuntimeError("New APC slot differs from the Dense ModelIR assignment")
+    return fabric
+
+
+def _describe_model(state, layer_indices, assignments, bindings, fingerprint, graph):
+    """Build the native ModelDescription from the collected APC assignments."""
+    # Preserve the tensor order expected by operator references in the Dense IR.
+    tensor = [
+        sn.models.TensorDescription(
+            name, role, _DTYPES[value.dtype], layer_indices[name.rpartition(".")[0]],
+            list(value.shape), bindings[name]
+        )
+        for name, (role, value) in state.items()
+    ]
+
+    layers = [sn.models.LayerDescription(0, len(layer), layer) for layer in assignments]
+    return sn.models.ModelDescription(
+        1,
+        sn.models.Family.torch_model,
+        layers,
+        configuration= sn.models.encode_dense_ir(tensor, fingerprint, graph)
+    )
+
+def _build_fabric(module, state, chunk_elements, segment_pool_path, fingerprint, graph):
+    """Convert PyTorch state into APC-backed native Fabric storage."""
+    if type(chunk_elements) is not int or not 1 <= chunk_elements <= (2**32 - 8):
+        raise ValueError("chunk_elements must be a positive integer within the APC size range")
+
+    (
+        layer_indices, assignments, features, paired_biases,
+        recurrent_groups, recurrent_tensors,
+    ) = _inspect_model_state(module, state)
+
+    schemas = []
+    columns = {}
+    bindings = {name: [] for name in state}
+
+    for name, (_, value) in state.items():
+        layer = layer_indices[name.rpartition(".")[0]]
+
+        if name in recurrent_groups:
+            blocks = _recurrent_blocks(*recurrent_groups[name], chunk_elements)
+        elif name in features:
+            width, bias = features[name]
+            blocks = _feature_blocks(name, bias, value.shape[0], width, chunk_elements)
+        elif name not in paired_biases and name not in recurrent_tensors:
+            blocks = (
+                [(name, offset, 1, min(chunk_elements, value.numel() - offset))]
+                for offset in range(0, value.numel(), chunk_elements)
+            )
+        else:
+            continue  # Handled together with its feature or recurrent group.
+
+        for regions in blocks:
+            _add_apc(layer, regions, state, assignments, schemas, columns, bindings)
+
+    # APCs are allocated by feature, but recurrent tensors are ordered by gate.
+    for name in recurrent_tensors:
+        bindings[name].sort(key=lambda piece: piece.tensor_offset)
+
+    model = _describe_model(state, layer_indices, assignments, bindings, fingerprint, graph)
+    return _allocate_fabric(model, schemas, columns, segment_pool_path)

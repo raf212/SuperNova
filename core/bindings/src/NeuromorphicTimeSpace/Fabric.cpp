@@ -33,6 +33,8 @@ namespace SuperNovaBindings
 
     void BindFabric(py::module_& module)
     {
+        module.attr("MINIMUM_APC_CELL_COUNT") = py::int_(sn::MINIMUM_APC_CELL_COUNT);
+        
         py::class_<Fabric, std::shared_ptr<Fabric>>(module, "Fabric")
             .def(
                 py::init([](uint32_t slots, const Records& schemas, uint32_t slot_cells,
