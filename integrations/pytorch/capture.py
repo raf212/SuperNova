@@ -197,3 +197,131 @@ def _fingerprint(program: ExportedProgram) -> str:
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+def _lower_graph(
+    program: ExportedProgram, tensor_names: Sequence[str] | Mapping[str, object],
+) -> sn.models.DenseOperatorGraph | None:
+    """Lower exactly supported one-input/one-output Linear/ReLU graphs.
+
+    An unsupported pattern returns None; the ExportedProgram is still kept.
+    """
+    names: dict[str, int] = {name: i for i, name in enumerate(tensor_names)}
+    placeholders = [node for node in program.graph.nodes if node.op == "placeholder"]
+    input_specs = program.graph_signature.input_specs
+    if len(placeholders) != len(input_specs):
+        return None
+
+    inputs: list[Node] = []
+    parameters: dict[Node, int] = {}
+    for node, spec in zip(placeholders, input_specs, strict=True):
+        if spec.kind.name == "USER_INPUT" and isinstance(spec.arg, TensorArgument):
+            inputs.append(node)
+        elif spec.kind.name == "PARAMETER" and spec.target in names:
+            assert spec.target is not None
+            parameters[node] = names[spec.target]
+        else:
+            return None
+
+    outputs = program.graph_signature.output_specs
+    if (
+        len(inputs) != 1
+        or len(outputs) != 1
+        or outputs[0].kind.name != "USER_OUTPUT"
+        or not isinstance(outputs[0].arg, TensorArgument)
+    ):
+        return None
+
+    values: dict[Node, int] = {inputs[0]: 0}
+    operators: list[sn.models.DenseOperator] = []
+    for node in program.graph.nodes:
+        if node.op == "placeholder":
+            continue
+        if node.op == "output":
+            if len(node.args) != 1 or not isinstance(node.args[0], (tuple, list)):
+                return None
+            result = cast(Sequence[object], node.args[0])
+            if len(result) == 1 and isinstance(result[0], Node) and result[0] in values:
+                return sn.models.DenseOperatorGraph(operators, values[result[0]])
+            return None
+        if (
+            node.op != "call_function"
+            or bool(node.kwargs)
+            or not node.args
+            or not isinstance(node.args[0], Node)
+            or node.args[0] not in values
+        ):
+            return None
+        operand = values[node.args[0]]
+        if node.target == torch.ops.aten.linear.default and len(node.args) in (2, 3):
+            weight = node.args[1]
+            bias = node.args[2] if len(node.args) == 3 else None
+            if not isinstance(weight, Node) or weight not in parameters:
+                return None
+            if bias is not None and (not isinstance(bias, Node) or bias not in parameters):
+                return None
+            if isinstance(bias, Node):
+                op = sn.models.DenseOperator(
+                    sn.models.OperatorKind.LINEAR,
+                    operand,
+                    parameters[weight],
+                    parameters[bias],
+                )
+            else:
+                op = sn.models.DenseOperator(
+                    sn.models.OperatorKind.LINEAR, operand, parameters[weight]
+                )
+        elif node.target == torch.ops.aten.relu.default and len(node.args) == 1:
+            op = sn.models.DenseOperator(sn.models.OperatorKind.RELU, operand)
+        else:
+            return None
+        operators.append(op)
+        values[node] = len(operators)
+    return None
+
+
+def _dense_model_constructor() -> DenseModelConstructor:
+    """Retrieve the not-yet-implemented reference adapter with a clear error."""
+    try:
+        reference = import_module(".reference", package=__package__)
+    except ModuleNotFoundError as exc:
+        if exc.name == f"{__package__}.reference":
+            raise RuntimeError(
+                "integrations.pytorch.reference is missing; the DenseModel "
+                "adapter must be implemented before capture() can run"
+            ) from exc
+        raise
+    factory: object = getattr(reference, "DenseModel", None)
+    candidate: object = getattr(factory, "_from_capture", None)
+    if not callable(candidate):
+        raise RuntimeError(
+            "integrations.pytorch.reference.DenseModel is not implemented yet. "
+            "Implement DenseModel._from_capture() and store_state() to use capture(). "
+            "capture_graph() and _fingerprint() can be used independently."
+        )
+    return cast(DenseModelConstructor, candidate)
+
+
+def capture(
+    module: nn.Module,
+    *,
+    example_args: tuple[object, ...] | None = None,
+    example_kwargs: dict[str, object] | None = None,
+    chunk_elements: int = 4096,
+    segment_pool_path: str | PathLike[str] | None = None,
+) -> DenseModelLike:
+    """Capture CPU tensors into APC storage, optionally preserving ATen topology.
+
+    Requires the separate DenseModel reference adapter, not yet present in the
+    supplied repository. No APC is allocated if graph export fails.
+    """
+    _validate_module(module)
+    template = deepcopy(module)
+    state = module_state(module)
+    program = _export_optional(template, example_args, example_kwargs)
+    fingerprint = _fingerprint(program) if program is not None else ""
+    graph = _lower_graph(program, state) if program is not None else None
+    constructor = _dense_model_constructor()  # fail before allocating native APCs
+    fabric = build_fabric(module, state, chunk_elements, segment_pool_path, fingerprint, graph)
+    dense = constructor(fabric, template, program, fingerprint)
+    dense.store_state({name: value for name, (_, value) in state.items()})
+    return dense
