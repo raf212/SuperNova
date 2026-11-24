@@ -230,3 +230,29 @@ class DenseModel:
 
         for (_, column), (apc, dtype, region) in pending.items():
             apc.write_region(column, dtype, region)
+
+    def forward(self, *args: object, **kwargs: object) -> object:
+        """Evaluate using APC state; forbid implicit training-buffer updates."""
+        if any(
+            child.training and next(child.buffers(recurse=False), None) is not None
+            for child in self.module.modules()
+        ):
+            raise RuntimeError("Use forward_with_state and store_state for training with buffers")
+        return self.forward_with_state(self.load_state(), *args, **kwargs)
+
+    def forward_with_state(
+        self,
+        state: Mapping[str, torch.Tensor],
+        /,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        """Execute PyTorch against explicit tensors; gradients flow into ``state``."""
+        self._check_revision()
+        if self._module_structure() != self._attached_structure:
+            raise RuntimeError(
+                "The attached PyTorch module structure changed. Reattach the model."
+            )
+        return cast(object, torch.func.functional_call(
+            self.module, state, args, kwargs, strict=True,
+        ))
