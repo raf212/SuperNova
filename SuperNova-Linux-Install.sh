@@ -8,13 +8,13 @@
 #   - Supported AdaptiveCpp full/generic LLVM releases: 15..21.
 #
 # NORMAL MODE:
-#   ./build-linux.sh
+#   ./SuperNova-Linux-Install.sh
 #     1. Verify system LLVM/Clang and required development components.
 #     2. Verify the existing AdaptiveCpp installation.
 #     3. Build only SuperNova.
 #
 # ADAPTIVECPP REBUILD MODE:
-#   ./build-linux.sh -accp_rebuild
+#   ./SuperNova-Linux-Install.sh -accp_rebuild
 #     1. Verify system LLVM/Clang and required development components.
 #     2. Initialize/update the AdaptiveCpp git submodule.
 #     3. Rebuild/reinstall AdaptiveCpp ONLY against the system LLVM.
@@ -45,7 +45,7 @@ CLANG_VERSION="${CLANG_VERSION:-18}"
 
 usage() {
   cat <<'EOF'
-Usage: build-linux.sh [options]
+Usage: SuperNova-Linux-Install.sh [options]
 
 Linux policy:
   LLVM is NEVER cloned or built by this script.
@@ -66,11 +66,11 @@ Options:
   -h, --help            Show this help
 
 Examples:
-  ./build-linux.sh
-  ./build-linux.sh -accp_rebuild
-  ./build-linux.sh -accp_rebuild --jobs 8
-  ./build-linux.sh --clang-version 20
-  ./build-linux.sh --clean-supernova
+  ./SuperNova-Linux-Install.sh
+  ./SuperNova-Linux-Install.sh -accp_rebuild
+  ./SuperNova-Linux-Install.sh -accp_rebuild --jobs 8
+  ./SuperNova-Linux-Install.sh --clang-version 20
+  ./SuperNova-Linux-Install.sh --clean-supernova
 EOF
 }
 
@@ -179,7 +179,7 @@ If LLVM ${version} packages are unavailable in your distribution repositories,
 install an official supported LLVM release from your distro or apt.llvm.org,
 then rerun with:
 
-  ./build-linux.sh --clang-version <major>
+  ./SuperNova-Linux-Install.sh --clang-version <major>
 
 This script will NOT clone or build LLVM from source.
 EOF
@@ -435,7 +435,7 @@ LLVM/Clang is NOT the problem and will NOT be rebuilt.
 
 Initialize/rebuild AdaptiveCpp against the verified system LLVM with:
 
-  ./build-linux.sh -accp_rebuild
+  ./SuperNova-Linux-Install.sh -accp_rebuild
 
 This rebuilds only:
   $ACPP_BUILD
@@ -543,6 +543,14 @@ printf 'LLVM source build  : DISABLED on Linux\n'
 
 warn_about_legacy_linux_llvm_clone
 
+# Initialize every registered submodule (including nested submodules) on
+# normal builds as well as AdaptiveCpp rebuilds.
+step "Synchronizing and initializing Git submodules"
+git -C "$ROOT" submodule sync --recursive ||
+  die "Failed to synchronize Git submodule URLs."
+git -C "$ROOT" submodule update --init --recursive ||
+  die "Failed to initialize Git submodules."
+
 resolve_system_llvm
 verify_llvm_release
 verify_llvm_development_components
@@ -634,10 +642,10 @@ cat <<EOF
 Linux never clones/builds LLVM.
 
 Normal build:
-  ./build-linux.sh
+  ./SuperNova-Linux-Install.sh
 
 Rebuild AdaptiveCpp only:
-  ./build-linux.sh -accp_rebuild
+  ./SuperNova-Linux-Install.sh -accp_rebuild
 
 Run:
   "$SUPERNOVA_EXE"

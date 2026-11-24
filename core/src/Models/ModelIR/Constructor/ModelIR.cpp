@@ -148,7 +148,7 @@ namespace BidirectionalInMemGraph::GMI
             const IndividualModelDescription& model = Description[idx];
             if (
                 model.Instance != (idx +1) ||
-                model.Model == PreBuildModels::NONE ||
+                model.Model == ModelRepresentation::NONE ||
                 model.Model > LAST_DEFINED_MODEL_IDX ||
                 model.StructuralADaptationAllowed > 1 ||
                 model.StructureRevision == UNSIGNED_ZERO ||
@@ -226,9 +226,17 @@ namespace BidirectionalInMemGraph::GMI
 
         if (apc_cursor != LayerAPCs.size()) return false;
 
-        if (Layers.empty()) return true;
         try 
         {
+            for (const IndividualModelDescription& model : Description) 
+            {
+                if (model.Model != ModelRepresentation::DENSE_TENSOR_STATE) continue;
+                Dense::DenseModelDynamics dense = Dense::DenseModelDynamics::Decode(
+                    Configuration(model.Instance)
+                );
+                dense.Validate(Layers.subspan(model.FirstLayer, model.LayerCount));
+            }
+            if (Layers.empty()) return true;
             std::vector<uint8_t> seen(slot_count, UNSIGNED_ZERO);
             for (const LayerDescription& layer : Layers) 
             {
@@ -265,7 +273,7 @@ namespace BidirectionalInMemGraph::GMI
             {
                 if (
                     mo.Instance != candidate.Description.size() + 1 ||
-                    mo.Model == PreBuildModels::NONE ||
+                    mo.Model == ModelRepresentation::NONE ||
                     mo.Model > LAST_DEFINED_MODEL_IDX ||
                     !mo.StructureRevision ||
                     mo.Layers.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_layers) ||

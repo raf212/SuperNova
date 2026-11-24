@@ -7,10 +7,11 @@
 </p>
 
 
-SuperNova is a C++20 architecture with optional AdaptiveCpp/SYCL execution for CPU and GPU workloads.
+<h4 align="center"><i>
+SuperNova is being designed as a model-agnostic, learning-rule-agnostic, structurally mutable computational library.Built upon a concurrently mutable directed acyclic graph (DAG) with CSR-like sparse computation, originally designed for Generalized Hierarchical Gaussian Filter's (GHGF).The ultimate objective is to unify PyTorch compatible dense modeling with fast memory local predictive coding, Bayesian inference, and continual structural learning through vendor agnostic heterogeneous device execution using AdaptiveCpp.
+</i></h4>
 
-
-## Before you start
+### Before you start
 
 Install these **before running the automatic build scripts**.
 
@@ -125,9 +126,9 @@ CPU execution does not require a GPU SDK.
 Windows:
 
 ```powershell
-.\SuperNova-Windows-Install.ps1 -CpuOnly
-.\SuperNova-Windows-Install.ps1 -BuildPython
-.\SuperNova-Windows-Install.ps1 -RebuildAdaptiveCpp
+powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -CpuOnly
+powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -BuildPython
+powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -RebuildAdaptiveCpp
 ```
 
 Linux:

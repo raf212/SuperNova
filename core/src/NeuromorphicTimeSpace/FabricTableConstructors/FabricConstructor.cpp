@@ -223,6 +223,15 @@ namespace BidirectionalInMemGraph
     }
 
 
+    constexpr bool FabricConstructor::IsDesiredIndexValidInSLab(size_t desired_idx) noexcept
+    {
+        if (FabCache_ && DisposableFCache___.SlabBasePtr_ && desired_idx < FabCache_->SlabCellCount_)
+        {
+            return true;
+        }
+        return false;
+    }
+
 
 
 }

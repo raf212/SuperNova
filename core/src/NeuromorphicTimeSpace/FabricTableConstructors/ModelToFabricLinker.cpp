@@ -2,7 +2,7 @@
 
 namespace BidirectionalInMemGraph 
 {
-    bool ModelMutation::ValidateLayer_(const GMI::ModelIR& ir, std::vector<uint8_t>& mapped) noexcept
+    bool ModelToFabricLinker::ValidateLayer_(const GMI::ModelIR& ir, std::vector<uint8_t>& mapped) noexcept
     {
         try 
         {
@@ -40,7 +40,7 @@ namespace BidirectionalInMemGraph
                         return false;
                     }
 
-                    for (const SD::RegionSchemaRecord& schema : MatrixViewRow_(model.Slot)) 
+                    for (const SD::RegionSchemaRecord& schema : MatrixViewRow(model.Slot)) 
                     {
                         if (
                             !SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED) &&

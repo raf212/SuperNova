@@ -1,6 +1,6 @@
 #pragma once 
 #include "../../AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
-#include "../../Models/ModelIR/ModelIR.hpp"
+#include "../../Models/ModelIR/Constructor/DenseModelIR.hpp"
 
 namespace BidirectionalInMemGraph
 {

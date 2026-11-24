@@ -25,7 +25,7 @@ namespace BidirectionalInMemGraph
         return SD::RSSpan(row, FabCache_->ActiveRegionCount_);
     }
 
-    SchemaDefinition::ConstRSSpan MatrixViewConstructor::MatrixViewRow_(uint32_t apc_slot) noexcept
+    SchemaDefinition::ConstRSSpan MatrixViewConstructor::MatrixViewRow(uint32_t apc_slot) noexcept
     {
         return MutableMatrixViewRow_(apc_slot);
     }

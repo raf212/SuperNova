@@ -12,6 +12,13 @@ namespace BidirectionalInMemGraph
         }
     }
 
+    bool APCFinilizer::OpenAPC(uint32_t slot, uint32_t generation, AdaptivePackedCellContainer& apc) noexcept
+    {
+        APCUseScope use;
+        return GetExistingAPC_(slot, apc, use, generation);
+    }
+
+
     bool APCFinilizer::BindExistingAPCSnapshot_(
         uint32_t slot,
         AdaptivePackedCellContainer& apc,

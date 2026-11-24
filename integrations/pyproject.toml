@@ -1,0 +1,45 @@
+# Current phase: package the Python integration and configure Pyright.
+# The native SuperNovaBind extension is still installed separately by
+# integrations/InstallSuperNovaBindings.py. This is NOT yet a wheel builder.
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supernova-runtime"
+version = "0.1.0.dev0"
+description = "SuperNova PyTorch integration (native SuperNovaBind installed separately)"
+readme = "readme.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.7",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyright>=1.1.400",
+    "pytest>=8",
+    "pip-tools>=7.4",
+    "build>=1.2",
+    "pybind11>=2.13",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["integrations*"]
+namespaces = true
+
+[tool.pyright]
+include = [
+    "pytorch/capture.py",
+    "pytorch/parameters.py",
+    "pytorch/reference.py",
+]
+exclude = ["**/__pycache__", "**/.venv", "**/build*", "**/.git"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+stubPath = "typings"
+
+[tool.setuptools.package-data]
+"integrations.pytorch" = ["py.typed"]

@@ -22,13 +22,13 @@
   GPU vendor drivers/SDKs are intentionally NOT installed automatically.
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild -Jobs 4
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -accp_rebuild -Jobs 4
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File powershell -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -BuildPython
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\SuperNova-Windows-Install.ps1 -BuildPython
 #>
 
 [CmdletBinding()]
@@ -42,6 +42,7 @@ param(
     [switch]$accp_rebuild,
 
     [switch]$BuildPython,
+    [string]$PythonExecutable = "",
     [switch]$CpuOnly,
     [switch]$Run,
 
@@ -385,6 +386,83 @@ function Remove-DirectoryIfPresent([string]$Path) {
     }
 }
 
+# Capture the intended Python BEFORE importing the Visual Studio environment.
+# Explicit selection wins, then a venv, then python.exe from the active PATH.
+# CONDA_PREFIX is only a fallback: a child PowerShell profile can reset it to base.
+# Prefer launching this script with powershell -NoProfile to preserve activation.
+if ($BuildPython) {
+    Write-Step "Selecting Python for SuperNova bindings"
+    if ($PythonExecutable) {
+        $python = (Resolve-Path -LiteralPath $PythonExecutable -ErrorAction Stop).ProviderPath
+    }
+    elseif ($env:VIRTUAL_ENV) {
+        $python = Join-Path $env:VIRTUAL_ENV "Scripts/python.exe"
+    }
+    else {
+        # The executable on PATH reflects what `python` actually runs here.
+        # CONDA_PREFIX can be stale or rewritten by PowerShell startup profiles.
+        $command = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($command) {
+            $python = $command.Source
+        }
+        elseif ($env:CONDA_PREFIX) {
+            $python = Join-Path $env:CONDA_PREFIX "python.exe"
+        }
+        else {
+            throw "Python bindings requested, but python.exe was not found. Use -PythonExecutable."
+        }
+    }
+
+    if (-not $PythonExecutable -and $env:CONDA_PREFIX) {
+        $condaPython = Join-Path $env:CONDA_PREFIX "python.exe"
+        if ([IO.Path]::GetFullPath($condaPython) -ine [IO.Path]::GetFullPath($python)) {
+            Write-Warning "CONDA_PREFIX and selected python.exe disagree. Selected: $python; CONDA_PREFIX: $condaPython. If this is unexpected, run with powershell -NoProfile or supply -PythonExecutable."
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw "Selected Python executable does not exist: $python. Activate the intended environment or use -PythonExecutable."
+    }
+
+    # Ask that exact interpreter for its own ABI and development artifacts.
+    $pythonProbe = @'
+import json, struct, sys, sysconfig
+from pathlib import Path
+include = Path(sysconfig.get_path("include"))
+name = f"python{sys.version_info.major}{sys.version_info.minor}{getattr(sys, 'abiflags', '')}.lib"
+dirs = [Path(sys.base_prefix) / "libs", Path(sys.prefix) / "libs"]
+libdir = sysconfig.get_config_var("LIBDIR")
+if libdir:
+    dirs.insert(0, Path(libdir))
+libs = [d / name for d in dirs]
+library = next((p for p in libs if p.is_file()), None)
+print(json.dumps(dict(executable=sys.executable, version=sys.version.split()[0],
+    implementation=sys.implementation.name, bits=struct.calcsize("P") * 8,
+    platform=sysconfig.get_platform(), include=str(include),
+    headers=(include / "Python.h").is_file() and (include / "pyconfig.h").is_file(),
+    library=str(library) if library else None, searched=[str(p) for p in libs])))
+'@
+    $probeOutput = $pythonProbe | & $python -
+    if ($LASTEXITCODE -ne 0 -or -not $probeOutput) {
+        throw "Could not inspect selected Python: $python"
+    }
+    $pythonInfo = $probeOutput | ConvertFrom-Json
+    $pythonPath = [string]$pythonInfo.executable
+    Write-Host "Python executable  : $pythonPath"
+    Write-Host "Python version     : $($pythonInfo.version)"
+    Write-Host "Python architecture: $($pythonInfo.bits)-bit ($($pythonInfo.platform))"
+    Write-Host "Python include     : $($pythonInfo.include)"
+    Write-Host "Python library     : $($pythonInfo.library)"
+    if ($pythonInfo.implementation -ne "cpython" -or $pythonInfo.platform -ne "win-amd64") {
+        throw "SuperNova Windows requires x64 CPython for the current build target."
+    }
+    if (-not $pythonInfo.headers -or -not $pythonInfo.library) {
+        throw "Selected Python is missing development headers or an import library. Include: $($pythonInfo.include); libraries checked: $($pythonInfo.searched -join ', '). Repair that Python installation or select another with -PythonExecutable."
+    }
+}
+
 Write-Step "Locating SuperNova repository"
 
 Require-Command git | Out-Null
@@ -604,11 +682,11 @@ $configureArgs = @(
 )
 
 if ($BuildPython) {
-    $python = Get-Command python.exe -ErrorAction SilentlyContinue
-    if (-not $python) {
-        throw "Python bindings were requested but python.exe was not found."
-    }
-    $configureArgs += "-DPython_EXECUTABLE=$($python.Source)"
+    $configureArgs += @(
+        "-DPython_EXECUTABLE:FILEPATH=$pythonPath",
+        "-DPython_INCLUDE_DIR:PATH=$($pythonInfo.include)",
+        "-DPython_LIBRARY:FILEPATH=$($pythonInfo.library)"
+    )
 }
 
 & cmake @configureArgs
@@ -619,15 +697,22 @@ if ($LASTEXITCODE -ne 0) {
 # Generate a clangd database using the actual CMake compile commands.
 # IntelliSense is editor-only and must never block a successful build.
 $IntelliSenseScript = Join-Path $Root "build-IntelliSenseCompDB.py"
-$PythonCommand = Get-Command python -ErrorAction SilentlyContinue
-if ($null -ne $PythonCommand) {
-    & $PythonCommand.Source $IntelliSenseScript --platform windows
+$EditorPython = if ($BuildPython) {
+    $pythonPath
+} else {
+    $PythonCommand = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -ne $PythonCommand) { $PythonCommand.Source }
+}
+if ($EditorPython) {
+    & $EditorPython $IntelliSenseScript --platform windows
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "SuperNova IntelliSense generation failed; build continues."
     }
 }
 else {
-    $PyLauncher = Get-Command py -ErrorAction SilentlyContinue
+    $PyLauncher = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     if ($null -ne $PyLauncher) {
         & $PyLauncher.Source -3 $IntelliSenseScript --platform windows
         if ($LASTEXITCODE -ne 0) {
