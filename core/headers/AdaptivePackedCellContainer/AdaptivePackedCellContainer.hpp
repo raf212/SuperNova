@@ -5,10 +5,15 @@ namespace BidirectionalInMemGraph
 {
 static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
 
+    namespace GMI::Dense
+    {
+        class DenseMutationEngine;
+    }
 
     class AdaptivePackedCellContainer : public FabricToAPCLinker
     {
         friend class GHGFModelOfAPC;
+        friend class GMI::Dense::DenseMutationEngine;
         using SD = SchemaDefinition;
         using ASG = APCStorageGeometry;
     protected:
@@ -17,7 +22,8 @@ static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
         bool ResolveBridgeRegion(
             MacroColumnOfAPC column,
             uint32_t record_ordinal,
-            ResolveRegionBiteView& out
+            ResolveRegionBiteView& out,
+            bool model_owner = false
         ) noexcept;
         
     public:

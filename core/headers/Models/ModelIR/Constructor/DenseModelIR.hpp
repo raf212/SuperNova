@@ -73,4 +73,38 @@ namespace BidirectionalInMemGraph::GMI::Dense
         uint64_t StructureRevision{};
         std::vector<std::vector<ModelAPC>> Assignments{};
     };
+
+    inline constexpr uint32_t INACTIVE_LAYER = ADS::APC_INDEX_BOUND_SENTINAL;
+
+    // Element offsets and strides, relative to a private Fabric region.
+    struct APCMatrixTile final
+    {
+        uint32_t Slot{};
+        MacroColumnOfAPC Region{};
+        uint32_t Offset{};
+        uint32_t FirstRow{};
+        uint32_t FirstColumn{};
+        uint32_t Rows{};
+        uint32_t Columns{};
+        uint32_t LeadingDimension{};
+    };
+
+    struct BlockPlacement final
+    {
+        uint32_t Layer{};
+        bool Initialized{}; // provisioning certifies all selectable connections and bias
+
+        std::vector<uint64_t> InputColumns; // stable IDs in physical column order
+        std::vector<APCMatrixTile> Weight;
+        std::vector<APCMatrixTile> Bias;     // one column, if the operator has a bias
+    };
+
+    struct DenseBlock final
+    {
+        uint64_t Id{}; // stable IDs in physical row order
+        std::vector<uint64_t> Nodes;
+        std::vector<ModelAPC> APCs;
+        std::vector<BlockPlacement> Placements;
+    };
+
 }

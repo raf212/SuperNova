@@ -25,6 +25,8 @@ namespace BidirectionalInMemGraph
 
         bool IsActiveAPC() noexcept;
 
+        const ADS::CacheOfAPC* GetAPCCache() const noexcept {return &APCCache_;}
+
     protected:
 
         ADS::CacheOfAPC APCCache_{};

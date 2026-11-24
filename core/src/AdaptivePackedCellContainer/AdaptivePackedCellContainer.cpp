@@ -14,7 +14,8 @@ namespace BidirectionalInMemGraph
     bool AdaptivePackedCellContainer::ResolveBridgeRegion(
         MacroColumnOfAPC column,
         uint32_t record_ordinal,
-        ResolveRegionBiteView& out
+        ResolveRegionBiteView& out,
+        bool model_owner
     ) noexcept
     {
         using SD = SchemaDefinition;
