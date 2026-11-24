@@ -27,7 +27,7 @@ __all__ = ["DenseModel"]
 # An APC region can have several independent tensor bindings. We stage all
 # writes to a region in one ndarray before writing the region exactly once.
 RegionPiece: TypeAlias = tuple[sn.models.TensorBinding, sn.apc.APC]
-TensorRegions: TypeAlias = tuple[sn.models.TensorDescription, torch.tensor, list[RegionPiece]]
+TensorRegions: TypeAlias = tuple[sn.models.TensorDescription, torch.Tensor, list[RegionPiece]]
 ModuleStructure: TypeAlias = tuple[tuple[str, int, type[nn.Module], object], ...]
 RegionKey: TypeAlias = tuple[int, sn.apc.Column]
 StagedRegion: TypeAlias = tuple[sn.apc.APC, sn.apc.DType, NDArray[np.generic]]
@@ -71,7 +71,7 @@ class DenseModel:
         self._module = deepcopy(module)
         program = export_optional(self._module, example_args, example_kwargs)
         graph_fingerprint = fingerprint(program) if program is not None else ""
-        self._bind(fabric, 1, program, fingerprint)
+        self._bind(fabric, instance, program, graph_fingerprint)
 
     @classmethod
     def _from_capture(
@@ -90,7 +90,7 @@ class DenseModel:
         dense._bind(fabric, 1, program, fingerprint)
         return dense
 
-    @classmethod
+    @property
     def module(self) -> nn.Module:
         """Owned execution template; call ``train()`` or ``eval()`` as needed."""
         return self._module
@@ -98,7 +98,7 @@ class DenseModel:
     def _module_structure(self) -> ModuleStructure:
         return tuple(
             (name, id(child), type(child), cast(object, child.forward))
-            for name, child in self.module.named_moduls(remove_duplicate= False)
+            for name, child in self.module.named_modules(remove_duplicate=False)
         )
 
     def _bind(
@@ -128,7 +128,7 @@ class DenseModel:
                 )
         self.exported_program = program
         self._attached_structure = self._module_structure()
-        self._assignments = self._assignments
+        self._assignments = snapshot.assignments
         self._structure_revision = snapshot.structure_revision
         self._metadata()
 
@@ -242,12 +242,12 @@ class DenseModel:
 
     def forward_with_state(
         self,
-        state: Mapping[str, torch.Tensor],
+        state: dict[str, torch.Tensor],
         /,
         *args: object,
         **kwargs: object,
     ) -> object:
-        """Execute PyTorch against explicit tensors; gradients flow into ``state``."""
+        """Execute PyTorch against an explicit state dict; gradients flow into its tensors."""
         self._check_revision()
         if self._module_structure() != self._attached_structure:
             raise RuntimeError(
