@@ -4,6 +4,7 @@
 
 namespace BidirectionalInMemGraph::GMI::Dense
 {
+    using SD = SchemaDefinition;
     inline constexpr uint32_t NO_TENSOR = ADS::APC_INDEX_BOUND_SENTINAL;
 
     enum class TensorRole : uint8_t 
@@ -23,7 +24,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
     struct TensorDescription final
     {
-        using DataType = SchemaDefinition::DataTypeOfMacroColumn;
+        using DataType = SD::DataTypeOfMacroColumn;
         std::string Name{};
         TensorRole Role{};
         DataType DType{};
@@ -105,6 +106,51 @@ namespace BidirectionalInMemGraph::GMI::Dense
         std::vector<uint64_t> Nodes;
         std::vector<ModelAPC> APCs;
         std::vector<BlockPlacement> Placements;
+    };
+
+    struct DenseSegment final
+    {
+        const void* Data{};
+        uint32_t Tensor{};
+        uint32_t FirstRow{};
+        uint32_t FirstColumn{};
+        uint32_t Rows{};
+        uint32_t Columns{};
+        uint32_t LeadingDimension{};
+    };
+
+    struct DenseResidentRegion final
+    {
+        const void* Data{};
+        ModelAPC APC;
+        size_t Bytes{};
+        MacroColumnOfAPC Region{};
+        SD::DataTypeOfMacroColumn DType{};
+    };
+
+    enum class PassAccess : uint8_t
+    {
+        Read = 0,
+        Write = 1
+    };
+
+    enum class PassStatus : uint8_t
+    {
+        Submitted = 0,
+        Busy,
+        Stale
+    };
+    
+    struct DensePass final
+    {
+        const ModelSnapshot& model;
+        std::span<const DenseSegment> Segments;
+        std::span<const DenseResidentRegion> Regions;
+        uint64_t Pass {};
+        uint64_t ParameterEpoch{};
+        PassAccess Access{};
+
+        void* WriteRegion(size_t index) const;
     };
 
 }

@@ -16,8 +16,6 @@ namespace
     constexpr uint8_t DIM_OF_WEIGHT_TENSOR = 2u;
     constexpr uint8_t DIM_OF_BIAS_TENSOR = 1u;
     
-    
-
     constexpr void Require(bool valid)
     {
         if (!valid) throw std::invalid_argument("Invalid Dense ModelIR configuration.");
@@ -364,5 +362,13 @@ namespace
 
     }
 
+    void* DensePass::WriteRegion(size_t index) const
+    {
+        if (Access == PassAccess::Write && index  < Regions.size()) 
+        {
+            throw std::invalid_argument("Dense region write was not admitted");
+        }
+        return const_cast<void*>(Regions[index].Data);
+    }
 
 }

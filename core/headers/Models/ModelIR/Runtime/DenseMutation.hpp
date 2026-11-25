@@ -22,7 +22,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
         uint32_t POsition{};
     };
 
-    struct MutationResult final
+    struct MutationRequest final
     {
         uint64_t ExpectedRevision{};
         uint64_t TargetPass{};
@@ -30,4 +30,20 @@ namespace BidirectionalInMemGraph::GMI::Dense
         std::vector<BlockEdit> Edits;
     };
 
+    enum class MutationStatus : uint8_t
+    {
+        Prepared = 0,
+        Idle,
+        Busy,
+        Stale,
+        Invalid,
+        Capacity,
+        TooEarly,
+        WaitingForDevice,
+        Published,
+        Expired,
+        DeviceFailure
+    };
+
+    
 }
