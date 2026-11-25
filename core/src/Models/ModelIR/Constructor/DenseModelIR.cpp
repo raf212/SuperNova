@@ -371,4 +371,32 @@ namespace
         return const_cast<void*>(Regions[index].Data);
     }
 
+    bool ModelLeaseCache::HasModelStateOutsideSlab() noexcept
+    {
+        std::lock_guard lock(ModelLeaseMutex);
+        return !LiveDenseModels.empty();
+    }
+
+    void ModelLeaseCache::ResetLiveModels() noexcept
+    {
+        std::lock_guard lock(ModelLeaseMutex);
+        LiveDenseModels.clear();
+    }
+
+    bool ModelLeaseCache::HasModelLease() const noexcept
+    {
+        return ModelLeasesActive.load(std::memory_order_acquire);
+    }
+
+    bool ModelLeaseCache::ModelOwnsSlot(uint32_t slot) noexcept
+    {
+        if (!HasModelLease()) return  false;
+        std::lock_guard lock(ModelLeaseMutex);
+        return LeaseModelSlots.contains(slot);
+    }
+
+    void ModelLeaseCache::ResetInstance(uint32_t instance) noexcept
+    {
+        LiveDenseModels.find(instance)->second.reset();
+    }
 }

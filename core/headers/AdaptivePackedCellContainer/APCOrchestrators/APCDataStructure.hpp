@@ -9,7 +9,11 @@ namespace BidirectionalInMemGraph
     class AdaptivePackedCellContainer;
     class Computer;
     class SlabToFabricConverterAndCordinator;
-
+    namespace GMI::Dense
+    {
+        class DenseMutationEngine;
+    }
+    
     //Static struct - Everything can be called statically
     struct APCDataStructure 
     {

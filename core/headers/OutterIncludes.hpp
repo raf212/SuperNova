@@ -43,6 +43,7 @@
 #include <vector>
 #include <tuple>
 #include <unordered_set>
+#include <unordered_map>
 
 // ============================================================
 // WINDOWS (only when compiling for Windows)

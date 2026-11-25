@@ -5,11 +5,6 @@ namespace BidirectionalInMemGraph
 {
 static_assert(__cpp_lib_atomic_wait, "C++ must suppoet atomic wait/notify");
 
-    namespace GMI::Dense
-    {
-        class DenseMutationEngine;
-    }
-
     class AdaptivePackedCellContainer : public FabricToAPCLinker
     {
         friend class GHGFModelOfAPC;

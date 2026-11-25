@@ -98,17 +98,19 @@ namespace BidirectionalInMemGraph::GMI::Dense
     namespace DMEState 
     {
         using FabricSPtr = std::shared_ptr<APCFinilizer>;
+        
+        using CRRev = std::shared_ptr<const Revision>;
 
         struct RevisionRootAtomic final
         {
-            std::atomic<std::shared_ptr<const Revision>> Active;
+            std::atomic<CRRev> Active;
         };
 
         struct StateSPtr final
         {
             std::shared_ptr<DMEState::RevisionRootAtomic> Root{std::make_shared<DMEState::RevisionRootAtomic>()};
             FabricSPtr Fabric;
-            std::shared_ptr<const Revision> retired;
+            CRRev retired;
 
             StateSPtr(FabricSPtr fabric) :
                 Fabric(std::move(fabric))
@@ -160,7 +162,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
         struct Pending
         {
-            std::shared_ptr<const Revision> Next;
+            CRRev Next;
             uint64_t Target;
             uint64_t Deadline;
         };
@@ -209,7 +211,39 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
         void Release(bool finalize) noexcept
         {
-            
+            if (!Cache_.Registered) return;
+            const DMEState::CRRev last = SharedPtrs_.Root->Active.exchange({}, std::memory_order_acq_rel);
+            const bool required_image = last ? 
+                (
+                    last->SnapShot.StructureRevision != Cache_.Installed.StructureRevision ||
+                    (!finalize && (Cache_.ParameterEpoch != UNSIGNED_ZERO || Cache_.Failed || Cache_.Restored))
+                ) : Cache_.ReOpening;
+
+            std::lock_guard lock(SharedPtrs_.Fabric->ModelCacheL_.ModelLeaseMutex);
+            if (required_image) 
+            {
+                SharedPtrs_.Fabric->ModelCacheL_.ResetInstance(Cache_.Instance);
+            }
+            else 
+            {
+                SharedPtrs_.Fabric->ModelCacheL_.LiveDenseModels.erase(Cache_.Instance);
+            }
+
+            for (const uint32_t slot : Vectors_.Claimed) 
+            {
+                SharedPtrs_.Fabric->ModelCacheL_.LeaseModelSlots.erase(slot);
+            }
+
+            const bool active = std::ranges::any_of(
+                SharedPtrs_.Fabric->ModelCacheL_.LiveDenseModels,
+                [] (const auto& entry)
+                {
+                    return bool(entry.second);
+                }
+            );
+
+            SharedPtrs_.Fabric->ModelCacheL_.ModelLeasesActive.store(active, std::memory_order_release);
+            Cache_.Registered = false;
         }
     };
 

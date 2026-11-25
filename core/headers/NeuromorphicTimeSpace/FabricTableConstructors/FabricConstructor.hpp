@@ -8,6 +8,7 @@ namespace BidirectionalInMemGraph
     class FabricConstructor 
     {
         friend class AdaptivePackedCellContainer;
+        friend class GMI::Dense::DenseMutationEngine;
     public:
         FabricExecutionGate& ExecutionGate() noexcept {return DisposableFCache___.ExecutionGate_;}
     protected:
@@ -23,6 +24,7 @@ namespace BidirectionalInMemGraph
 
         FabricCache* FabCache_{nullptr};
         CFC::VolatileFabricCache DisposableFCache___{};
+        GMI::Dense::ModelLeaseCache ModelCacheL_{};
         
         uint64_t* NumericalBase_() noexcept { return DisposableFCache___.StorageBasePtr_; }
 

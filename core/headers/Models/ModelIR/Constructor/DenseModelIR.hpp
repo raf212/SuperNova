@@ -153,4 +153,19 @@ namespace BidirectionalInMemGraph::GMI::Dense
         void* WriteRegion(size_t index) const;
     };
 
+    struct RevisionRootAtomic;
+
+    struct ModelLeaseCache
+    {
+        std::mutex ModelLeaseMutex;
+        std::unordered_set<uint32_t> LeaseModelSlots;
+        std::atomic_bool ModelLeasesActive{};
+        std::unordered_map<uint32_t, std::shared_ptr<RevisionRootAtomic>> LiveDenseModels;
+
+        bool HasModelStateOutsideSlab() noexcept;
+        void ResetLiveModels() noexcept;
+        bool HasModelLease() const noexcept;
+        bool ModelOwnsSlot(uint32_t slot) noexcept;
+        void ResetInstance(uint32_t instance) noexcept;
+    };
 }
