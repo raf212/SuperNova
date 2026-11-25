@@ -1,6 +1,5 @@
 #pragma once 
-#include "../../../NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
-#include "../../../SuperNovaComputeManager/Computer.hpp"
+#include "DenseMutation.hpp"
 
 namespace BidirectionalInMemGraph 
 {
