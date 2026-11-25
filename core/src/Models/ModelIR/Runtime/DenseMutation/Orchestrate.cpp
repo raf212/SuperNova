@@ -267,7 +267,43 @@ namespace BidirectionalInMemGraph::GMI::Dense
             const APCMatrixTile& tile,
             size_t columns,
             SD::DataTypeOfMacroColumn dtype
-        ) noexcept;
+        ) noexcept
+        {
+            const auto slot = std::ranges::find(block.APCs, tile.Slot, &ModelAPC::Slot);
+            const auto region =  Maps_.RegionIndex.find({tile.Slot, tile.Region});
+            Require(slot != block.APCs.end() && region != Maps_.RegionIndex.end(), 
+                "Dense tile dosen't use a private region of one of its APC's");
+            Require(
+                tile.Rows && tile.Columns && 
+                tile.LeadingDimension >= tile.Columns &&
+                (uint64_t{tile.FirstRow} + tile.Rows) <= block.Nodes.size() &&
+                (uint64_t{tile.FirstColumn} + tile.Columns) <= columns, 
+                "Dense APC tile dimensions or stride are invalid.");
+            
+            const StorageRegion& storage = Vectors_.Storage[region->second];
+            const uint8_t stride = SD::DTypeByteCount(dtype).value();
+            const uint64_t elements = storage.Host.size() / stride;
+            const uint64_t extent = uint64_t{tile.Rows -1} * tile.LeadingDimension + tile.Columns;
+            Require(
+                Vectors_.Region[region->second].DType == dtype &&
+                tile.Offset <= elements &&
+                (uint64_t{tile.Offset} + extent) <= NO_TENSOR, 
+                "Dense tile exceeds its typed APC region.");
+
+        }
+
+        void AppendTile(
+            Revision& result,
+            const DenseBlock& block,
+            uint32_t tensor,
+            size_t physical_columns,
+            uint32_t row_base,
+            std::span<const ColumnRun> columns,
+            std::span<const APCMatrixTile> tiles,
+            uint32_t width,
+            const std::unordered_map<uint32_t, uint32_t>& assignments,
+            size_t& remaining_bindings
+        ) const;
     };
 
 }
