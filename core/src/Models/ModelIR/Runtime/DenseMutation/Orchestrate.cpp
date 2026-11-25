@@ -106,13 +106,13 @@ namespace BidirectionalInMemGraph::GMI::Dense
             std::atomic<CRRev> Active;
         };
 
-        struct StateSPtr final
+        struct StateSPtrs final
         {
             std::shared_ptr<DMEState::RevisionRootAtomic> Root{std::make_shared<DMEState::RevisionRootAtomic>()};
             FabricSPtr Fabric;
             CRRev retired;
 
-            StateSPtr(FabricSPtr fabric) :
+            StateSPtrs(FabricSPtr fabric) :
                 Fabric(std::move(fabric))
             {}
         };
@@ -180,7 +180,11 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
     struct DenseMutationEngine::State
     {
-        DMEState::StateSPtr SharedPtrs_;
+    #if defined (SN_ACPP_ENABLED)
+        DMEState::StateGPUCache GPUCache_{};
+    #endif
+
+        DMEState::StateSPtrs SharedPtrs_;
 
         DMEState::StateVectors Vectors_{};
 
@@ -189,8 +193,6 @@ namespace BidirectionalInMemGraph::GMI::Dense
         DMEState::Cache Cache_;
 
         DMEState::StateMutexes Mutexes_{};
-
-        DMEState::StateGPUCache GPUCache_{};
 
         DMEState::Pending Plan_{};
 
@@ -245,6 +247,27 @@ namespace BidirectionalInMemGraph::GMI::Dense
             SharedPtrs_.Fabric->ModelCacheL_.ModelLeasesActive.store(active, std::memory_order_release);
             Cache_.Registered = false;
         }
+
+        const DenseBlock& Block(uint64_t id) const 
+        {
+            const auto entry = Maps_.BlockIndex.find(id);
+            Require(entry != Maps_.BlockIndex.end(), "Unknown Dense APC Block.");
+            return Cache_.Config.Blocks[entry->second];
+        }
+
+        const BlockPlacement& placement(const DenseBlock& block, uint32_t layer) const
+        {
+            const auto found = std::ranges::find(block.Placements, layer, &BlockPlacement::Layer);
+            Require(found != block.Placements.end(), "Destination APC geometry was not provisioned.");
+            return *found;
+        };
+
+        size_t ValidTile(
+            const DenseBlock& block,
+            const APCMatrixTile& tile,
+            size_t columns,
+            SD::DataTypeOfMacroColumn dtype
+        ) noexcept;
     };
 
 }

@@ -106,6 +106,8 @@ namespace BidirectionalInMemGraph::GMI::Dense
         std::vector<uint64_t> Nodes;
         std::vector<ModelAPC> APCs;
         std::vector<BlockPlacement> Placements;
+
+        std::vector<const ModelAPC*> Carriers(const BlockPlacement& placement) const;
     };
 
     struct DenseSegment final

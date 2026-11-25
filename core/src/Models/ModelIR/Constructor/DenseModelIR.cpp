@@ -361,7 +361,10 @@ namespace
         }
 
     }
+}
 
+namespace BidirectionalInMemGraph::GMI::Dense
+{
     void* DensePass::WriteRegion(size_t index) const
     {
         if (Access == PassAccess::Write && index  < Regions.size()) 
@@ -370,7 +373,10 @@ namespace
         }
         return const_cast<void*>(Regions[index].Data);
     }
+}
 
+namespace BidirectionalInMemGraph::GMI::Dense
+{
     bool ModelLeaseCache::HasModelStateOutsideSlab() noexcept
     {
         std::lock_guard lock(ModelLeaseMutex);
@@ -398,5 +404,24 @@ namespace
     void ModelLeaseCache::ResetInstance(uint32_t instance) noexcept
     {
         LiveDenseModels.find(instance)->second.reset();
+    }
+}
+
+namespace BidirectionalInMemGraph::GMI::Dense
+{
+    std::vector<const ModelAPC*> DenseBlock::Carriers(const BlockPlacement& placement) const
+    {
+        std::vector<const ModelAPC*> result;
+        for (const ModelAPC& apc : APCs ) 
+        {
+            if (
+                std::ranges::find(placement.Weight, apc.Slot, &APCMatrixTile::Slot) != placement.Weight.end() ||
+                std::ranges::find(placement.Bias, apc.Slot, &APCMatrixTile::Slot) != placement.Bias.end()                     
+            ) 
+            {
+                result.push_back(&apc);
+            }
+        }
+        return result;
     }
 }
