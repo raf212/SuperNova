@@ -94,4 +94,123 @@ namespace BidirectionalInMemGraph::GMI::Dense
             return result;
         }
     }
+
+    namespace DMEState 
+    {
+        using FabricSPtr = std::shared_ptr<APCFinilizer>;
+
+        struct RevisionRootAtomic final
+        {
+            std::atomic<std::shared_ptr<const Revision>> Active;
+        };
+
+        struct StateSPtr final
+        {
+            std::shared_ptr<DMEState::RevisionRootAtomic> Root{std::make_shared<DMEState::RevisionRootAtomic>()};
+            FabricSPtr Fabric;
+            std::shared_ptr<const Revision> retired;
+
+            StateSPtr(FabricSPtr fabric) :
+                Fabric(std::move(fabric))
+            {}
+        };
+
+        struct StateVectors final
+        {
+            std::vector<LayerDescription> Capacities;
+            std::vector<uint64_t> Input;
+            std::vector<uint32_t> Claimed;
+            std::vector<StorageRegion> Storage;
+            std::vector<DenseResidentRegion> Region;
+        };
+
+        struct StateMaps final
+        {
+            std::unordered_map<uint64_t, size_t> BlockIndex;
+            std::unordered_map<const BlockPlacement*, ColumnIndex> ColumnIndecies;
+            std::map<RegionKey, size_t> RegionIndex;
+        };
+
+        struct StateMutexes final
+        {
+            mutable std::mutex Mutex;
+            std::mutex Planner;
+            std::shared_mutex Numerical;
+        };
+
+        struct Cache
+        {
+            uint32_t Instance;
+            ModelSnapshot Installed;
+            DenseMutationConfig Config;
+            uint64_t LayoutSignature{};
+            size_t FixedBIndings{};
+            uint64_t Clock{};
+            uint64_t ParameterEpoch{};
+            bool CPUWriter{};
+            bool Failed{};
+            bool Registered{};
+            bool ReOpening{};
+            bool Restored{};
+
+            Cache(uint32_t instance):
+                Instance(instance)
+            {}
+        };
+
+        struct Pending
+        {
+            std::shared_ptr<const Revision> Next;
+            uint64_t Target;
+            uint64_t Deadline;
+        };
+
+    #if defined (SN_ACPP_ENABLED)
+        struct StateGPUCache final
+        {
+            std::shared_ptr<ComputerDetail::RuntimeAcpp> GPU;
+            std::unique_ptr<ComputerDetail::ResidentDeviceRegion<std::byte>> DeviceStorage;
+            std::unique_ptr<ComputerDetail::DevicePlanDoubleBuffer<DenseSegment>> DevicePlans;
+            std::optional<sycl::event> LastUse;
+        };
+    #endif
+    }
+
+    struct DenseMutationEngine::State
+    {
+        DMEState::StateSPtr SharedPtrs_;
+
+        DMEState::StateVectors Vectors_{};
+
+        DMEState::StateMaps Maps_{};
+
+        DMEState::Cache Cache_;
+
+        DMEState::StateMutexes Mutexes_{};
+
+        DMEState::StateGPUCache GPUCache_{};
+
+        DMEState::Pending Plan_{};
+
+        State(DMEState::FabricSPtr fabric, uint32_t instance) :
+            SharedPtrs_(std::move(fabric)), Cache_(instance)
+        {}
+
+        ~State()
+        {
+        #if defined (SN_ACPP_ENABLED)
+            if (Cache_.Registered && GPUCache_.GPU && GPUCache_.GPU->Drain())
+            {
+                std::terminate();
+            }
+        #endif
+            Release(false);
+        }
+
+        void Release(bool finalize) noexcept
+        {
+            
+        }
+    };
+
 }
