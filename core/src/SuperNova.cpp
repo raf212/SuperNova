@@ -1,5 +1,5 @@
 // src/atomiccim_core.cpp
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include <SuperNova>
 
 // This TU intentionally very small — it forces the header-defined functions
 // to be compiled into the static library (useful when your code is header-first).

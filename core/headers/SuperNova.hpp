@@ -20,7 +20,7 @@
 #include "AdaptivePackedCellContainer/AdaptivePackedCellContainer.hpp"
 
 // Fabric / slab / DAG public layer.
-#include "NeuromorphicTimeSpace/VagueTemoraryPremativeFabric.hpp"
+#include "NeuromorphicTimeSpace/APCFinilizer.hpp"
 
 // Models and learning system
 #include "Models/ModelAndlarnerManager.hpp"
