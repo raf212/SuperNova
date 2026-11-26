@@ -4,10 +4,12 @@
 
 namespace BidirectionalInMemGraph::GMI::Dense
 {
+    using Vect2DU64 = std::vector<std::vector<uint64_t>>;
+    
     struct DenseMutationConfig final
     {
         std::vector<DenseBlock> Blocks;
-        std::vector<std::vector<uint64_t>> Layers;
+        Vect2DU64 Layers;
         size_t MaxDeviceSegments{}; // required bound for the two descriptor banks
         size_t MaxModelBindings{size_t{1} << 20}; // total ModelIR fragments, including fixed buffers
     #if defined (SN_ACPP_ENABLED)
@@ -64,7 +66,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
         uint64_t StructureRevision{};
         uint64_t ParameterEpoch{};
         uint64_t LastPass{};
-        std::vector<std::vector<uint64_t>> Layers;
+        Vect2DU64 Layers;
         std::vector<RegionImage> Regions;
     };
 

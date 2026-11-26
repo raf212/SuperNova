@@ -25,7 +25,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
         struct Revision final
         {
             ModelSnapshot SnapShot;
-            std::vector<std::vector<uint64_t>> Blocks;
+            Vect2DU64 Blocks;
             std::vector<DenseSegment> Segments;
         };
 
@@ -41,6 +41,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             uint32_t Physical;
             uint32_t Count;
         };
+        static constexpr ColumnRun SINGLE_COLUMN_IDENTITY_RUN{0, 0, 1};
 
         static std::vector<ColumnRun> ProjectColumns(
             const ColumnIndex& columns,
@@ -256,7 +257,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             return Cache_.Config.Blocks[entry->second];
         }
 
-        const BlockPlacement& placement(const DenseBlock& block, uint32_t layer) const
+        const BlockPlacement& Placement(const DenseBlock& block, uint32_t layer) const
         {
             const auto found = std::ranges::find(block.Placements, layer, &BlockPlacement::Layer);
             Require(found != block.Placements.end(), "Destination APC geometry was not provisioned.");
@@ -372,7 +373,109 @@ namespace BidirectionalInMemGraph::GMI::Dense
             }
         }
 
-        CRRev Build(std::vector<std::vector<uint64_t>> selection, uint32_t number) const;
+        CRRev Build(Vect2DU64 selection, uint32_t number) const
+        {
+            std::shared_ptr result = std::make_shared<Revision>();
+            result->Blocks = std::move(selection);
+            result->SnapShot = Cache_.Installed;
+            ModelSnapshot& snapshot = result->SnapShot;
+            snapshot.StructureRevision = number;
+            Require(result->Blocks.size() == snapshot.Assignments.size(), 
+                "Dense layer count dose not match.");
+            std::vector<LayerDescription> layers = Vectors_.Capacities;
+            Vect2DU64 values{Vectors_.Input};
+            std::unordered_set<uint64_t> used_blocks;
+            std::vector<bool> described(snapshot.DenseIR.Tensors.size());
+            size_t remaining_bindings = Cache_.Config.MaxModelBindings - Cache_.FixedBIndings;
+            for (const Operator & op  : snapshot.DenseIR.Graph->Operators) 
+            {
+                if (op.Kind == OperatorKind::ReLU) 
+                {
+                    std::vector<uint64_t> input = values[op.Input];
+                    values.push_back(std::move(input));
+                    continue;
+                }
+
+                TensorDescription& weight_tensor = snapshot.DenseIR.Tensors[op.Weight];
+                const uint32_t layer_index = weight_tensor.LayerIndex;
+                const std::vector<uint64_t>& input = values[op.Input];
+                std::vector<ModelAPC>& apcs = snapshot.Assignments[layer_index];
+                apcs.clear();
+                weight_tensor.Bindings.clear();
+                described[op.Weight] = true;
+                if (op.Bias != NO_TENSOR) 
+                {
+                    described[op.Bias] = true;
+                    snapshot.DenseIR.Tensors[op.Bias].Bindings.clear();
+                }
+
+                std::vector<uint64_t> output;
+                std::unordered_map<uint32_t, uint32_t> assignments;
+                const ColumnRun bias_column = SINGLE_COLUMN_IDENTITY_RUN;
+                for (const uint64_t id : result->Blocks[layer_index]) 
+                {
+                    Require(used_blocks.insert(id).second, "Dense block was selected twice");
+                    const DenseBlock& block = Block(id);
+                    const BlockPlacement& place = Placement(block, layer_index);
+                    Require(place.Initialized, "Dense placement was certified initialized");
+                    for (const ModelAPC* apc : block.Carriers(place)) 
+                    {
+                        if (apcs.size() >= layers[layer_index].APCCapacity) 
+                        {
+                            throw CapacityError{};
+                        }
+                        assignments.emplace(apc->Slot, static_cast<uint32_t>(apcs.size()));
+                        apcs.push_back(*apc);
+                    }
+                    Require(block.Nodes.size() <= (ADS::APC_INDEX_BOUND_SENTINAL - output.size()), 
+                        "Dense logical output exceeds 32 bit system limit");
+                    const uint32_t row = static_cast<uint32_t>(output.size());
+                    const std::vector<ColumnRun> columns = ProjectColumns(
+                        Maps_.ColumnIndecies.at(&place), input
+                    );
+                    AppendTile(*result, block, op.Weight, place.InputColumns.size(), 
+                        row, columns, place.Weight, static_cast<uint32_t>(input.size()), 
+                        assignments, remaining_bindings);
+                    output.insert(output.end(), block.Nodes.begin(), block.Nodes.end());
+                }
+
+                Require(!output.empty(), "A Linear must retain atleat one output node");
+                weight_tensor.Shape = {
+                    static_cast<uint32_t>(output.size()),
+                    static_cast<uint32_t>(input.size())
+                };
+                if (op.Bias != NO_TENSOR) 
+                {
+                    snapshot.DenseIR.Tensors[op.Bias].Shape = {weight_tensor.Shape[0]};
+                    layers[layer_index].APCCount = static_cast<uint32_t>(apcs.size());
+                    values.push_back(std::move(output));
+                }
+            }
+
+            for (size_t i = 0; i < snapshot.DenseIR.Tensors.size(); i++) 
+            {
+                TensorDescription& tensor = snapshot.DenseIR.Tensors[i];
+                if (!described[i]) 
+                {
+                    Require(tensor.Role == TensorRole::Buffer, "Unmapped Dense parameter.");
+                    // Fixed buffers keep their physical regions. 
+                    // Per-node optimizer storage can use the independent region views.
+                    for (TensorBindings& binding : tensor.Bindings) 
+                    {
+                        const uint32_t slot = Cache_.Installed.Assignments[tensor.LayerIndex][binding.APCIndex].Slot;
+                        const std::vector<ModelAPC>& apcs = snapshot.Assignments[tensor.LayerIndex];
+                        const auto new_index = std::ranges::find(apcs, slot, &ModelAPC::Slot);
+                        Require(new_index != apcs.end(), "Mutation would unbind a fixed Dense Buffer.");
+                        binding.APCIndex = static_cast<uint32_t>(new_index - apcs.begin());
+                    }
+                }
+                std::ranges::sort(tensor.Bindings, {}, &TensorBindings::TensorOffset);
+            }
+            snapshot.DenseIR.Validate(layers);
+            return result;
+        }
+
+        void ValidateCatalog();
     };
 
 }
