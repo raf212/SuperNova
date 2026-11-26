@@ -180,6 +180,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
     struct DenseMutationEngine::State
     {
+        using CRRev = DMEState::CRRev;
     #if defined (SN_ACPP_ENABLED)
         DMEState::StateGPUCache GPUCache_{};
     #endif
@@ -262,12 +263,12 @@ namespace BidirectionalInMemGraph::GMI::Dense
             return *found;
         };
 
-        size_t ValidTile(
+        size_t ValidateTile(
             const DenseBlock& block,
             const APCMatrixTile& tile,
             size_t columns,
             SD::DataTypeOfMacroColumn dtype
-        ) noexcept
+        ) const
         {
             const auto slot = std::ranges::find(block.APCs, tile.Slot, &ModelAPC::Slot);
             const auto region =  Maps_.RegionIndex.find({tile.Slot, tile.Region});
@@ -303,7 +304,75 @@ namespace BidirectionalInMemGraph::GMI::Dense
             uint32_t width,
             const std::unordered_map<uint32_t, uint32_t>& assignments,
             size_t& remaining_bindings
-        ) const;
+        ) const
+        {
+            TensorDescription& target_tensor = result.SnapShot.DenseIR.Tensors[tensor];
+            const uint8_t bytes = SD::DTypeByteCount(target_tensor.DType).value();
+            for (const APCMatrixTile& tile : tiles) 
+            {
+                const size_t region = ValidateTile(block, tile, physical_columns, target_tensor.DType);
+                for (const ColumnRun& run : columns) 
+                {
+                    const uint32_t first = std::max(run.Physical, tile.FirstColumn);
+                    const uint32_t last = std::min((run.Physical + run.Count), (tile.FirstColumn + tile.Columns));
+                    if (first >= last) continue;
+                    const uint32_t count = last - first;
+                    const uint32_t column = run.Logical + (first - run.Physical);
+                    const uint32_t offset = tile.Offset + (first - tile.FirstColumn);
+                    const uint32_t row = row_base + tile.FirstRow;
+                    const std::byte* data = static_cast<const std::byte*>(Vectors_.Region[region].Data);
+                    const bool contigious = column == UNSIGNED_ZERO &&
+                        count == width && tile.LeadingDimension == width &&
+                        uint64_t{tile.Rows} * width <= NO_TENSOR;
+                    
+                    const size_t bindings = contigious ? 1 : tile.Rows;
+                    if (
+                        result.Segments.size() >= Cache_.Config.MaxDeviceSegments ||
+                        bindings > remaining_bindings
+                    ) 
+                    {
+                        throw CapacityError{};
+                    }
+                    remaining_bindings -= bindings;
+                    result.Segments.push_back({
+                        data + (size_t{offset} * bytes),
+                        tensor, 
+                        row,
+                        column,
+                        tile.Rows,
+                        count,
+                        tile.LeadingDimension
+                    });
+                    const uint32_t apc = assignments.at(tile.Slot);
+                    if (contigious) 
+                    {
+                        target_tensor.Bindings.push_back({
+                            apc,
+                            tile.Region,
+                            uint64_t{row} * width,
+                            offset,
+                            tile.Rows * width
+                        });
+                    }
+                    else 
+                    {
+                        for (uint32_t r = 0; r < tile.Rows; r++) 
+                        {
+                            target_tensor.Bindings.push_back({
+                                apc,
+                                tile.Region,
+                                (uint64_t{row + r} * width) + column,
+                                offset + (r * tile.LeadingDimension),
+                                count
+                            });
+                        }
+                    }
+
+                }
+            }
+        }
+
+        CRRev Build(std::vector<std::vector<uint64_t>> selection, uint32_t number) const;
     };
 
 }
