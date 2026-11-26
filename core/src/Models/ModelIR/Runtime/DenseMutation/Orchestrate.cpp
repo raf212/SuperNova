@@ -635,6 +635,63 @@ namespace BidirectionalInMemGraph::GMI::Dense
             return hash;
         }
 
+        Vect2DU64 Apply(const Revision& current, std::span<const BlockEdit> edits) const
+        {
+            Vect2DU64 result = current.Blocks;
+            std::unordered_set<uint64_t> edited;
+            for (const BlockEdit& edit : edits)
+            {
+                const DenseBlock& block = Block(edit.Block);
+                Require(edited.insert(edit.Block).second, "Ediot each dense block only once");
+                uint32_t from = INACTIVE_LAYER;
+                for (uint32_t layer = 0; layer < result.size(); layer++) 
+                {
+                    const auto found = std::ranges::find(result[layer], edit.Block);
+                    if (found == result[layer].end()) continue;
+                    from = layer;
+                    result[layer].erase(found);
+                    break;
+                }
+                if (edit.Layer == INACTIVE_LAYER) 
+                {
+                    Require(from != INACTIVE_LAYER, "Dense block is already inasctive");
+                    continue;
+                }
+                Require(edit.Layer < result.size() && edit.Position <= result[edit.Layer].size(), 
+                    "Invalid dense block destination");
+                if (from != INACTIVE_LAYER && from != edit.Layer) 
+                {
+                    const std::vector<const ModelAPC*> old = block.Carriers(Placement(block, from));
+                    const std::vector<const ModelAPC*> next = block.Carriers(Placement(block, edit.Layer));
+                    const auto common = std::ranges::count_if(next, [&](const auto* apc)
+                    {
+                        return std::ranges::find(old, apc) != old.end();
+                    });
+                    Require(static_cast<size_t>(common) == std::min(old.size(), next.size()), 
+                        "A moved dense block must remain all APCs that can carry to its destination");
+                }
+                result[edit.Layer].insert((result[edit.Layer].begin() + edit.Position), edit.Block);
+            }
+            Require(result != current.Blocks, "Dense mutation has no structrural effect");
+            return result;
+        }
+
+        void RequireHealthy()
+        {
+            if (!Cache_.Registered) throw std::logic_error("Dense session is finalized");
+        #if defined (SN_ACPP_ENABLED)
+            if (GPUCache_.GPU && !GPUCache_.GPU->Healthy()) throw std::runtime_error("Dense device execution failed");
+        #endif
+            if (Cache_.Failed) throw std::runtime_error("Dense numerical execution failed");
+        }
+
+        // void DropPlan()
+        // {
+        // #if defined (SN_ACPP_ENABLED)
+        //     if (GPUCache_.DevicePlans) GPUCache_.DevicePlans.Cance
+        // #endif
+        // }
+
     };
 
 }

@@ -21,7 +21,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     {
         uint64_t Block{};
         uint32_t Layer{INACTIVE_LAYER};
-        uint32_t POsition{};
+        uint32_t Position{};
     };
 
     struct MutationRequest final
