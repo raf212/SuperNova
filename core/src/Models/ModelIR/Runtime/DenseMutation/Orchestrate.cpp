@@ -124,7 +124,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             std::vector<uint64_t> Input;
             std::vector<uint32_t> Claimed;
             std::vector<StorageRegion> Storage;
-            std::vector<DenseResidentRegion> Region;
+            std::vector<DenseResidentRegion> Regions;
         };
 
         struct StateMaps final
@@ -287,7 +287,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             const uint64_t elements = storage.Host.size() / stride;
             const uint64_t extent = uint64_t{tile.Rows -1} * tile.LeadingDimension + tile.Columns;
             Require(
-                Vectors_.Region[region->second].DType == dtype &&
+                Vectors_.Regions[region->second].DType == dtype &&
                 tile.Offset <= elements &&
                 (uint64_t{tile.Offset} + extent) <= NO_TENSOR, 
                 "Dense tile exceeds its typed APC region.");
@@ -321,7 +321,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
                     const uint32_t column = run.Logical + (first - run.Physical);
                     const uint32_t offset = tile.Offset + (first - tile.FirstColumn);
                     const uint32_t row = row_base + tile.FirstRow;
-                    const std::byte* data = static_cast<const std::byte*>(Vectors_.Region[region].Data);
+                    const std::byte* data = static_cast<const std::byte*>(Vectors_.Regions[region].Data);
                     const bool contigious = column == UNSIGNED_ZERO &&
                         count == width && tile.LeadingDimension == width &&
                         uint64_t{tile.Rows} * width <= NO_TENSOR;
@@ -571,7 +571,70 @@ namespace BidirectionalInMemGraph::GMI::Dense
             }
         }
 
-        
+        constexpr uint64_t Signature() const
+        {
+            using CheckpointFormat::InternalValues;
+
+            uint64_t hash = InternalValues::FnvOffsetBasis;
+            const auto Byte___ = [&](uint8_t value)
+            {
+                hash = (hash ^ value) * InternalValues::FnvPrime;
+            };
+            const auto Word___ = [&](uint64_t value)
+            {
+                for (unsigned shift = 0; shift < sizeof(uint64_t) * LEN_OF_BYTE_IN_BITS; shift += LEN_OF_BYTE_IN_BITS) 
+                {
+                    Byte___(static_cast<uint8_t>(value >> shift));
+                }
+            };
+
+            const auto Ids___ = [&](std::span<const uint64_t> values)
+            {
+                Word___(values.size());
+                for (uint64_t id : values) Word___(id);
+            };
+
+            const auto Tiles___ = [&](std::span<const APCMatrixTile> values)
+            {
+                Word___(values.size());
+            };
+
+            const std::vector<std::byte> encoded = Cache_.Installed.DenseIR.Encode();
+            Word___(encoded.size());
+            for (std::byte v : encoded) Byte___(std::to_integer<uint8_t>(v));
+            Word___(Cache_.Config.Layers.size());
+            for (const std::vector<uint64_t>& s : Cache_.Config.Layers) Ids___(s);
+            for (const LayerDescription& l : Vectors_.Capacities) Word___(l.APCCapacity);
+            Word___(Cache_.Config.Blocks.size());
+            for (const DenseBlock& block : Cache_.Config.Blocks) 
+            {
+                Word___(block.Id);
+                Ids___(block.Nodes);
+                Word___(block.APCs.size());
+                for (const ModelAPC& apc : block.APCs) 
+                {
+                    for (auto field : {apc.Slot, apc.Generation, apc.Role}) 
+                    {
+                        Word___(field);
+                    }
+                }
+                Word___(block.Placements.size());
+                for (const BlockPlacement& placement : block.Placements) 
+                {
+                    Word___(placement.Layer);
+                    Ids___(placement.InputColumns);
+                    Tiles___(placement.Weight);
+                    Tiles___(placement.Bias);
+                    Word___(placement.Initialized);
+                }
+            }
+            for (const DenseResidentRegion& region : Vectors_.Regions) 
+            {
+                Word___(static_cast<uint8_t>(region.DType));
+            }
+            return hash;
+        }
+
     };
 
 }
