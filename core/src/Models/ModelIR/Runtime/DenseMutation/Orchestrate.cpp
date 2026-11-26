@@ -111,7 +111,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
         {
             std::shared_ptr<DMEState::RevisionRootAtomic> Root{std::make_shared<DMEState::RevisionRootAtomic>()};
             FabricSPtr Fabric;
-            CRRev retired;
+            CRRev Retired;
 
             StateSPtrs(FabricSPtr fabric) :
                 Fabric(std::move(fabric))
@@ -690,6 +690,38 @@ namespace BidirectionalInMemGraph::GMI::Dense
             if (GPUCache_.DevicePlans) GPUCache_.DevicePlans->CancelStage();
         #endif
             Cache_.Plan.reset();
+        }
+
+        MutationStatus AdvanceLocked()
+        {
+            if (!Cache_.Plan.has_value()) return MutationStatus::Idle;
+            if (Cache_.Clock >= Cache_.Plan->Deadline)
+            {
+                DropPlan();
+                return MutationStatus::Expired;
+            }
+            if ((Cache_.Clock + 1) < Cache_.Plan->Target) return MutationStatus::Busy;
+
+        #if defined (SN_ACPP_ENABLED)
+            if (GPUCache_.DevicePlans) 
+            {
+                using R = ComputerDetail::PlanUpdateResult;
+                const R status = GPUCache_.DevicePlans->TryActive(
+                    Cache_.Plan->Next->SnapShot.StructureRevision
+                );
+                if (status == R::BUSY) return MutationStatus::WaitingForDevice;
+                if (status != R::ACCEPTED) 
+                {
+                    DropPlan();
+                    return MutationStatus::DeviceFailure;
+                }
+            }
+        #endif
+            SharedPtrs_.Retired = SharedPtrs_.Root->Active.exchange(
+                std::move(Cache_.Plan->Next), std::memory_order_acq_rel
+            );
+            Cache_.Plan.reset();
+            return MutationStatus::Published;
         }
 
     };
