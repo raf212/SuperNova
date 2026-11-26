@@ -209,7 +209,10 @@ namespace BidirectionalInMemGraph::ComputerDetail
     }
 
     template<class Record>
-    PlanUpdateResult DevicePlanDoubleBuffer<Record>::TryPublish(std::span<const Record> records) noexcept
+    PlanUpdateResult DevicePlanDoubleBuffer<Record>::StageRecords_(
+        std::span<const Record> records,
+        bool require_idle_bank
+    ) noexcept
     {
         if (
             Capacity_ == UNSIGNED_ZERO ||
@@ -225,16 +228,20 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return PlanUpdateResult::FAILED;
         }
 
-        const unsigned next = Published_ ? (Active_ ^1u) : UNSIGNED_ZERO;
+        if (Stage_) return PlanUpdateResult::BUSY;
+
+        const unsigned next = ActiveStateBank_ != BankState::Empty ? (Active_ ^ 1u) : UNSIGNED_ZERO;
         try 
         {
-            if (!Completed_(Ready_[next]) || !Completed_(LastUse_[next])) 
+            const bool bank_idle = Completed_(LastUse_[next]);
+
+            if (!Completed_(Ready_[next]) || (require_idle_bank && !bank_idle)) 
             {
                 return PlanUpdateResult::BUSY;
             }
             if (
                 (Ready_[next] && !Runtime_->Wait(*Ready_[next])) ||
-                (LastUse_[next] && !Runtime_->Wait(*LastUse_[next]))
+                (bank_idle && LastUse_[next] && !Runtime_->Wait(*LastUse_[next]))
             ) 
             {
                 return PlanUpdateResult::FAILED;
@@ -254,13 +261,52 @@ namespace BidirectionalInMemGraph::ComputerDetail
             );
             Ready_[next] = event;
             Count_[next] = records.size();
-            Active_ = next;
-            Published_ = true;
-            ++Revision_;
+            Staged_ = next;
             return PlanUpdateResult::ACCEPTED;
         }
         catch (...)
         {
+            Runtime_->MarkFaild();
+            return PlanUpdateResult::FAILED;
+        }
+    }
+
+    template<class Record>
+    PlanUpdateResult DevicePlanDoubleBuffer<Record>::TryPublish(std::span<const Record> records) noexcept
+    {
+        const PlanUpdateResult result = StageRecords_(records, true);
+        if (result != PlanUpdateResult::ACCEPTED) return result;
+        Active_ = *Staged_;
+        Staged_.reset();
+        ActiveStateBank_ = BankState::Pending;
+        ++Revision_;
+        return PlanUpdateResult::ACCEPTED;
+    }
+
+    template<class Record>
+    PlanUpdateResult DevicePlanDoubleBuffer<Record>::TryActive(uint64_t revision, bool wait) noexcept
+    {
+        if (!Staged_ || revision <= Revision_) return PlanUpdateResult::INVALID;
+        try 
+        {
+            const unsigned bank = *Staged_;
+            if (!wait && !Completed_(Ready_[bank])) return PlanUpdateResult::BUSY;
+            if (
+                !Runtime_->Wait(*Ready_[bank]) ||
+                (LastUse_[bank] && !Runtime_->Wait(*LastUse_[bank]))
+            ) 
+            {
+                return PlanUpdateResult::FAILED;
+            }
+            Active_ = bank;
+            Revision_ = revision;
+            ActiveStateBank_ = BankState::Ready;
+            Staged_.reset();
+            return PlanUpdateResult::ACCEPTED;
+        }
+        catch (...)
+        {
+            Runtime_->MarkFaild();
             return PlanUpdateResult::FAILED;
         }
     }

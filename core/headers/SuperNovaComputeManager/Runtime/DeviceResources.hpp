@@ -111,6 +111,13 @@ namespace BidirectionalInMemGraph::ComputerDetail
     private:
         static constexpr uint8_t DOUBLE = 2u;
 
+        enum class BankState
+        {
+            Empty,
+            Pending,
+            Ready
+        };
+
         static_assert(std::is_trivially_copyable_v<Record> && !std::is_const_v<Record>);
         std::shared_ptr<RuntimeAcpp> Runtime_;
         Record* Bank_[DOUBLE] {nullptr, nullptr};
@@ -123,7 +130,9 @@ namespace BidirectionalInMemGraph::ComputerDetail
         unsigned Active_{UNSIGNED_ZERO};
         bool Published_{false};
         uint64_t Revision_{UNSIGNED_ZERO};
-
+        BankState ActiveStateBank_{BankState::Empty};
+        std::optional<unsigned> Staged_;
+        
         bool Completed_(const std::optional<sycl::event>& e)
         {
             return !e ||
@@ -131,6 +140,8 @@ namespace BidirectionalInMemGraph::ComputerDetail
         }
 
         void Relese_() noexcept;
+
+        PlanUpdateResult StageRecords_(std::span<const Record> records, bool require_idle_bank) noexcept;
     public:
         explicit DevicePlanDoubleBuffer(std::shared_ptr<RuntimeAcpp> runtime) noexcept:
             Runtime_(std::move(runtime))
@@ -145,6 +156,8 @@ namespace BidirectionalInMemGraph::ComputerDetail
         bool Allocate(uint64_t capacity) noexcept;
 
         PlanUpdateResult TryPublish(std::span<const Record> records) noexcept;
+
+        PlanUpdateResult TryActive(uint64_t revision, bool wait = false) noexcept;
 
         uint64_t Revision() const noexcept {return Revision_;}
 
