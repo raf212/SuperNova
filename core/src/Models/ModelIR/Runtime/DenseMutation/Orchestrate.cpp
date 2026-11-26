@@ -475,7 +475,103 @@ namespace BidirectionalInMemGraph::GMI::Dense
             return result;
         }
 
-        void ValidateCatalog();
+        void ValidateCatalog()
+        {
+            const DenseModelDynamics& ir = Cache_.Installed.DenseIR;
+            Require(ir.Graph.has_value() && Cache_.Config.MaxDeviceSegments && Cache_.Config.MaxModelBindings, 
+                "A dense mutation graph and seperate description and binding budgets are required");
+            
+            std::vector<bool> layers(Vectors_.Capacities.size());
+            std::vector<bool> projected(ir.Tensors.size());
+            std::vector<uint32_t> origins{0};
+            std::vector<const Operator*> owners(layers.size());
+            for (const Operator& op : ir.Graph->Operators) 
+            {
+                if (op.Kind == OperatorKind::ReLU) 
+                {
+                    origins.push_back(origins[op.Input]);
+                    continue;
+                }
+
+                const TensorDescription& tensor_weight = ir.Tensors[op.Weight];
+                Require(
+                    !layers[tensor_weight.LayerIndex] && 
+                    tensor_weight.Shape[0] && tensor_weight.Shape[1], 
+                    "Dense mutation requirs one nonempty Linear per layer.");
+                Require(op.Bias == NO_TENSOR ||
+                    ir.Tensors[op.Bias].LayerIndex == tensor_weight.LayerIndex, 
+                    "Linear bias must belong to its weight layer");
+                layers[tensor_weight.LayerIndex] = true;
+                projected[op.Weight] = true;
+                if (op.Bias != NO_TENSOR) projected[op.Bias] = true;
+                owners[tensor_weight.LayerIndex] = &op;
+                if (origins[op.Input] == UNSIGNED_ZERO && Vectors_.Input.empty()) 
+                {
+                    Vectors_.Input.resize(tensor_weight.Shape[1]);
+                    for (size_t i = 0; i < Vectors_.Input.size(); i++) 
+                    {
+                        Vectors_.Input[i] = i + 1;
+                    }
+                }
+                origins.push_back(1);
+            }
+
+            Require(!Vectors_.Input.empty() && 
+                std::ranges::all_of(layers, [](bool pressent){
+                    return pressent;
+                }), "Each mutable layer must correspond to a Linear operator");
+            for (size_t tensor = 0; tensor < ir.Tensors.size(); tensor++) 
+            {
+                if (projected[tensor]) continue;
+                const size_t count = ir.Tensors[tensor].Bindings.size();
+                Require(count <= (Cache_.Config.MaxModelBindings - Cache_.FixedBIndings), 
+                    "Fixed dense bindings exceed their budget");
+                Cache_.FixedBIndings += count;
+            }
+
+            std::unordered_set<uint64_t> nodes;
+            for (size_t i = 0; i < Cache_.Config.Blocks.size(); i++) 
+            {
+                const DenseBlock& block = Cache_.Config.Blocks[i];
+                Require(block.Id && !block.Nodes.empty() && !block.APCs.empty() && 
+                    !block.Placements.empty() && Maps_.BlockIndex.emplace(block.Id, i).second,
+                    "Dense blocks require unique IDs, nodes, APCs and placements");
+                for (const uint64_t node : block.Nodes) 
+                {
+                    Require(node > Vectors_.Input.size() && nodes.insert(node).second, 
+                        "Dense node ids must be unique and distinct from model inputs.");
+                }
+
+                std::unordered_set<uint32_t> placements;
+                for (const BlockPlacement& place : block.Placements) 
+                {
+                    Require(place.Layer < layers.size() && placements.insert(place.Layer).second &&
+                        place.InputColumns.size() <= ADS::APC_INDEX_BOUND_SENTINAL &&
+                        !place.Weight.empty(), "Invalid or duplicate dense placement");
+                    auto& columns = Maps_.ColumnIndecies[&place];
+                    columns.reserve(place.InputColumns.size());
+                    for (uint32_t clm = 0; clm < place.InputColumns.size(); clm++) 
+                    {
+                        Require(place.InputColumns[clm] && columns.emplace(
+                            place.InputColumns[clm], clm
+                        ).second, "Dense physical columns require unique non zero ids");
+                        const Operator& op = *owners[place.Layer];
+                        Require((op.Bias == NO_TENSOR) == place.Bias.empty(), 
+                            "Dense bias placement is missing or unexpected.");
+                        for (const APCMatrixTile& tile : place.Weight) 
+                        {
+                            (void)ValidateTile(block, tile, place.InputColumns.size(), ir.Tensors[op.Weight].DType);
+                        }
+                        for (const APCMatrixTile& tile : place.Bias) 
+                        {
+                            (void)ValidateTile(block, tile, 1, ir.Tensors[op.Bias].DType);
+                        }
+                    }
+                }
+            }
+        }
+
+        
     };
 
 }
