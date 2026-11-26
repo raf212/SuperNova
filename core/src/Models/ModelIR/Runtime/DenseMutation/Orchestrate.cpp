@@ -141,6 +141,13 @@ namespace BidirectionalInMemGraph::GMI::Dense
             std::shared_mutex Numerical;
         };
 
+        struct Pending
+        {
+            CRRev Next;
+            uint64_t Target;
+            uint64_t Deadline;
+        };
+
         struct Cache
         {
             uint32_t Instance;
@@ -155,17 +162,11 @@ namespace BidirectionalInMemGraph::GMI::Dense
             bool Registered{};
             bool ReOpening{};
             bool Restored{};
+            std::optional<Pending> Plan{};
 
             Cache(uint32_t instance):
                 Instance(instance)
             {}
-        };
-
-        struct Pending
-        {
-            CRRev Next;
-            uint64_t Target;
-            uint64_t Deadline;
         };
 
     #if defined (SN_ACPP_ENABLED)
@@ -195,8 +196,6 @@ namespace BidirectionalInMemGraph::GMI::Dense
         DMEState::Cache Cache_;
 
         DMEState::StateMutexes Mutexes_{};
-
-        DMEState::Pending Plan_{};
 
         State(DMEState::FabricSPtr fabric, uint32_t instance) :
             SharedPtrs_(std::move(fabric)), Cache_(instance)
@@ -685,12 +684,13 @@ namespace BidirectionalInMemGraph::GMI::Dense
             if (Cache_.Failed) throw std::runtime_error("Dense numerical execution failed");
         }
 
-        // void DropPlan()
-        // {
-        // #if defined (SN_ACPP_ENABLED)
-        //     if (GPUCache_.DevicePlans) GPUCache_.DevicePlans.Cance
-        // #endif
-        // }
+        void DropPlan()
+        {
+        #if defined (SN_ACPP_ENABLED)
+            if (GPUCache_.DevicePlans) GPUCache_.DevicePlans->CancelStage();
+        #endif
+            Cache_.Plan.reset();
+        }
 
     };
 

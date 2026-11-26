@@ -157,6 +157,13 @@ namespace BidirectionalInMemGraph::ComputerDetail
 
         PlanUpdateResult TryPublish(std::span<const Record> records) noexcept;
 
+        PlanUpdateResult TryStage(std::span<const Record> records) noexcept {return StageRecords_(records, false);}
+
+        void CancelStage() noexcept {Staged_.reset();}
+
+        // Call immediately after enqueueing an active-bank consumer on the associated in-order compute queue.
+        void RecordUse(const sycl::event& tail) { LastUse_[Active_] = tail; }
+
         PlanUpdateResult TryActive(uint64_t revision, bool wait = false) noexcept;
 
         uint64_t Revision() const noexcept {return Revision_;}
@@ -175,6 +182,13 @@ namespace BidirectionalInMemGraph::ComputerDetail
             OP operation,
             std::span<const sycl::event> dependencies = {}
         ) noexcept;
+
+        DevicePlanView<Record> ActiveView() const noexcept
+        {
+            return ActiveStateBank_ == BankState::Ready ?
+                DevicePlanView<Record>{Bank_[Active_], Count_[Active_], Revision_} :
+                DevicePlanView<Record>{};
+        }
         
     };
 #endif
