@@ -6,11 +6,21 @@ namespace BidirectionalInMemGraph
 
     uint64_t ModelRuntime::DenseStructureRevision(uint32_t instance)
     {
+        auto Active___ = [&]() noexcept -> MdlSnapCPtr
+        {
+            MdlSnapCPtr active = GMI::Dense::DenseMutationEngine::Published(
+                *FabricPtr_, instance
+            );
+            return active;
+        };
+
+        if (MdlSnapCPtr active = Active___()) return active->StructureRevision; 
         ReadLease admission = FabricPtr_->ExecutionGate().TryTransientRead();
         if (!admission || !FabricPtr_->IsFabricActive()) 
         {
             throw std::runtime_error("Dense revision lookup requires an active host fabric.");
         }
+        if (MdlSnapCPtr active = Active___()) return active->StructureRevision; 
 
         GMI::ModelIR ir = GMI::GetModelIR(*FabricPtr_->GetFabricCache(), FabricPtr_->GetDisposableCache()->SlabBasePtr_);
         const GMI::ViewModelIndividually model = ir.ModelView(instance);
@@ -23,8 +33,25 @@ namespace BidirectionalInMemGraph
 
     GMI::Dense::ModelSnapshot ModelRuntime::InspectDenseModel(uint32_t instance)
     {
+        auto Active___ = [&]() noexcept -> MdlSnapCPtr
+        {
+            MdlSnapCPtr active = GMI::Dense::DenseMutationEngine::Published(
+                *FabricPtr_, instance
+            );
+            return active;
+        };
+
+        if (MdlSnapCPtr active = Active___()) return *active; 
         ReadLease admission = FabricPtr_->ExecutionGate().TryTransientRead();
-        if (!admission || !FabricPtr_->IsFabricActive()) 
+        if (!admission) throw std::runtime_error("Dense model inspection needs Fabric Admission.");
+        if (MdlSnapCPtr active = Active___()) return *active; 
+
+        return InspectInstalledDenseModel_(instance);
+    }
+
+    GMI::Dense::ModelSnapshot ModelRuntime::InspectInstalledDenseModel_(uint32_t instance)
+    {
+        if (!FabricPtr_->IsFabricActive()) 
         {
             throw std::runtime_error("Dense model inspection requires an active host fabric.");
         }

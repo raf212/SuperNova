@@ -5,6 +5,7 @@
 namespace BidirectionalInMemGraph::GMI::Dense
 {
     using Vect2DU64 = std::vector<std::vector<uint64_t>>;
+    using MdlSnapCPtr = std::shared_ptr<const ModelSnapshot>;
     
     struct DenseMutationConfig final
     {
@@ -28,7 +29,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     {
         uint64_t ExpectedRevision{};
         uint64_t TargetPass{};
-        uint64_t NextPass{};
+        uint64_t NextPass{}; // Inclusive publication deadline.
         std::vector<BlockEdit> Edits;
     };
 
@@ -93,9 +94,9 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
         bool UseGPU() const noexcept;
 
-        std::shared_ptr<const ModelSnapshot> Model() const noexcept;
+        MdlSnapCPtr Model() const noexcept;
 
-        static std::shared_ptr<const ModelSnapshot> Published(APCFinilizer& fabric, uint32_t instance);
+        static MdlSnapCPtr Published(APCFinilizer& fabric, uint32_t instance);
 
         // Pass IDs come only from successful admissions to the execution interface.
         // Advance attempts the boundary before the next admission.
@@ -134,7 +135,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             sycl::queue&, const DensePass&, DevicePlan
         )>;
 
-        PassAccess SubmitGPU(uint64_t revision, PassAccess access, const GPUWork& work);
+        PassStatus SubmitGPU(uint64_t revision, PassAccess access, const GPUWork& work);
     #endif
     };
 

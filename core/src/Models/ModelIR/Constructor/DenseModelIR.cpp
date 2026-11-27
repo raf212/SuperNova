@@ -367,7 +367,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
 {
     void* DensePass::WriteRegion(size_t index) const
     {
-        if (Access == PassAccess::Write && index  < Regions.size()) 
+        if (Access != PassAccess::Write || index >= Regions.size()) 
         {
             throw std::invalid_argument("Dense region write was not admitted");
         }
