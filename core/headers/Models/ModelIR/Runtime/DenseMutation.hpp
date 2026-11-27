@@ -72,9 +72,9 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
     class DenseMutationEngine final
     {
-        struct State;
+        struct StateDM;
 
-        std::unique_ptr<State> State_;
+        std::unique_ptr<StateDM> State_;
 
         DenseMutationImage Capture_(bool finalize);
 
@@ -121,6 +121,12 @@ namespace BidirectionalInMemGraph::GMI::Dense
         // Persist the returned image with the construction config before discarding it.
         // A changed structure must be reopened from an image and cannot fall back to installed ModelIR.
         DenseMutationImage Finalize();
+
+        bool ReplaceModelLayerAPCs(
+            uint32_t model_instance,
+            uint32_t layer_position,
+            std::span<const GMI::ModelAPC> ordered_assignments
+        ) noexcept;
 
     #if defined (SN_ACPP_ENABLED)
         using DevicePlan = ComputerDetail::DevicePlanView<DenseSegment>;

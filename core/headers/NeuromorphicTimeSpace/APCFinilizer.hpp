@@ -9,6 +9,7 @@ class APCFinilizer : public ConstructDAGOnEachAxis
     friend class AdaptivePackedCellContainer;
     friend class FabricToAPCLinker;
     friend class ModelRuntime;
+    friend class GMI::Dense::DenseMutationEngine;
 private:
     bool RetireAPC_(
         uint32_t slot,

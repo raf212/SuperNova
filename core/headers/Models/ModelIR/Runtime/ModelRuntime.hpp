@@ -18,10 +18,5 @@ namespace BidirectionalInMemGraph
 
         uint64_t DenseStructureRevision(uint32_t instance);
 
-        bool ReplaceModelLayerAPCs(
-            uint32_t model_instance,
-            uint32_t layer_position,
-            std::span<const GMI::ModelAPC> ordered_assignments
-        ) noexcept;
     };
 }

@@ -155,14 +155,16 @@ namespace BidirectionalInMemGraph::GMI::Dense
         void* WriteRegion(size_t index) const;
     };
 
-    struct RevisionRootAtomic;
-
+    namespace DMEState
+    {
+        struct RevisionRootAtomic;
+    }
     struct ModelLeaseCache
     {
         std::mutex ModelLeaseMutex;
         std::unordered_set<uint32_t> LeaseModelSlots;
         std::atomic_bool ModelLeasesActive{};
-        std::unordered_map<uint32_t, std::shared_ptr<RevisionRootAtomic>> LiveDenseModels;
+        std::unordered_map<uint32_t, std::shared_ptr<DMEState::RevisionRootAtomic>> LiveDenseModels;
 
         bool HasModelStateOutsideSlab() noexcept;
         void ResetLiveModels() noexcept;

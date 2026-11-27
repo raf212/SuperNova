@@ -4,11 +4,10 @@
 
 namespace BidirectionalInMemGraph
 {
-
-    class APCFinilizer;
     class AdaptivePackedCellContainer;
-    class Computer;
     class SlabToFabricConverterAndCordinator;
+    class APCFinilizer;
+    class Computer;
     namespace GMI::Dense
     {
         class DenseMutationEngine;

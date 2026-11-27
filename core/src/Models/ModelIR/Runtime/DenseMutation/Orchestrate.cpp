@@ -180,7 +180,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     #endif
     }
 
-    struct DenseMutationEngine::State
+    struct DenseMutationEngine::StateDM
     {
         using CRRev = DMEState::CRRev;
     #if defined (SN_ACPP_ENABLED)
@@ -197,11 +197,11 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
         DMEState::StateMutexes Mutexes_{};
 
-        State(DMEState::FabricSPtr fabric, uint32_t instance) :
+        StateDM(DMEState::FabricSPtr fabric, uint32_t instance) :
             SharedPtrs_(std::move(fabric)), Cache_(instance)
         {}
 
-        ~State()
+        ~StateDM()
         {
         #if defined (SN_ACPP_ENABLED)
             if (Cache_.Registered && GPUCache_.GPU && GPUCache_.GPU->Drain())
