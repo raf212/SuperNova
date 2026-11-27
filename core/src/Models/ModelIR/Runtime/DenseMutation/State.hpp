@@ -187,19 +187,19 @@ namespace BidirectionalInMemGraph::GMI::Dense
         void RestoreHostRegions(const DenseMutationImage& image) const noexcept;
 
     private:
-        void RegisterSession(APCFinilizer& owner, bool restoring);
-        void ResolveProvisionedRegions(APCFinilizer& owner);
-        void ResolveAPCRegions(APCFinilizer& owner, const ModelAPC& apc, uint32_t model);
-        void ClaimProvisionedSlots(APCFinilizer& owner);
-        CRRev BuildInitialRevision(const Vect2DU64& layers, uint64_t revision) const;
-        void ValidateInitialLayout(const ModelSnapshot& original) const;
-        void ClearProjectedBindings();
-        void ValidateImage(const DenseMutationImage& image) const;
+        void RegisterSession_(APCFinilizer& owner, bool restoring);
+        void ResolveProvisionedRegions_(APCFinilizer& owner);
+        void ResolveAPCRegions_(APCFinilizer& owner, const ModelAPC& apc, uint32_t model);
+        void ClaimProvisionedSlots_(APCFinilizer& owner);
+        CRRev BuildInitialRevision_(const Vect2DU64& layers, uint64_t revision) const;
+        void ValidateInitialLayout_(const ModelSnapshot& original) const;
+        void ClearProjectedBindings_();
+        void ValidateImage_(const DenseMutationImage& image) const;
     #if defined(SN_ACPP_ENABLED)
-        void SelectDevice();
-        void PrepareDeviceStorage(const DenseMutationImage* restore);
-        void PublishInitialDevicePlan(const Revision& revision);
-        void DownloadRegions(DenseMutationImage& image);
+        void SelectDevice_();
+        void PrepareDeviceStorage_(const DenseMutationImage* restore);
+        void PublishInitialDevicePlan_(const Revision& revision);
+        void DownloadRegions_(DenseMutationImage& image);
     #endif
 
     };
