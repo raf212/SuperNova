@@ -7,7 +7,7 @@ namespace BidirectionalInMemGraph
         if (ExecutionGate().IsPoisoned()) return {};
 
         auto phase = ExecutionGate().TryMaintenance();
-        if (!phase) return {};
+        if (!phase || ModelCacheL_.HasModelStateOutsideSlab()) return {};
 
         CFC::DetachFabric detached{};
         if (
@@ -42,6 +42,7 @@ namespace BidirectionalInMemGraph
         ExclusiveLease ex_phase = ExecutionGate().TryMaintenance();
         if (
             !ex_phase ||
+            ModelCacheL_.HasModelStateOutsideSlab() ||
             !IsFabricActive() ||
             !destination.data() ||
             destination.size() < FabCache_->SegmentPoolBegin_ ||
@@ -69,7 +70,7 @@ namespace BidirectionalInMemGraph
         if (ExecutionGate().IsPoisoned()) return false;
 
         auto phase = ExecutionGate().TryMaintenance();
-        if (!phase) return false;
+        if (!phase || ModelCacheL_.HasModelStateOutsideSlab()) return false;
 
         if (
             !IsFabricActive() ||
@@ -109,6 +110,7 @@ namespace BidirectionalInMemGraph
     {
         ExclusiveLease phase = ExecutionGate().TryMaintenance();
         return phase &&
+            !ModelCacheL_.HasModelStateOutsideSlab() &&
             !DisposableFCache___.ExecutionGate_.IsPoisoned() &&
             __NumericalBacking__.Flush();
     }
@@ -138,8 +140,6 @@ namespace BidirectionalInMemGraph
             );
     }
 
-
-
     bool RelocatableSlabStorage::AttachFabric(
         uint64_t* raw_cells,
         uint64_t cell_count,
@@ -148,7 +148,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         auto phase = ExecutionGate().TryMaintenance();
-        if (!phase) return false;
+        if (!phase || ModelCacheL_.HasModelStateOutsideSlab()) return false;
 
         if (
             !raw_cells || cell_count < CFC::FABRIC_UNIT_COUNT || 
@@ -249,6 +249,7 @@ namespace BidirectionalInMemGraph
         (void)ExecutionGate().ConfirmedRestored();
 
         replacement.Commit();
+        ModelCacheL_.ResetLiveModels();
         return true;
         
     }
