@@ -24,6 +24,10 @@ namespace BidirectionalInMemGraph
         out = ResolveRegionBiteView{};
         if (
             !IsActiveAPC() ||
+            (
+                !model_owner &&
+                APCCache_.FabricOwnerPtr_->ModelCacheL_.ModelOwnsSlot(APCCache_.APCSlotIdx_)
+            ) ||
             !APCCache_.RawAPCBasePtr_ ||
             region_row.size() != APCCache_.FabricOwnerPtr_->FabCache_->ActiveRegionCount_
         ) 

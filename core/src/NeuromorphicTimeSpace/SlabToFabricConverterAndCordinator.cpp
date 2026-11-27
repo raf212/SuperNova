@@ -230,7 +230,7 @@ namespace BidirectionalInMemGraph
         using SAD = StorageAllocationDef;
 
         ExclusiveLease exc_phase = DisposableFCache___.ExecutionGate_.TryMaintenance();
-        if (!exc_phase) return false;
+        if (!exc_phase || ModelCacheL_.HasModelStateOutsideSlab()) return false;
         bool expected = false;
         if (
             !DisposableFCache___.InitializationInProgress_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)
@@ -316,6 +316,7 @@ namespace BidirectionalInMemGraph
         DisposableFCache___.FabricInitialized_.store(true, std::memory_order_release);
         (void) ExecutionGate().ConfirmedRestored();
         replacement.Commit();
+        ModelCacheL_.ResetLiveModels();
         return true;
     }
 
@@ -324,7 +325,12 @@ namespace BidirectionalInMemGraph
         // Preserve the original blocking/draining shutdown contract.
         // Disallow fresh Fabric access before waiting for existing read pins.
         if (ExecutionGate().EpochOwnedByCaller()) return;
-        const bool was_initialized = DisposableFCache___.FabricInitialized_.exchange(false, std::memory_order_acq_rel);
+        bool was_initialized;
+        {
+            std::lock_guard lock(ModelCacheL_.ModelLeaseMutex);
+            if (ModelCacheL_.HasModelLease()) return;
+            was_initialized = DisposableFCache___.FabricInitialized_.exchange(false, std::memory_order_acq_rel);
+        }
         auto phase = ExecutionGate().TryMaintenance();
         while (!phase)
         {
@@ -356,6 +362,7 @@ namespace BidirectionalInMemGraph
 
         DisposableFCache___.SealedDAGRevision_.fetch_add(1u, std::memory_order_release);
         ResetScalarsofTheFabric_();
+        ModelCacheL_.ResetLiveModels();
     }
 
     bool SlabToFabricConverterAndCordinator::ValidateAttachedFabricLayout_() noexcept

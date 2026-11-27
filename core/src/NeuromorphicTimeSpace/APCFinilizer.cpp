@@ -998,7 +998,7 @@ namespace BidirectionalInMemGraph
     ) noexcept
     {
         auto phase = ExecutionGate().TryTransientRead();
-        if (!phase) return false;
+        if (!phase || ModelCacheL_.ModelOwnsSlot(slot)) return false;
 
         if (
             slot >= FabCache_->CountOfAPC_ ||

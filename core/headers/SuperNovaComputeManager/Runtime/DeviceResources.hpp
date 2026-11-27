@@ -128,7 +128,6 @@ namespace BidirectionalInMemGraph::ComputerDetail
         std::optional<sycl::event> Ready_[DOUBLE]{};
         std::optional<sycl::event> LastUse_[DOUBLE]{};
         unsigned Active_{UNSIGNED_ZERO};
-        bool Published_{false};
         uint64_t Revision_{UNSIGNED_ZERO};
         BankState ActiveStateBank_{BankState::Empty};
         std::optional<unsigned> Staged_;

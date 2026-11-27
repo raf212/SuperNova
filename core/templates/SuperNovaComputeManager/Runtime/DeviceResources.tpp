@@ -228,7 +228,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
             return PlanUpdateResult::FAILED;
         }
 
-        if (Stage_) return PlanUpdateResult::BUSY;
+        if (Staged_) return PlanUpdateResult::BUSY;
 
         const unsigned next = ActiveStateBank_ != BankState::Empty ? (Active_ ^ 1u) : UNSIGNED_ZERO;
         try 
@@ -286,7 +286,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     template<class Record>
     PlanUpdateResult DevicePlanDoubleBuffer<Record>::TryActive(uint64_t revision, bool wait) noexcept
     {
-        if (!Staged_ || revision <= Revision_) return PlanUpdateResult::INVALID;
+        if (!Staged_ || (revision <= Revision_ && ActiveStateBank_ != BankState::Empty)) return PlanUpdateResult::INVALID;
         try 
         {
             const unsigned bank = *Staged_;
@@ -320,7 +320,7 @@ namespace BidirectionalInMemGraph::ComputerDetail
     ) noexcept
     {
         static_assert(std::is_trivially_copyable_v<OP>);
-        if (!Published_ || work_items == UNSIGNED_ZERO || !Runtime_->Healthy()) 
+        if (ActiveStateBank_ == BankState::Empty || work_items == UNSIGNED_ZERO || !Runtime_->Healthy()) 
             return std::nullopt;
         const unsigned bank = Active_;
         const DevicePlanView<Record> view{Bank_[bank], Count_[bank], Revision_};
