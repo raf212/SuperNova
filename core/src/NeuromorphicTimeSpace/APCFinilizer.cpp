@@ -29,6 +29,7 @@ namespace BidirectionalInMemGraph
         if (!admission) return false;
 
         if (
+            !IsFabricActive() ||
             slot >= FabCache_->CountOfAPC_ ||
             apc.IsFabricBound_() ||
             (

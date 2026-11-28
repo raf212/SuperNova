@@ -6,7 +6,7 @@ namespace BidirectionalInMemGraph
 
     uint64_t ModelRuntime::DenseStructureRevision(uint32_t instance)
     {
-        auto Active___ = [&]() noexcept -> MdlSnapCPtr
+        auto Active___ = [&]() -> MdlSnapCPtr
         {
             MdlSnapCPtr active = GMI::Dense::DenseMutationEngine::Published(
                 *FabricPtr_, instance
@@ -33,7 +33,7 @@ namespace BidirectionalInMemGraph
 
     GMI::Dense::ModelSnapshot ModelRuntime::InspectDenseModel(uint32_t instance)
     {
-        auto Active___ = [&]() noexcept -> MdlSnapCPtr
+        auto Active___ = [&]() -> MdlSnapCPtr
         {
             MdlSnapCPtr active = GMI::Dense::DenseMutationEngine::Published(
                 *FabricPtr_, instance

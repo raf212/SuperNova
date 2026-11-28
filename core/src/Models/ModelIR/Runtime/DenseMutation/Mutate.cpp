@@ -1,4 +1,4 @@
-#include "Orchestrate.cpp"
+#include "State.hpp"
 
 namespace BidirectionalInMemGraph::GMI::Dense
 {
@@ -192,6 +192,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     {
         std::lock_guard lock(State_->Mutexes_.Mutex);
         if (!State_->Cache_.Plan) return false;
+        State_->DropPlan();
         return true;
     }
 
@@ -235,12 +236,12 @@ namespace BidirectionalInMemGraph::GMI::Dense
                 state.Cache_.Failed = true;
             }
             throw;
-            if (write) 
-            {
-                std::lock_guard lock(state.Mutexes_.Mutex);
-                ++state.Cache_.ParameterEpoch;
-                state.Cache_.CPUWriter = false;
-            }
+        }
+        if (write) 
+        {
+            std::lock_guard lock(state.Mutexes_.Mutex);
+            ++state.Cache_.ParameterEpoch;
+            state.Cache_.CPUWriter = false;
         }
         return PassStatus::Submitted;
     }
@@ -423,15 +424,18 @@ namespace BidirectionalInMemGraph::GMI::Dense
         AdaptivePackedCellContainer handle;
         APCUseScope  use;
         Require((model == UNSIGNED_ZERO || model == Cache_.Instance) && 
-            apc.Reserved && 
-            owner.GetExistingAPC_(apc.Slot, handle, use),
+            apc.Reserved == UNSIGNED_ZERO && 
+            owner.GetExistingAPC_(apc.Slot, handle, use, apc.Generation),
             "Dense APC is stale / unavailavle / assigned to another model"
         );
 
         const size_t first = Vectors_.Regions.size();
         for (const SD::RegionSchemaRecord& schema : owner.MatrixViewRow(apc.Slot)) 
         {
-            if (schema.Protocol != SD::SchemaProtocols::PRIVATE_REGION) 
+            if (
+                schema.Protocol != SD::SchemaProtocols::PRIVATE_REGION ||
+                SD::HasSchemaFlag(schema.Flags, SD::SchemaFlags::REGION_DISABLED)
+            ) 
             {
                 continue;
             }
@@ -492,6 +496,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             std::vector<ModelAPC> expected = installed.Assignments[layer];
             std::vector<ModelAPC> selected = original.Assignments[layer];
             std::ranges::sort(expected, {}, &ModelAPC::Slot);
+            std::ranges::sort(selected, {}, &ModelAPC::Slot);
             Require(std::ranges::equal(expected, selected, [](const ModelAPC& a, const ModelAPC& b){
                 return a == b;
             }), "Initial dense APC assignments do not match installed ModelIR");
@@ -585,7 +590,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     void DenseMutationEngine::StateDM::SelectDevice_()
     {
         if (Cache_.Config.ForceCpu) return;
-        std::shared_ptr<ComputerDetail::RuntimeAcpp> gpu = GPUCache_.GPU;
+        std::shared_ptr<ComputerDetail::RuntimeAcpp>& gpu = GPUCache_.GPU;
         gpu = std::move(Cache_.Config.Runtime);
         if (gpu) 
         {
@@ -603,7 +608,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
         for (const sycl::device& device : sycl::device::get_devices(sycl::info::device_type::gpu)) 
         {
             if (!device.has(sycl::aspect::usm_device_allocations)) continue;
-            gpu = std::make_unique<ComputerDetail::RuntimeAcpp>(device);
+            gpu = std::make_shared<ComputerDetail::RuntimeAcpp>(device);
             break;
         }
     }
@@ -612,6 +617,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     {
         constexpr size_t ALLIGNMENT = ADS::CACELINE_SIZE_IN_BYTES;
         DMEState::StateGPUCache& device = GPUCache_;
+        if (!device.GPU) return;
 
         size_t bytes = UNSIGNED_ZERO;
         for (StorageRegion& region : Vectors_.Storage) 
@@ -675,7 +681,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
                 image.Regions[i].Bytes, Vectors_.Storage[i].DeviceOffset, dependencies
             )) continue;
 
-            if (device.GPU->Drain()) std::terminate();
+            if (!device.GPU->Drain()) std::terminate();
             Cache_.Failed = true;
             throw std::runtime_error("Cannot download Dense checkpoint regions.");
         }

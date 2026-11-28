@@ -62,7 +62,7 @@ namespace BidirectionalInMemGraph
         }
 
         auto phase = APCCache_.FabricOwnerPtr_->ExecutionGate().TryRead(true);
-        if (!phase) return {};
+        if (!phase || !APCCache_.FabricOwnerPtr_->IsFabricActive()) return {};
 
         std::atomic_ref<uint64_t> control(*APCCache_.GenerationCellPtr_);
         uint64_t observed = control.load(std::memory_order_acquire);
@@ -105,7 +105,7 @@ namespace BidirectionalInMemGraph
         }
 
         auto phase = APCCache_.FabricOwnerPtr_->ExecutionGate().TryTransientRead(true);
-        if (!phase) return false;
+        if (!phase || !APCCache_.FabricOwnerPtr_->IsFabricActive()) return false;
 
         const uint64_t raw = std::atomic_ref<const uint64_t>(*APCCache_.GenerationCellPtr_).load(std::memory_order_acquire);
 

@@ -148,8 +148,10 @@ namespace BidirectionalInMemGraph::GMI
             const IndividualModelDescription& model = Description[idx];
             if (
                 model.Instance != (idx +1) ||
-                model.Model == ModelRepresentation::NONE ||
-                model.Model > LAST_DEFINED_MODEL_IDX ||
+                (
+                    model.Model != ModelRepresentation::GHGF_GRAPH &&
+                    model.Model != ModelRepresentation::DENSE_TENSOR_STATE 
+                ) ||
                 model.StructuralADaptationAllowed > 1 ||
                 model.StructureRevision == UNSIGNED_ZERO ||
                 model.ConfByteOffset > Dynamics.size() ||
@@ -273,8 +275,10 @@ namespace BidirectionalInMemGraph::GMI
             {
                 if (
                     mo.Instance != candidate.Description.size() + 1 ||
-                    mo.Model == ModelRepresentation::NONE ||
-                    mo.Model > LAST_DEFINED_MODEL_IDX ||
+                    (
+                        mo.Model != ModelRepresentation::GHGF_GRAPH &&
+                        mo.Model != ModelRepresentation::DENSE_TENSOR_STATE 
+                    ) ||
                     !mo.StructureRevision ||
                     mo.Layers.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_layers) ||
                     mo.Dependencies.size() > (ADS::APC_INDEX_BOUND_SENTINAL - total_dependencies) ||
