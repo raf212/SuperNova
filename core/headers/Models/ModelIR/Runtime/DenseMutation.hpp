@@ -123,12 +123,6 @@ namespace BidirectionalInMemGraph::GMI::Dense
         // A changed structure must be reopened from an image and cannot fall back to installed ModelIR.
         DenseMutationImage Finalize();
 
-        bool ReplaceModelLayerAPCs(
-            uint32_t model_instance,
-            uint32_t layer_position,
-            std::span<const GMI::ModelAPC> ordered_assignments
-        ) noexcept;
-
     #if defined (SN_ACPP_ENABLED)
         using DevicePlan = ComputerDetail::DevicePlanView<DenseSegment>;
         using GPUWork = std::function<sycl::event(

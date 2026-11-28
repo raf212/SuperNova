@@ -174,7 +174,55 @@ namespace BidirectionalInMemGraph::GMI::Dense
         return true;
     }
 
+    PassStatus DenseMutationEngine::ExecuteCPU(uint64_t revision, PassAccess access, const CPUWork &work)
+    {
+        StateDM& state = *State_;
+        if (UseGPU()) throw std::logic_error("Dense parameters reside inside GPU");
+        const bool write = access == PassAccess::Write;
+        std::unique_lock exclusive(state.Mutexes_.Numerical, std::defer_lock);
+        std::shared_lock shared(state.Mutexes_.Numerical, std::defer_lock);
+        if (!(write ? exclusive.try_lock() : shared.try_lock())) return PassStatus::Busy;
+        DMEState::CRRev active;
+        uint64_t pass;
+        uint64_t epoch;
+        {
+            std::lock_guard lock(state.Mutexes_.Mutex);
+            state.RequireHealthy();
+            (void) state.AdvanceLocked();
+            active = state.SharedPtrs_.Root->Active.load(std::memory_order_acquire);
+            if (active->SnapShot.StructureRevision != revision) 
+            {
+                return PassStatus::Stale;
+            }
+            state.ValidatePass(bool(work), access);
+            state.Cache_.CPUWriter = write;
+            pass = ++state.Cache_.Clock;
+            epoch = state.Cache_.ParameterEpoch;
+        }
 
+        try 
+        {
+            work({active->SnapShot, active->Segments, state.Vectors_.Regions,
+                pass, epoch, access});
+        }
+        catch(...)
+        {
+            if (write) 
+            {
+                std::lock_guard lock(state.Mutexes_.Mutex);
+                state.Cache_.CPUWriter = false;
+                state.Cache_.Failed = true;
+            }
+            throw;
+            if (write) 
+            {
+                std::lock_guard lock(state.Mutexes_.Mutex);
+                ++state.Cache_.ParameterEpoch;
+                state.Cache_.CPUWriter = false;
+            }
+        }
+        return PassStatus::Submitted;
+    }
 
     void DenseMutationEngine::StateDM::Open(DenseMutationConfig config, const DenseMutationImage* restore)
     {
@@ -230,6 +278,39 @@ namespace BidirectionalInMemGraph::GMI::Dense
         SharedPtrs_.Root->Active.store(revision, std::memory_order_release);
     }
 
+    DenseMutationImage DenseMutationEngine::StateDM::CaptureImage(const Revision &active)
+    {
+        DenseMutationImage image{
+            DenseMutationImage::FORMAT_VERSION,
+            Cache_.Instance,
+            Cache_.LayoutSignature,
+            active.SnapShot.StructureRevision,
+            Cache_.ParameterEpoch,
+            Cache_.Clock,
+            active.Blocks,
+            {}
+        };
+        image.Regions.reserve(Vectors_.Regions.size());
+        for (const DenseResidentRegion& region : Vectors_.Regions) 
+        {
+            image.Regions.push_back({region.APC, region.Region, 
+                std::vector<std::byte>(region.Bytes)});
+        }
+    #if defined (SN_ACPP_ENABLED)
+        if (GPUCache_.DeviceStorage) 
+        {
+            DownloadRegions_(image);
+            return image;
+        }
+    #endif
+        for (size_t i = 0; i < Vectors_.Storage.size(); i++) 
+        {
+            const std::span<std::byte> host = Vectors_.Storage[i].Host;
+            std::memcpy(image.Regions[i].Bytes.data(), host.data(), host.size());
+        }
+        return image;
+    }
+
     void DenseMutationEngine::StateDM::ValidatePass(bool has_work, PassAccess access) const
     {
         Require(
@@ -240,7 +321,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             "Invalid dense pass callback / access / counter overflow"
         );
     }
-    
+
     void DenseMutationEngine::StateDM::RestoreHostRegions(const DenseMutationImage& image) const noexcept
     {
         for (size_t i = 0; i < Vectors_.Storage.size(); i++) 
