@@ -135,7 +135,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
         std::span<const ColumnRun> columns,
         std::span<const APCMatrixTile> tiles,
         uint32_t width,
-        const std::unordered_map<uint32_t, uint32_t>& assignments,
+        const TwinU32Umap& assignments,
         size_t& remaining_bindings
     ) const
     {
@@ -242,7 +242,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             }
 
             std::vector<uint64_t> output;
-            std::unordered_map<uint32_t, uint32_t> assignments;
+            TwinU32Umap assignments;
             const ColumnRun bias_column = SINGLE_COLUMN_IDENTITY_RUN;
             for (const uint64_t id : result->Blocks[layer_index])
             {

@@ -123,6 +123,78 @@ namespace BidirectionalInMemGraph::GMI::Dense
         leases.ModelLeasesActive.store(true, std::memory_order_release);
     }
 
+    void DenseMutationEngine::StateDM::ResolveProvisionedRegions_(APCFinilizer& owner)
+    {
+        const ModelIR ir = GetModelIR(
+            *owner.GetFabricCache(), 
+            owner.GetDisposableCache()->SlabBasePtr_
+        );
+        const ViewModelIndividually view = ir.ModelView(Cache_.Instance);
+        Require(view && view.Description->StructuralADaptationAllowed,
+                std::string(std::format("Structural adaptation disabled for {} this dense model", Cache_.Instance)));
+        Require(std::ranges::none_of(ir.Dependencies, [&](const auto& edge){
+            return edge.Producer == Cache_.Instance || edge.Consumer == Cache_.Instance;
+        }), "Dense model require independent model instance");
+
+        Vectors_.Capacities.assign(view.Layers.begin(), view.Layers.end());
+        TwinU32Umap installed_owners;
+        for (const IndividualModelDescription& model : ir.Description) 
+        {
+            for (const LayerDescription& layer : ir.Layers.subspan(model.FirstLayer, model.LayerCount)) 
+            {
+                for (const ModelAPC& apc : ir.LayerAPCs.subspan(layer.FirstAPCRecord, layer.APCCount)) 
+                {
+                    installed_owners.emplace(apc.Slot, model.Instance);
+                }
+            }
+        }
+
+        for (const DenseBlock& block : Cache_.Config.Blocks)
+        {
+            for (const ModelAPC& apc : block.APCs) 
+            {
+                const auto assignment = installed_owners.find(apc.Slot);
+                const uint32_t model = assignment == installed_owners.end() ? UNSIGNED_ZERO : assignment->second;
+                ResolveAPCRegions_(owner, apc, model);
+            }
+        }
+        Require(!Vectors_.Regions.empty(), "Dense mutation requirs provisioned APCs");
+    }
+
+    void DenseMutationEngine::StateDM::ResolveAPCRegions_(APCFinilizer& owner, const ModelAPC& apc, uint32_t model)
+    {
+        AdaptivePackedCellContainer handle;
+        APCUseScope  use;
+        Require((model == UNSIGNED_ZERO || model == Cache_.Instance) && 
+            apc.Reserved && 
+            owner.GetExistingAPC_(apc.Slot, handle, use),
+            "Dense APC is stale / unavailavle / assigned to another model"
+        );
+
+        const size_t first = Vectors_.Regions.size();
+        for (const SD::RegionSchemaRecord& schema : owner.MatrixViewRow(apc.Slot)) 
+        {
+            if (schema.Protocol != SD::SchemaProtocols::PRIVATE_REGION) 
+            {
+                continue;
+            }
+            ResolveRegionBiteView raw;
+
+            Require(schema.ModelInstance == model && handle.ResolveBridgeRegion(
+                schema.Region, 0, raw, true
+            ), std::string(std::format("Cannot resolve the dense APC : {} Region {}", apc.Slot, static_cast<size_t>(schema.Region))));
+            Require(Maps_.RegionIndex.emplace(RegionKey{apc.Slot, schema.Region}, 
+                Vectors_.Regions.size()).second, "A provisioned Dense APC may belong to only one block");
+            Vectors_.Regions.push_back({
+                raw.Bytes.data(), apc, raw.Bytes.size(), schema.Region, schema.Dtype
+            });
+            Vectors_.Storage.push_back({raw.Bytes});
+        }
+        Require(Vectors_.Regions.size() != first, "Dense APC has no private numerical regions");
+    }
+
+    
+
 
 
     

@@ -15,6 +15,11 @@ namespace BidirectionalInMemGraph::GMI::Dense
             if (!valid) throw std::invalid_argument(reason);
         }
 
+        inline void Require(bool valid, const std::string reason)
+        {
+            if (!valid) throw std::invalid_argument(reason);
+        }
+
         struct CapacityError {};
 
         struct Revision final
@@ -126,6 +131,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     using DMEState::Require;
     using DMEState::Revision;
     using DMEState::StorageRegion;
+    using TwinU32Umap = std::unordered_map<uint32_t, uint32_t>;
 
     struct DenseMutationEngine::StateDM
     {
@@ -170,7 +176,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
             std::span<const ColumnRun> columns,
             std::span<const APCMatrixTile> tiles,
             uint32_t width,
-            const std::unordered_map<uint32_t, uint32_t>& assignments,
+            const TwinU32Umap& assignments,
             size_t& remaining_bindings
         ) const;
 
