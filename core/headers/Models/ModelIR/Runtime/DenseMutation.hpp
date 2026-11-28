@@ -116,7 +116,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
         using CPUWork = std::function<void(const DensePass&)>;
         PassStatus ExecuteCPU(uint64_t revision, PassAccess access, const CPUWork& work);
 
-        DenseMutationImage Capture();
+        DenseMutationImage Capture() {return Capture_(false);}
 
         // Capture authoritative state, synchronize GPU changes to the host regions and close admission.
         // Persist the returned image with the construction config before discarding it.

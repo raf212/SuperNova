@@ -46,6 +46,27 @@ namespace BidirectionalInMemGraph::GMI::Dense
         State_->Open(std::move(config), restore);
     }
 
+    DenseMutationImage DenseMutationEngine::Capture_(bool finalize)
+    {
+        StateDM& state = *State_;
+        std::unique_lock numerical(state.Mutexes_.Numerical);
+        std::lock_guard lock(state.Mutexes_.Mutex);
+        state.RequireHealthy();
+        const DMEState::CRRev active = state.SharedPtrs_.Root->Active.load(std::memory_order_acquire);
+        DenseMutationImage image = state.CaptureImage(*active);
+        if (finalize) 
+        {
+        #if defined (SN_ACPP_ENABLED)
+            if (state.GPUCache_.DeviceStorage) state.RestoreHostRegions(image);
+            state.GPUCache_.DevicePlans.reset();
+            state.GPUCache_.DeviceStorage.reset();
+        #endif
+            state.Cache_.Plan.reset();
+            state.Release(true);
+        }
+        return image;
+    }
+
     DenseMutationEngine::~DenseMutationEngine() = default;
 
     bool DenseMutationEngine::UseGPU() const noexcept
@@ -222,6 +243,12 @@ namespace BidirectionalInMemGraph::GMI::Dense
             }
         }
         return PassStatus::Submitted;
+    }
+
+    DenseMutationImage DenseMutationEngine::Finalize()
+    {
+        std::lock_guard planning(State_->Mutexes_.Planner);
+        return Capture_(true);
     }
 
     void DenseMutationEngine::StateDM::Open(DenseMutationConfig config, const DenseMutationImage* restore)
@@ -513,9 +540,51 @@ namespace BidirectionalInMemGraph::GMI::Dense
         }
     }
 
+#if defined (SN_ACPP_ENABLED)
+    PassStatus DenseMutationEngine::SubmitGPU(uint64_t revision, PassAccess access, const GPUWork &work)
+    {
+        StateDM& state = *State_;
+        DMEState::Cache& cache = state.Cache_;
+        DMEState::StateGPUCache& device = state.GPUCache_;
+        std::lock_guard lock(state.Mutexes_.Mutex);
+        state.RequireHealthy();
+        if (!device.DevicePlans) throw std::logic_error("Dense device execution is unavailavle");
+        if (state.AdvanceLocked() == MutationStatus::DeviceFailure) state.RequireHealthy();
+        
+        const DMEState::CRRev active = state.SharedPtrs_.Root->Active.load(std::memory_order_acquire);
+        if (active->SnapShot.StructureRevision != revision) return PassStatus::Stale;
+        state.ValidatePass(bool(work), access);
 
+        try 
+        {
+            auto tail = work(
+                device.GPU->ComputeQueue,
+                {
+                    active->SnapShot,
+                    active->Segments,
+                    state.Vectors_.Regions,
+                    cache.Clock + 1,
+                    cache.ParameterEpoch,
+                    access
+                },
+                device.DevicePlans->ActiveView()
+            );
+            device.DevicePlans->RecordUse(tail);
+            device.LastUse = std::move(tail);
+            ++cache.Clock;
+            if (access == PassAccess::Write) ++cache.ParameterEpoch;
+        }
+        catch (...)
+        {
+            cache.Failed = true;
+            throw;
+        }
+        return PassStatus::Submitted;
+    }
 
+    
 
+#endif
 
 
     
