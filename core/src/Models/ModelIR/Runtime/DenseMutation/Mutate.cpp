@@ -48,6 +48,54 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
     DenseMutationEngine::~DenseMutationEngine() = default;
 
+    bool DenseMutationEngine::UseGPU() const noexcept
+    {
+    #if defined (SN_ACPP_ENABLED)
+        return bool(State_->GPUCache_.GPU);
+    #else
+        return false;
+    #endif
+    }
+
+    MdlSnapCPtr DenseMutationEngine::Model() const noexcept
+    {
+        DMEState::CRRev active = State_->SharedPtrs_.Root->Active.load(std::memory_order_acquire);
+        if (!active) return {};
+        const ModelSnapshot* snapshot = &active->SnapShot;
+        return {std::move(active), snapshot};
+    }
+
+    MdlSnapCPtr DenseMutationEngine::Published(APCFinilizer &fabric, uint32_t instance)
+    {
+        ModelLeaseCache& leases = fabric.ModelCacheL_;
+        std::shared_ptr<DMEState::RevisionRootAtomic> root;
+        {
+            std::lock_guard lock(leases.ModelLeaseMutex);
+            const auto found = leases.LiveDenseModels.find(instance);
+            if (found == leases.LiveDenseModels.end()) return {};
+            root = found->second;
+        }
+        if (!root) throw std::runtime_error("Dense model requires an authoritative image.");
+        DMEState::CRRev active = root->Active.load(std::memory_order_acquire);
+        if (!active) 
+        {
+            throw std::runtime_error("Dense session is opening or closing.");
+        }
+        const ModelSnapshot* snapshot = &active->SnapShot;
+        return {std::move(active), snapshot};
+    }
+
+    uint64_t DenseMutationEngine::LastPass() const
+    {
+        std::lock_guard lock(State_->Mutexes_.Mutex);
+        return State_->Cache_.Clock;
+    }
+
+    MutationStatus DenseMutationEngine::Prepare(MutationRequest request)
+    {
+        
+    }
+
     void DenseMutationEngine::StateDM::Open(DenseMutationConfig config, const DenseMutationImage* restore)
     {
         Require(SharedPtrs_.Fabric && !config.Blocks.empty(),
@@ -101,6 +149,16 @@ namespace BidirectionalInMemGraph::GMI::Dense
         }
         SharedPtrs_.Root->Active.store(revision, std::memory_order_release);
     }
+
+    void DenseMutationEngine::StateDM::RestoreHostRegions(const DenseMutationImage& image) const noexcept
+    {
+        for (size_t i = 0; i < Vectors_.Storage.size(); i++) 
+        {
+            const std::span<std::byte> host = Vectors_.Storage[i].Host;
+            std::memcpy(host.data(), image.Regions[i].Bytes.data(), host.size());
+        }
+    }
+
 
     void DenseMutationEngine::StateDM::RegisterSession_(APCFinilizer& owner, bool restoring)
     {
