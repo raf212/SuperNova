@@ -4,7 +4,7 @@
 #include "tests/StaticAsserts.hpp"
 int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
 {
-    (void) argc;
-    (void) argv;
-    return GHGFTestKit::RunAll();
+    // (void) argc;
+    // (void) argv;
+    return DenseMutationKit::RunAll(argc, argv);
 }

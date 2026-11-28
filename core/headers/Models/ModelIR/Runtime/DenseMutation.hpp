@@ -16,6 +16,7 @@ namespace BidirectionalInMemGraph::GMI::Dense
     #if defined (SN_ACPP_ENABLED)
         std::shared_ptr<ComputerDetail::RuntimeAcpp> Runtime;
     #endif
+        bool ForceCpu{};
     };
 
     struct BlockEdit final

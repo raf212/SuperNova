@@ -582,7 +582,116 @@ namespace BidirectionalInMemGraph::GMI::Dense
         return PassStatus::Submitted;
     }
 
-    
+    void DenseMutationEngine::StateDM::SelectDevice_()
+    {
+        if (Cache_.Config.ForceCpu) return;
+        std::shared_ptr<ComputerDetail::RuntimeAcpp> gpu = GPUCache_.GPU;
+        gpu = std::move(Cache_.Config.Runtime);
+        if (gpu) 
+        {
+            Require(gpu->Gpu.is_gpu() && gpu->Gpu.has(sycl::aspect::usm_device_allocations) &&
+                gpu->Healthy(), "Dense mutation needs a healthy gpu");
+            const auto Compatible___ = [&] (const sycl::queue&( queue))
+            {
+                return queue.is_in_order() && queue.get_device() == gpu->Gpu &&
+                    queue.get_context() == gpu->Contex;
+            };
+            Require(Compatible___(gpu->ComputeQueue) && Compatible___(gpu->ControlQueue), 
+                "Dense mutation requires comitable in-order compute and control queues");
+            return;
+        }
+        for (const sycl::device& device : sycl::device::get_devices(sycl::info::device_type::gpu)) 
+        {
+            if (!device.has(sycl::aspect::usm_device_allocations)) continue;
+            gpu = std::make_unique<ComputerDetail::RuntimeAcpp>(device);
+            break;
+        }
+    }
+
+    void DenseMutationEngine::StateDM::PrepareDeviceStorage_(const DenseMutationImage *restore)
+    {
+        constexpr size_t ALLIGNMENT = ADS::CACELINE_SIZE_IN_BYTES;
+        DMEState::StateGPUCache& device = GPUCache_;
+
+        size_t bytes = UNSIGNED_ZERO;
+        for (StorageRegion& region : Vectors_.Storage) 
+        {
+            Require(bytes <= (SIZE_MAX - (ALLIGNMENT - 1)), "Dense resedenct size overflow");
+            bytes = (bytes + ALLIGNMENT - 1) & ~(ALLIGNMENT - 1);
+            region.DeviceOffset = bytes;
+            Require(region.Host.size() <= (SIZE_MAX - bytes), "Dense residency size overflow");
+            bytes += region.Host.size();
+        }
+        
+        device.DeviceStorage = std::make_unique<ComputerDetail::ResidentDeviceRegion<std::byte>>(device.GPU);
+        device.DevicePlans = std::make_unique<ComputerDetail::DevicePlanDoubleBuffer<DenseSegment>>(device.GPU);
+        if (
+            !device.DeviceStorage->Allocate(bytes) ||
+            !device.DevicePlans->Allocate(Cache_.Config.MaxDeviceSegments)
+        ) 
+        {
+            throw std::runtime_error("Can't preallocate device resources");
+        }
+
+        for (size_t i = 0; i < Vectors_.Regions.size(); i++) 
+        {
+            const StorageRegion& region = Vectors_.Storage[i];
+            Vectors_.Regions[i].Data = device.DeviceStorage->Data() + region.DeviceOffset;
+            const std::span data = restore ? std::span<const std::byte>(restore->Regions[i].Bytes) :
+                std::span<const std::byte>(region.Host);
+            if (!device.DeviceStorage->PrepareStage(data, region.DeviceOffset)) 
+            {
+                throw std::runtime_error("Cannot upload dense APC numerical storage");
+            }
+        }
+        if (!device.DeviceStorage->Wait()) 
+        {
+            throw std::runtime_error("Dense numerical upload failed");
+        }
+    }
+
+    void DenseMutationEngine::StateDM::PublishInitialDevicePlan_(const Revision &revision)
+    {
+        std::unique_ptr<ComputerDetail::DevicePlanDoubleBuffer<DenseSegment>>& plans = GPUCache_.DevicePlans;
+        if (!plans) return;
+        using R = ComputerDetail::PlanUpdateResult;
+        if (
+            plans->TryStage(revision.Segments) != R::ACCEPTED ||
+            plans->TryActive(revision.SnapShot.StructureRevision, true) != R::ACCEPTED
+        ) 
+        {
+            throw std::runtime_error("Cannot publish the initial dense device layout");
+        }
+    }
+
+    void DenseMutationEngine::StateDM::DownloadRegions_(DenseMutationImage &image)
+    {
+        using SSyE = std::span<const sycl::event>;
+        DMEState::StateGPUCache& device = GPUCache_;
+        const SSyE dependencies = device.LastUse ? SSyE{&*device.LastUse, 1} : SSyE{};
+        for (size_t i = 0; i < Vectors_.Storage.size(); i++) 
+        {
+            if (device.DeviceStorage->Download(
+                image.Regions[i].Bytes, Vectors_.Storage[i].DeviceOffset, dependencies
+            )) continue;
+
+            if (device.GPU->Drain()) std::terminate();
+            Cache_.Failed = true;
+            throw std::runtime_error("Cannot download Dense checkpoint regions.");
+        }
+        if (
+            !device.DeviceStorage->Wait() ||
+            (
+                device.LastUse &&
+                !device.GPU->Wait(*device.LastUse)
+            )
+        ) 
+        {
+            if (!device.GPU->Drain()) std::terminate();
+            Cache_.Failed = true;
+            throw std::runtime_error("Dense checkpoint transfer failed");
+        }
+    }
 
 #endif
 
