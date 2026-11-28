@@ -193,7 +193,98 @@ namespace BidirectionalInMemGraph::GMI::Dense
         Require(Vectors_.Regions.size() != first, "Dense APC has no private numerical regions");
     }
 
-    
+    void DenseMutationEngine::StateDM::ClaimProvisionedSlots_(APCFinilizer& owner)
+    {
+        size_t slot_count = 0;
+        for (const DenseBlock& block : Cache_.Config.Blocks) 
+        {
+            Require(block.APCs.size() <= (SIZE_MAX - slot_count), "Dense APC catalogue too large");
+            slot_count += block.APCs.size();
+        }
+        Vectors_.Claimed.reserve(slot_count);
+        ModelLeaseCache& leases = owner.ModelCacheL_;
+        std::lock_guard lock(leases.ModelLeaseMutex);
+        for (const DenseBlock& block : Cache_.Config.Blocks) 
+        {
+            for (const ModelAPC& apc : block.APCs) 
+            {
+                Require(leases.LeaseModelSlots.insert(apc.Slot).second, 
+                    std::string(std::format("Dense APC : {} is leased by another model.", apc.Slot)));
+                Vectors_.Claimed.push_back(apc.Slot);
+            }
+        }
+    }
+
+    DMEState::CRRev DenseMutationEngine::StateDM::BuildInitialRevision_(const Vect2DU64& layers, uint64_t revision) const
+    {
+        try 
+        {
+            return Build(layers, revision);
+        }
+        catch (const CapacityError&)
+        {
+            throw std::invalid_argument("Dense configuration exceeds its capacity");
+        }
+    }
+
+    void DenseMutationEngine::StateDM::ValidateInitialLayout_(const ModelSnapshot& original) const
+    {
+        const  ModelSnapshot& installed = Cache_.Installed;
+        for (size_t layer = 0; layer < installed.Assignments.size(); layer++) 
+        {
+            std::vector<ModelAPC> expected = installed.Assignments[layer];
+            std::vector<ModelAPC> selected = original.Assignments[layer];
+            std::ranges::sort(expected, {}, &ModelAPC::Slot);
+            Require(std::ranges::equal(expected, selected, [](const ModelAPC& a, const ModelAPC& b){
+                return a == b;
+            }), "Initial dense APC assignments do not match installed ModelIR");
+        }
+        for (size_t tensor = 0; tensor < installed.DenseIR.Tensors.size(); ++tensor) 
+        {
+            Require(original.DenseIR.Tensors[tensor].Shape == installed.DenseIR.Tensors[ tensor].Shape && 
+                PhysicalBindings(original, tensor) == PhysicalBindings(installed, tensor), 
+                "Initial dense placements do not reproduce installed Model IR");
+        }
+    }
+
+    void DenseMutationEngine::StateDM::ClearProjectedBindings_()
+    {
+        DenseModelDynamics& ir = Cache_.Installed.DenseIR;
+        for (const Operator& op : ir.Graph->Operators)
+        {
+            if (op.Kind != OperatorKind::Linear) continue;
+            ir.Tensors[op.Weight].Bindings.clear();
+            if (op.Bias != NO_TENSOR) ir.Tensors[op.Bias].Bindings.clear();
+        }
+    }
+
+    void DenseMutationEngine::StateDM::ValidateImage_(const DenseMutationImage& image) const
+    {
+        Require(
+            image.Version == DenseMutationImage::FORMAT_VERSION &&
+            image.Instance == Cache_.Instance &&
+            image.LayoutSignature == Cache_.LayoutSignature &&
+            image.StructureRevision >= Cache_.Installed.StructureRevision &&
+            image.ParameterEpoch <= image.LastPass &&
+            image.Regions.size() == Vectors_.Regions.size() &&
+            (
+                image.StructureRevision != Cache_.Installed.StructureRevision ||
+                image.Layers == Cache_.Config.Layers
+            ),
+            "Dense image dosen't match the model or format"
+        );
+
+        for (size_t i = 0; i < image.Regions.size(); i++) 
+        {
+            const DenseMutationImage::RegionImage& saved = image.Regions[i];
+            const DenseResidentRegion& region = Vectors_.Regions[i];
+            Require(saved.APC == region.APC && saved.Region == region.Region &&
+                saved.Bytes.size() == region.Bytes, "Dense image region  is stale or incomplete");
+        }
+    }
+
+
+
 
 
 

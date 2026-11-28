@@ -38,6 +38,13 @@ namespace BidirectionalInMemGraph::GMI
         uint32_t Generation{};  // Zero until the APC is constructed.
         uint32_t Role{}; // Interpreted by the owning model family.
         uint32_t Reserved{};
+        bool operator==(const ModelAPC& other) const noexcept
+        {
+            return Slot == other.Slot &&
+                Generation == other.Generation &&
+                Role == other.Role &&
+                Reserved == other.Reserved;
+        }
     };
 
     struct alignas(uint64_t) LayerDescription final
