@@ -93,8 +93,88 @@ namespace BidirectionalInMemGraph::GMI::Dense
 
     MutationStatus DenseMutationEngine::Prepare(MutationRequest request)
     {
-        
+        StateDM& state = *State_;
+        std::unique_lock planning(state.Mutexes_.Planner, std::try_to_lock);
+        if (!planning) return MutationStatus::Busy;
+
+        DMEState::CRRev current;
+        DMEState::CRRev retired;
+        const uint64_t deadline = request.NextPass;
+        {
+            std::lock_guard lock(state.Mutexes_.Mutex);
+            DMEState::Cache cache = state.Cache_;
+            state.RequireHealthy();
+            if (cache.Plan) return MutationStatus::Busy;
+            current = state.SharedPtrs_.Root->Active.load(std::memory_order_acquire);
+            if (request.ExpectedRevision != current->SnapShot.StructureRevision) 
+            {
+                return MutationStatus::Stale;
+            }
+            if (
+                deadline < request.TargetPass ||
+                request.TargetPass < cache.Clock ||
+                (request.TargetPass - cache.Clock) < MINIMUM_PLANNING_LEAD ||
+                request.ExpectedRevision == FABRIC_CELL_SENTINAL
+            ) 
+            {
+                return MutationStatus::Invalid;
+            }
+            retired = std::move(state.SharedPtrs_.Retired);
+        }
+        retired.reset();
+
+        DMEState::CRRev next;
+        try 
+        {
+            next = state.Build(state.Apply(*current, request.Edits), 
+                (request.ExpectedRevision + 1));
+        }
+        catch (const CapacityError&) {return MutationStatus::Capacity;}
+        catch (const std::invalid_argument&) {return MutationStatus::Invalid;}
+        catch (const std::bad_alloc&) {return MutationStatus::Capacity;}
+        catch (const std::length_error&) {return MutationStatus::Capacity;}
+
+        std::lock_guard lock(state.Mutexes_.Mutex);
+        state.RequireHealthy();
+        if (state.SharedPtrs_.Root->Active.load(std::memory_order_acquire) != current) 
+        {
+            return  MutationStatus::Stale;
+        }
+        if (state.Cache_.Clock >= deadline) return MutationStatus::Expired;
+    #if defined(SN_ACPP_ENABLED)
+        if (state.GPUCache_.DevicePlans) 
+        {
+            using Result = ComputerDetail::PlanUpdateResult;
+            const Result staged = state.GPUCache_.DevicePlans->TryStage(next->Segments);
+            if (staged == Result::BUSY) return MutationStatus::Busy;
+            if (staged != Result::ACCEPTED) 
+            {
+                state.Cache_.Failed = true;
+                return MutationStatus::DeviceFailure;
+            }
+        }
+    #endif
+        state.Cache_.Plan.emplace(DMEState::Pending{
+            std::move(next), request.TargetPass, deadline
+        });
+        return MutationStatus::Prepared;
     }
+
+    MutationStatus DenseMutationEngine::Advance()
+    {
+        std::lock_guard lock(State_->Mutexes_.Mutex);
+        State_->RequireHealthy();
+        return State_->AdvanceLocked();
+    }
+
+    bool DenseMutationEngine::Cancel()
+    {
+        std::lock_guard lock(State_->Mutexes_.Mutex);
+        if (!State_->Cache_.Plan) return false;
+        return true;
+    }
+
+
 
     void DenseMutationEngine::StateDM::Open(DenseMutationConfig config, const DenseMutationImage* restore)
     {
@@ -150,6 +230,17 @@ namespace BidirectionalInMemGraph::GMI::Dense
         SharedPtrs_.Root->Active.store(revision, std::memory_order_release);
     }
 
+    void DenseMutationEngine::StateDM::ValidatePass(bool has_work, PassAccess access) const
+    {
+        Require(
+            has_work && 
+            (access == PassAccess::Read || access == PassAccess::Write) && 
+            Cache_.Clock != FABRIC_CELL_SENTINAL && 
+            (access == PassAccess::Read || Cache_.ParameterEpoch != FABRIC_CELL_SENTINAL),
+            "Invalid dense pass callback / access / counter overflow"
+        );
+    }
+    
     void DenseMutationEngine::StateDM::RestoreHostRegions(const DenseMutationImage& image) const noexcept
     {
         for (size_t i = 0; i < Vectors_.Storage.size(); i++) 
